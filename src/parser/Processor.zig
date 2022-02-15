@@ -19,18 +19,7 @@ const Inhetitance = struct {
     content: []const Tag,
 };
 
-const TagType = enum {
-    StaticText,
-    Comment,
-    Delimiters,
-    Interpolation,
-    NoScapeInterpolation,
-    Section,
-    InvertedSection,
-    CloseSection,
-    Partial,
-    Inheritance,
-};
+
 
 const Tag = union(TagType) {
 
