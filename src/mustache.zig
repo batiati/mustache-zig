@@ -26,8 +26,6 @@ pub const parser = @import("parser/parser.zig");
 //    return try template.render(hash);
 //}
 
-const Lex = @import("parser/Lex.zig");
-
 test {
     std.testing.refAllDecls(@This());
 }

@@ -7,6 +7,7 @@ pub const MustacheError = error{
     UnexpectedEof,
     UnexpectedCloseSection,
     InvalidDelimiters,
+    InvalidIdentifier,
 };
 
 pub const TemplateOptions = struct {

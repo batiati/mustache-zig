@@ -1,16 +1,14 @@
+/// A simple text iterator
+/// It just scans for the next delimiter or EOF.
 const std = @import("std");
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
 const Delimiters = mustache.Delimiters;
-const TemplateOptions = mustache.TemplateOptions;
-
-const TagType = mustache.parser.TagType;
 const TagMark = mustache.parser.TagMark;
 const TagMarkType = mustache.parser.TagMarkType;
 const TextPart = mustache.parser.TextPart;
 const DelimiterType = mustache.parser.DelimiterType;
-const tokens = mustache.parser.tokens;
 
 const Self = @This();
 
@@ -30,7 +28,11 @@ pub fn init(content: []const u8, delimiters: Delimiters) Self {
 ///
 /// Reads until the next event of TAG or EOF
 pub fn next(self: *Self) ?TextPart {
+
+    // TODO: identify the proper NEW_LINE constant
+    // This is used only to show rownumbers in error messages
     const NEW_LINE = '\n';
+
     const initial_index = self.index;
 
     while (self.index < self.content.len) {
