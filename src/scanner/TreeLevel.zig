@@ -11,51 +11,72 @@ const TextPart = scanner.TextPart;
 const PartType = scanner.PartType;
 const Mark = scanner.Mark;
 
-pub const LevelPart = struct {
+pub const Node = struct {
     part_type: PartType,
     text_part: TextPart,
-    nested_parts: ?[]const LevelPart = null,
+    children: ?[]const Node = null,
 };
 
 const Self = @This();
 
-parent: ?*Level,
+parent: ?*Self,
 delimiters: Delimiters,
-list: std.ArrayList(LevelPart),
+list: std.ArrayList(Node),
 
 pub fn init(allocator: Allocator, parent: ?*Self, delimiters: Delimiters) !*Self {
     var self = try allocator.create(Self);
     self.* = .{
         .parent = parent,
         .delimiters = delimiters,
-        .list = std.ArrayList(LevelPart).init(allocator),
+        .list = std.ArrayList(Node).init(allocator),
     };
 
     return self;
 }
 
 pub fn trimStandAloneTag(self: *const Self, part_type: PartType, part: *TextPart) void {
+
+    // Lines containing tags without any static text or interpolation
+    // must be fully removed from the rendered result
+    //
+    // Examples:
+    //
+    // 1. TRIM LEFT
+    //                                            ┌ any white space after that must be TRIMMED,
+    //                                            ↓ including the line break
+    // var template_text = \\{{! Comments block }}
+    //                     \\Hello World
+    //
+    // 2. TRIM RIGHT
+    //                            ┌ any white space before that must be trimmed,
+    //                            ↓
+    // var template_text = \\      {{! Comments block }}
+    //                     \\Hello World
+    //
+    // 3. PRESERVE
+    //                                     ┌ any white space and the line break after that must be PRESERVED,
+    //                                     ↓
+    // var template_text = \\      {{Name}}
+    //                     \\      {{Address}}
+    //                            ↑
+    //                            └ any white space before that must be PRESERVED,
+
     if (part_type == .StaticText) {
         if (self.peek()) |level_part| {
             if (level_part.part_type.canBeStandAlone()) {
-
-                //{{! Comments block }}    <--- Trim Left this
-                //  Hello                  <--- This static text
                 part.trimStandAlone(.Left);
             }
         }
     } else if (part_type.canBeStandAlone()) {
         if (self.peek()) |level_part| {
             if (level_part.part_type == .StaticText) {
-
-                //Trim Right this --->   {{#section}}
                 level_part.text_part.trimStandAlone(.Right);
             }
         }
     }
 }
 
-fn peek(self: *const Self) ?*LevelPart {
+pub fn peek(self: *const Self) ?*Node {
     var level: ?*const Self = self;
 
     while (level) |current_level| {
@@ -70,7 +91,7 @@ fn peek(self: *const Self) ?*LevelPart {
     return null;
 }
 
-pub fn endLevel(self: *Self) []const LevelPart {
+pub fn endLevel(self: *Self) []const Node {
     const allocator = self.list.allocator;
 
     allocator.destroy(self);

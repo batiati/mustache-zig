@@ -5,9 +5,10 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const mustache = @import("../mustache.zig");
 const Delimiters = mustache.Delimiters;
 const TemplateOptions = mustache.TemplateOptions;
-const Error = mustache.Error;
 const MustacheError = mustache.MustacheError;
 const Template = mustache.template.Template;
+const LastError = mustache.template.LastError;
+const TreeLevel = @import("TreeLevel.zig");
 
 const scanner = @import("scanner.zig");
 const tokens = scanner.tokens;
@@ -15,11 +16,11 @@ const TextPart = scanner.TextPart;
 const PartType = scanner.PartType;
 const Mark = scanner.Mark;
 
-const Element = mustache.parser.Element;
-const Interpolation = mustache.parser.Interpolation;
-const Section = mustache.parser.Section;
-const Partials = mustache.parser.Partials;
-const Inheritance = mustache.parser.Inheritance;
+const Element = mustache.template.Element;
+const Interpolation = mustache.template.Interpolation;
+const Section = mustache.template.Section;
+const Partials = mustache.template.Partials;
+const Inheritance = mustache.template.Inheritance;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -35,7 +36,7 @@ arena: ArenaAllocator,
 template_text: []const u8,
 options: TemplateOptions,
 state: State = .WaitingStaringTag,
-last_error: ?Error = null,
+last_error: ?LastError = null,
 
 pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) Self {
     return Self{
@@ -50,27 +51,22 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn parse(self: *Self) !Template {
-
     const allocator = self.arena.child_allocator;
 
-    const level_parts = self.parseText() catch {
-
-        return Template{
-            .allocator = allocator,
-            .elements = null,
-            .last_error = self.last_error,
-        };        
-
-    };
-    
-    const elements = self.createElements(allocator, level_parts) catch {
-
+    const nodes = self.parseTree() catch {
         return Template{
             .allocator = allocator,
             .elements = null,
             .last_error = self.last_error,
         };
+    };
 
+    const elements = self.createElements(allocator, nodes) catch {
+        return Template{
+            .allocator = allocator,
+            .elements = null,
+            .last_error = self.last_error,
+        };
     };
 
     return Template{
@@ -80,7 +76,7 @@ pub fn parse(self: *Self) !Template {
     };
 }
 
-fn createElements(self: *Self, allocator: Allocator, level_parts: []const LevelPart) anyerror![]const Element {
+fn createElements(self: *Self, allocator: Allocator, nodes: []const TreeLevel.Node) anyerror![]const Element {
     var list = std.ArrayList(Element).init(allocator);
     errdefer {
         for (list.items) |*element| {
@@ -90,11 +86,11 @@ fn createElements(self: *Self, allocator: Allocator, level_parts: []const LevelP
         list.deinit();
     }
 
-    for (level_parts) |level_part| {
+    for (nodes) |node| {
         const element = blk: {
-            switch (level_part.part_type) {
+            switch (node.part_type) {
                 .StaticText => {
-                    if (level_part.text_part.tail) |content| {
+                    if (node.text_part.tail) |content| {
                         break :blk Element{
                             .StaticText = try allocator.dupe(u8, content),
                         };
@@ -111,10 +107,10 @@ fn createElements(self: *Self, allocator: Allocator, level_parts: []const LevelP
                 => continue,
 
                 else => |part_type| {
-                    const key = try self.parseIdentificator(allocator, &level_part.text_part);
+                    const key = try self.parseIdentificator(allocator, &node.text_part);
                     errdefer allocator.free(key);
 
-                    const content = if (level_part.nested_parts) |nested_parts| try self.createElements(allocator, nested_parts) else null;
+                    const content = if (node.children) |children| try self.createElements(allocator, children) else null;
                     errdefer if (content) |content_value| allocator.free(content_value);
 
                     break :blk switch (part_type) {
@@ -176,12 +172,11 @@ fn createElements(self: *Self, allocator: Allocator, level_parts: []const LevelP
     return list.toOwnedSlice();
 }
 
-fn parseText(self: *Self) ![]const LevelPart {
+fn parseTree(self: *Self) ![]const TreeLevel.Node {
     const allocator = self.arena.allocator();
-    const root = try Level.init(allocator, null, self.options.delimiters);
+    const root = try TreeLevel.init(allocator, null, self.options.delimiters);
 
     var current_level = root;
-
     var text_scanner = scanner.TextScanner.init(self.template_text, self.options.delimiters);
 
     while (text_scanner.next()) |*text_part| {
@@ -209,7 +204,7 @@ fn parseText(self: *Self) ![]const LevelPart {
             .Partials,
             .Inheritance,
             => {
-                var next_level = try Level.init(allocator, current_level, current_level.delimiters);
+                var next_level = try TreeLevel.init(allocator, current_level, current_level.delimiters);
                 current_level = next_level;
             },
 
@@ -226,7 +221,7 @@ fn parseText(self: *Self) ![]const LevelPart {
                     return self.setLastError(MustacheError.UnexpectedCloseSection, text_part, null);
                 };
 
-                last_part.nested_parts = current_level.endLevel();
+                last_part.children = current_level.endLevel();
                 current_level = prev_level;
 
                 // Restore parent level delimiters
@@ -324,7 +319,7 @@ fn parseIdentificator(self: *Self, allocator: Allocator, part: *const TextPart) 
 }
 
 fn setLastError(self: *Self, err: MustacheError, part: ?*const TextPart, detail: ?[]const u8) anyerror {
-    self.last_error = Error{
+    self.last_error = LastError{
         .last_error = err,
         .row = if (part) |p| p.row else 0,
         .col = if (part) |p| p.col else 0,
@@ -347,13 +342,16 @@ test "DOM2" {
     ;
 
     const allocator = testing.allocator;
-    var processor = Processor.init(allocator, template_text, .{});
+    var processor = Self.init(allocator, template_text, .{});
     defer processor.deinit();
 
     var template = try testParseTemplate(&processor);
     defer template.deinit();
 
-    const elements = template.elements;
+    const elements = template.elements orelse {
+        try testing.expect(false);
+        return;
+    };
     try testing.expectEqual(@as(usize, 3), elements.len);
 
     try testing.expectEqual(Element.StaticText, elements[0]);
@@ -409,7 +407,7 @@ test "DOM" {
     ;
 
     const allocator = testing.allocator;
-    var processor = Processor.init(allocator, template_text, .{});
+    var processor = Self.init(allocator, template_text, .{});
     defer processor.deinit();
 
     var template = try testParseTemplate(&processor);
@@ -429,7 +427,7 @@ test "basic test" {
     ;
 
     const allocator = testing.allocator;
-    var processor = Processor.init(allocator, template_text, .{});
+    var processor = Self.init(allocator, template_text, .{});
     defer processor.deinit();
 
     var ret = try testParseText(&processor);
@@ -446,7 +444,7 @@ test "basic test" {
         try testing.expectEqual(PartType.StaticText, parts[3].part_type);
         try testing.expectEqualStrings("World", parts[3].text_part.tail.?);
 
-        if (parts[2].nested_parts) |section| {
+        if (parts[2].children) |section| {
             try testing.expectEqual(@as(usize, 8), section.len);
             try testing.expectEqual(PartType.StaticText, section[0].part_type);
 
@@ -484,7 +482,7 @@ test "Scan standAlone tags" {
     ;
 
     const allocator = testing.allocator;
-    var processor = Processor.init(allocator, template_text, .{});
+    var processor = Self.init(allocator, template_text, .{});
     defer processor.deinit();
 
     var ret = try testParseText(&processor);
@@ -511,7 +509,7 @@ test "Scan delimiters Tags" {
     ;
 
     const allocator = testing.allocator;
-    var processor = Processor.init(allocator, template_text, .{});
+    var processor = Self.init(allocator, template_text, .{});
     defer processor.deinit();
 
     var ret = try testParseText(&processor);
@@ -532,8 +530,8 @@ test "Scan delimiters Tags" {
     }
 }
 
-fn testParseText(processor: *Processor) !?[]const LevelPart {
-    return processor.parseText() catch |e| {
+fn testParseText(processor: *Self) !?[]const TreeLevel.Node {
+    return processor.parseTree() catch |e| {
         if (processor.last_error) |err| {
             std.log.err("template {s} at row {}, col {};", .{ @errorName(err.last_error), err.row, err.col });
             try testing.expect(false);
@@ -543,7 +541,7 @@ fn testParseText(processor: *Processor) !?[]const LevelPart {
     };
 }
 
-fn testParseTemplate(processor: *Processor) !Template {
+fn testParseTemplate(processor: *Self) !Template {
     return processor.parse() catch |e| {
         if (processor.last_error) |err| {
             std.log.err("template {s} at row {}, col {};", .{ @errorName(err.last_error), err.row, err.col });

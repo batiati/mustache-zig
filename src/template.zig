@@ -1,19 +1,16 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const mustache = @import("mustache.zig");
+const MustacheError = mustache.MustacheError;
+const TemplateOptions = mustache.TemplateOptions;
+const Delimiters = mustache.Delimiters;
+
 const scanner = @import("scanner/scanner.zig");
 
-pub const Delimiters = struct {
-    pub const DefaultStartingDelimiter = "{{";
-    pub const DefaultEndingDelimiter = "}}";
-    pub const NoScapeStartingDelimiter = "{{{";
-    pub const NoScapeEndingDelimiter = "}}}";
+pub const Parser = scanner.Parser;
 
-    starting_delimiter: []const u8 = DefaultStartingDelimiter,
-    ending_delimiter: []const u8 = DefaultEndingDelimiter,
-};
-
-pub const Error = struct {
+pub const LastError = struct {
     last_error: MustacheError,
     row: usize,
     col: usize,
@@ -188,11 +185,10 @@ pub const Template = struct {
     const Self = @This();
 
     allocator: Allocator,
-    elements: []const Element,
-    last_error: ?Error,
+    elements: ?[]const Element,
+    last_error: ?LastError,
 
     pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) !Template {
-
         var parser = scanner.Parser.init(allocator, template_text, options);
         defer parser.deinit();
 
@@ -211,9 +207,5 @@ pub const Template = struct {
 };
 
 test {
-
-    _ = @import("parser/Parser.zig");
-    _ = @import("parser/TextScanner.zig");
-    _ = @import("parser/TextScanner.zig");
-
+    _ = @import("scanner/scanner.zig");
 }

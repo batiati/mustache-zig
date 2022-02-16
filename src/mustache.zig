@@ -27,5 +27,5 @@ pub const template = @import("template.zig");
 //}
 
 test {
-    _ = parser;
+    _ = template;
 }
