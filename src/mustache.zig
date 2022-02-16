@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub usingnamespace @import("commons.zig");
-pub const parser = @import("parser/parser.zig");
+pub const template = @import("template.zig");
 
 //pub const Template = @import("template.zig").Template;
 //pub const ComptimeTemplate = @import("comptime_template.zig").ComptimeTemplate;
@@ -27,5 +27,5 @@ pub const parser = @import("parser/parser.zig");
 //}
 
 test {
-    std.testing.refAllDecls(@This());
+    _ = parser;
 }
