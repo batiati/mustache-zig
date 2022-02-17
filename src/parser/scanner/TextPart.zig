@@ -1,10 +1,5 @@
-/// A simple text iterator
-/// It just scans for the next delimiter or EOF.
 const std = @import("std");
 const assert = std.debug.assert;
-
-const mustache = @import("../mustache.zig");
-const Delimiters = mustache.Delimiters;
 
 const scanner = @import("scanner.zig");
 const tokens = scanner.tokens;
@@ -13,6 +8,7 @@ const PartType = scanner.PartType;
 const Mark = scanner.Mark;
 const MarkType = scanner.MarkType;
 const DelimiterType = scanner.DelimiterType;
+const Delimiters = scanner.Delimiters;
 
 const Self = @This();
 

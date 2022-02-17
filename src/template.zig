@@ -2,11 +2,19 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const mustache = @import("mustache.zig");
-const MustacheError = mustache.MustacheError;
 const TemplateOptions = mustache.TemplateOptions;
 const Delimiters = mustache.Delimiters;
 
-const Parser = @import("scanner/Parser.zig");
+const Parser = @import("parser/Parser.zig");
+
+pub const ParseErrors = error{
+    StartingDelimiterMismatch,
+    EndingDelimiterMismatch,
+    UnexpectedEof,
+    UnexpectedCloseSection,
+    InvalidDelimiters,
+    InvalidIdentifier,
+};
 
 pub const LastError = struct {
     last_error: anyerror,
@@ -196,10 +204,7 @@ pub const Template = struct {
 
     pub fn deinit(self: *Self) void {
         if (self.elements) |elements| {
-            for (elements) |*element| {
-                element.free(self.allocator);
-            }
-            self.allocator.free(elements);
+            Element.freeMany(self.allocator, elements);
         }
     }
 };

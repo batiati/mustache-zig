@@ -1,25 +1,11 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 pub const template = @import("template.zig");
 
-pub const MustacheError = error{
-    StartingDelimiterMismatch,
-    EndingDelimiterMismatch,
-    UnexpectedEof,
-    UnexpectedCloseSection,
-    InvalidDelimiters,
-    InvalidIdentifier,
-};
 
-pub const Delimiters = struct {
-    pub const DefaultStartingDelimiter = "{{";
-    pub const DefaultEndingDelimiter = "}}";
-    pub const NoScapeStartingDelimiter = "{{{";
-    pub const NoScapeEndingDelimiter = "}}}";
 
-    starting_delimiter: []const u8 = DefaultStartingDelimiter,
-    ending_delimiter: []const u8 = DefaultEndingDelimiter,
-};
+pub const Delimiters = @import("parser/scanner/scanner.zig").Delimiters;
 
 pub const TemplateOptions = struct {
     delimiters: Delimiters = .{},
@@ -27,9 +13,5 @@ pub const TemplateOptions = struct {
 };
 
 test {
-    _ = @import("scanner/Parser.zig");
-    _ = @import("scanner/scanner.zig");
-    _ = @import("scanner/TextPart.zig");
-    _ = @import("scanner/TextScanner.zig");
-    _ = @import("scanner/Tree.zig");
+    std.testing.refAllDecls(@This());
 }

@@ -5,7 +5,6 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const mustache = @import("../mustache.zig");
 const Delimiters = mustache.Delimiters;
 const TemplateOptions = mustache.TemplateOptions;
-const MustacheError = mustache.MustacheError;
 
 const Template = mustache.template.Template;
 const Element = mustache.template.Element;
@@ -15,13 +14,17 @@ const Partials = mustache.template.Partials;
 const Inheritance = mustache.template.Inheritance;
 const LastError = mustache.template.LastError;
 
-const scanner = @import("scanner.zig");
-const Tree = scanner.Tree;
+const ParseErrors = mustache.template.ParseErrors;
+const Errors = ParseErrors || Allocator.Error;
+
+const scanner = @import("scanner/scanner.zig");
 const TextScanner = scanner.TextScanner;
 const tokens = scanner.tokens;
 const TextPart = scanner.TextPart;
 const PartType = scanner.PartType;
 const Mark = scanner.Mark;
+
+const Tree = @import("Tree.zig");
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -47,29 +50,12 @@ pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOp
     };
 }
 
-pub fn deinit(self: *Self) void {
-    _ = self;
-}
-
-pub fn parse(self: *Self) !Template {
+pub fn parse(self: *Self) Errors!Template {
     var arena = ArenaAllocator.init(self.allocator);
     defer arena.deinit();
 
-    const nodes = self.parseTree(arena.allocator()) catch {
-        return Template{
-            .allocator = self.allocator,
-            .elements = null,
-            .last_error = self.last_error,
-        };
-    };
-
-    const elements = self.createElements(nodes) catch {
-        return Template{
-            .allocator = self.allocator,
-            .elements = null,
-            .last_error = self.last_error,
-        };
-    };
+    const nodes = self.parseTree(arena.allocator()) catch |err| return self.fromError(err);
+    const elements = self.createElements(nodes) catch |err| return self.fromError(err); 
 
     return Template{
         .allocator = self.allocator,
@@ -78,9 +64,21 @@ pub fn parse(self: *Self) !Template {
     };
 }
 
+fn fromError(self: *Self, err: Errors) Errors!Template {
 
-fn createElements(self: *Self, nodes: []const Tree.Node) anyerror!?[]const Element {
-    var list = std.ArrayListUnmanaged(Element) {};
+    switch(err) {
+        
+        Allocator.Error.OutOfMemory => return err,
+        else => return Template{
+                .allocator = self.allocator,
+                .elements = null,
+                .last_error = self.last_error,
+            },
+    }
+}
+
+fn createElements(self: *Self, nodes: []const Tree.Node) Errors!?[]const Element {
+    var list = std.ArrayListUnmanaged(Element){};
     errdefer Element.freeMany(self.allocator, list.toOwnedSlice(self.allocator));
 
     for (nodes) |node| {
@@ -172,14 +170,14 @@ fn createElements(self: *Self, nodes: []const Tree.Node) anyerror!?[]const Eleme
         list.clearAndFree(self.allocator);
         return null;
     } else {
-        return list.toOwnedSlice(self.allocator) ;
+        return list.toOwnedSlice(self.allocator);
     }
 }
 
-fn parseTree(self: *Self, arena: Allocator) ![]const Tree.Node {
-    var tree = try Tree.init(arena, self.options.delimiters);    
+fn parseTree(self: *Self, arena: Allocator) Errors![]const Tree.Node {
+    var tree = try Tree.init(arena, self.options.delimiters);
     var text_scanner = TextScanner.init(self.template_text, self.options.delimiters);
-    
+
     while (text_scanner.next()) |*text_part| {
         var part_type = (try self.matchPartType(text_part)) orelse continue;
 
@@ -193,9 +191,7 @@ fn parseTree(self: *Self, arena: Allocator) ![]const Tree.Node {
             text_scanner.delimiters = new_delimiters;
         }
 
-        tree.addNode(part_type, text_part) catch |err| {
-            return self.setLastError(err, text_part, null);
-        };
+        try tree.addNode(part_type, text_part);
 
         switch (part_type) {
             .Section,
@@ -203,9 +199,7 @@ fn parseTree(self: *Self, arena: Allocator) ![]const Tree.Node {
             .Partials,
             .Inheritance,
             => {
-                tree.nextLevel() catch |err| {
-                    return self.setLastError(err, text_part, null);
-                };
+                try tree.nextLevel();
             },
 
             .CloseSection => {
@@ -226,7 +220,7 @@ fn parseTree(self: *Self, arena: Allocator) ![]const Tree.Node {
     };
 }
 
-fn matchPartType(self: *Self, part: *TextPart) !?PartType {
+fn matchPartType(self: *Self, part: *TextPart) Errors!?PartType {
     switch (part.event) {
         .Mark => |tag_mark| {
             switch (self.state) {
@@ -234,7 +228,7 @@ fn matchPartType(self: *Self, part: *TextPart) !?PartType {
                     defer self.state = .WaitingEndingTag;
 
                     if (tag_mark.mark_type == .Ending) {
-                        return self.setLastError(MustacheError.EndingDelimiterMismatch, part, null);
+                        return self.setLastError(ParseErrors.EndingDelimiterMismatch, part, null);
                     }
 
                     // If there is no current action, any content is a static text
@@ -247,7 +241,7 @@ fn matchPartType(self: *Self, part: *TextPart) !?PartType {
                     defer self.state = .WaitingStaringTag;
 
                     if (tag_mark.mark_type == .Starting) {
-                        return self.setLastError(MustacheError.StartingDelimiterMismatch, part, null);
+                        return self.setLastError(ParseErrors.StartingDelimiterMismatch, part, null);
                     }
 
                     // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, $, =, &, /)
@@ -265,7 +259,7 @@ fn matchPartType(self: *Self, part: *TextPart) !?PartType {
     return null;
 }
 
-fn parseDelimiters(self: *Self, part: *TextPart) !Delimiters {
+fn parseDelimiters(self: *Self, part: *TextPart) Errors!Delimiters {
     var delimiter: ?Delimiters = if (part.tail) |content| blk: {
 
         // Delimiters are the only case of match closing tags {{= and =}}
@@ -288,11 +282,11 @@ fn parseDelimiters(self: *Self, part: *TextPart) !Delimiters {
     if (delimiter) |ret| {
         return ret;
     } else {
-        return self.setLastError(MustacheError.InvalidDelimiters, part, null);
+        return self.setLastError(ParseErrors.InvalidDelimiters, part, null);
     }
 }
 
-fn parseIdentificator(self: *Self, part: *const TextPart) anyerror![]const u8 {
+fn parseIdentificator(self: *Self, part: *const TextPart) Errors![]const u8 {
     if (part.tail) |text| {
         var tokenizer = std.mem.tokenize(u8, text, " \t");
         if (tokenizer.next()) |token| {
@@ -302,10 +296,10 @@ fn parseIdentificator(self: *Self, part: *const TextPart) anyerror![]const u8 {
         }
     }
 
-    return self.setLastError(MustacheError.InvalidIdentifier, part, null);
+    return self.setLastError(ParseErrors.InvalidIdentifier, part, null);
 }
 
-fn setLastError(self: *Self, err: anyerror, part: ?*const TextPart, detail: ?[]const u8) anyerror {
+fn setLastError(self: *Self, err: ParseErrors, part: ?*const TextPart, detail: ?[]const u8) ParseErrors {
     self.last_error = LastError{
         .last_error = err,
         .row = if (part) |p| p.row else 0,
@@ -327,13 +321,10 @@ test "DOM2" {
         \\{{/section}}
         \\World
     ;
-    
 
     const allocator = testing.allocator;
-    
-    var parser = Self.init(allocator, template_text, .{});
-    defer parser.deinit();
 
+    var parser = Self.init(allocator, template_text, .{});
     var template = try testParseTemplate(&parser);
     defer template.deinit();
 
@@ -397,8 +388,6 @@ test "DOM" {
 
     const allocator = testing.allocator;
     var parser = Self.init(allocator, template_text, .{});
-    defer parser.deinit();
-
     var template = try testParseTemplate(&parser);
     defer template.deinit();
 }
@@ -420,8 +409,6 @@ test "basic test" {
     defer arena.deinit();
 
     var parser = Self.init(allocator, template_text, .{});
-    defer parser.deinit();
-
     var ret = try testParseTree(arena.allocator(), &parser);
 
     if (ret) |parts| {
@@ -478,8 +465,6 @@ test "Scan standAlone tags" {
     defer arena.deinit();
 
     var parser = Self.init(allocator, template_text, .{});
-    defer parser.deinit();
-
     var ret = try testParseTree(arena.allocator(), &parser);
 
     if (ret) |parts| {
@@ -505,12 +490,10 @@ test "Scan delimiters Tags" {
 
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    
+
     var allocator = arena.allocator();
 
     var parser = Self.init(allocator, template_text, .{});
-    defer parser.deinit();
-
     var ret = try testParseTree(allocator, &parser);
 
     if (ret) |parts| {

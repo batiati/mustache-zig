@@ -3,15 +3,13 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const mustache = @import("../mustache.zig");
-const Delimiters = mustache.Delimiters;
-
 const scanner = @import("scanner.zig");
 const Event = scanner.Event;
 const Mark = scanner.Mark;
 const MarkType = scanner.MarkType;
 const DelimiterType = scanner.DelimiterType;
 const TextPart = scanner.TextPart;
+const Delimiters = scanner.Delimiters;
 
 const Self = @This();
 

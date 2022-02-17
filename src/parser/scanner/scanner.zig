@@ -1,8 +1,17 @@
 const std = @import("std");
 
-pub const Tree = @import("Tree.zig");
 pub const TextScanner = @import("TextScanner.zig");
 pub const TextPart = @import("TextPart.zig");
+
+pub const Delimiters = struct {
+    pub const DefaultStartingDelimiter = "{{";
+    pub const DefaultEndingDelimiter = "}}";
+    pub const NoScapeStartingDelimiter = "{{{";
+    pub const NoScapeEndingDelimiter = "}}}";
+
+    starting_delimiter: []const u8 = DefaultStartingDelimiter,
+    ending_delimiter: []const u8 = DefaultEndingDelimiter,
+};
 
 pub const tokens = struct {
     pub const Comments = '!';
