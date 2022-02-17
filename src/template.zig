@@ -1,8 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
+
+const testing = std.testing;
+const assert = std.debug.assert;
 
 const mustache = @import("mustache.zig");
-const TemplateOptions = mustache.TemplateOptions;
 const Delimiters = mustache.Delimiters;
 
 const Parser = @import("parser/Parser.zig");
@@ -195,10 +198,12 @@ pub const Template = struct {
     elements: ?[]const Element,
     last_error: ?LastError,
 
-    pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) !Template {
-        var parser = Parser.init(allocator, template_text, options);
-        defer parser.deinit();
+    pub fn init(allocator: Allocator, template_text: []const u8, delimiters: Delimiters) !Template {
 
+        var arena = ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        var parser = try Parser.init(allocator, arena.allocator(), template_text, delimiters);
         return try parser.parse();
     }
 
@@ -211,4 +216,74 @@ pub const Template = struct {
 
 test {
     std.testing.refAllDecls(@This());
+}
+
+test "Basic DOM test" {
+    const template_text =
+        \\{{! Comments block }}
+        \\  Hello
+        \\  {{#section}}
+        \\Name: {{name}}
+        \\Comments: {{&comments}}
+        \\{{^inverted}}Inverted text{{/inverted}}
+        \\{{/section}}
+        \\World
+    ;
+
+    const allocator = testing.allocator;
+
+    var template = try Template.init(allocator, template_text, .{});
+    defer template.deinit();
+
+    try testing.expect(template.last_error == null);
+
+    const elements = template.elements orelse {
+        try testing.expect(false);
+        return;
+    };
+
+    try testing.expectEqual(@as(usize, 3), elements.len);
+
+    try testing.expectEqual(Element.StaticText, elements[0]);
+    try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
+
+    try testing.expectEqual(Element.Section, elements[1]);
+    try testing.expectEqualStrings("section", elements[1].Section.key);
+    if (elements[1].Section.content) |section| {
+        try testing.expectEqual(@as(usize, 6), section.len);
+
+        try testing.expectEqual(Element.StaticText, section[0]);
+        try testing.expectEqualStrings("Name: ", section[0].StaticText);
+
+        try testing.expectEqual(Element.Interpolation, section[1]);
+        try testing.expectEqualStrings("name", section[1].Interpolation.key);
+        try testing.expectEqual(true, section[1].Interpolation.escaped);
+
+        try testing.expectEqual(Element.StaticText, section[2]);
+        try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
+
+        try testing.expectEqual(Element.Interpolation, section[3]);
+        try testing.expectEqualStrings("comments", section[3].Interpolation.key);
+        try testing.expectEqual(false, section[3].Interpolation.escaped);
+
+        try testing.expectEqual(Element.StaticText, section[4]);
+        try testing.expectEqualStrings("\n", section[4].StaticText);
+
+        try testing.expectEqual(Element.Section, section[5]);
+        try testing.expectEqualStrings("inverted", section[5].Section.key);
+        try testing.expectEqual(true, section[5].Section.inverted);
+        if (section[5].Section.content) |inverted| {
+            try testing.expectEqual(@as(usize, 1), inverted.len);
+
+            try testing.expectEqual(Element.StaticText, inverted[0]);
+            try testing.expectEqualStrings("Inverted text", inverted[0].StaticText);
+        } else {
+            try testing.expect(false);
+        }
+    } else {
+        try testing.expect(false);
+    }
+
+    try testing.expectEqual(Element.StaticText, elements[2]);
+    try testing.expectEqualStrings("World", elements[2].StaticText);
 }

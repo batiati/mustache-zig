@@ -17,14 +17,12 @@ const LastError = mustache.template.LastError;
 const ParseErrors = mustache.template.ParseErrors;
 const Errors = ParseErrors || Allocator.Error;
 
-const scanner = @import("scanner/scanner.zig");
+const scanner = @import("scanner.zig");
 const TextScanner = scanner.TextScanner;
 const tokens = scanner.tokens;
 const TextPart = scanner.TextPart;
 const PartType = scanner.PartType;
 const Mark = scanner.Mark;
-
-const Tree = @import("Tree.zig");
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -34,52 +32,85 @@ const State = enum {
     WaitingEndingTag,
 };
 
+const Level = struct {
+    parent: ?*Level,
+    delimiters: Delimiters,
+    list: std.ArrayListUnmanaged(Node) = .{},
+
+    pub fn peekNode(self: *const Level) ?*Node {
+        var level: ?*const Level = self;
+
+        while (level) |current_level| {
+            const items = current_level.list.items;
+            if (items.len == 0) {
+                level = current_level.parent;
+            } else {
+                return &items[items.len - 1];
+            }
+        }
+
+        return null;
+    }
+};
+
+pub const Node = struct {
+    part_type: PartType,
+    text_part: TextPart,
+    children: ?[]const Node = null,
+};
+
 const Self = @This();
 
-allocator: Allocator,
+gpa: Allocator,
+arena: Allocator,
 template_text: []const u8,
-options: TemplateOptions,
-state: State = .WaitingStaringTag,
+state: State,
+root: *Level,
+current_level: *Level,
 last_error: ?LastError = null,
 
-pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) Self {
+pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, delimiters: Delimiters) Allocator.Error!Self {
+    var root = try arena.create(Level);
+    root.* = .{
+        .parent = null,
+        .delimiters = delimiters,
+    };
+
     return Self{
-        .allocator = allocator,
+        .gpa = gpa,
+        .arena = arena,
         .template_text = template_text,
-        .options = options,
+        .state = .WaitingStaringTag,
+        .root = root,
+        .current_level = root,
     };
 }
 
-pub fn parse(self: *Self) Errors!Template {
-    var arena = ArenaAllocator.init(self.allocator);
-    defer arena.deinit();
-
-    const nodes = self.parseTree(arena.allocator()) catch |err| return self.fromError(err);
-    const elements = self.createElements(nodes) catch |err| return self.fromError(err); 
+pub fn parse(self: *Self) Allocator.Error!Template {
+    const nodes = self.parseTree() catch |err| return self.fromError(err);
+    const elements = self.createElements(nodes) catch |err| return self.fromError(err);
 
     return Template{
-        .allocator = self.allocator,
+        .allocator = self.gpa,
         .elements = elements,
         .last_error = null,
     };
 }
 
-fn fromError(self: *Self, err: Errors) Errors!Template {
-
-    switch(err) {
-        
-        Allocator.Error.OutOfMemory => return err,
+fn fromError(self: *Self, err: Errors) Allocator.Error!Template {
+    switch (err) {
+        Allocator.Error.OutOfMemory => |alloc| return alloc,
         else => return Template{
-                .allocator = self.allocator,
-                .elements = null,
-                .last_error = self.last_error,
-            },
+            .allocator = self.gpa,
+            .elements = null,
+            .last_error = self.last_error,
+        },
     }
 }
 
-fn createElements(self: *Self, nodes: []const Tree.Node) Errors!?[]const Element {
+fn createElements(self: *Self, nodes: []const Node) Errors!?[]const Element {
     var list = std.ArrayListUnmanaged(Element){};
-    errdefer Element.freeMany(self.allocator, list.toOwnedSlice(self.allocator));
+    errdefer Element.freeMany(self.gpa, list.toOwnedSlice(self.gpa));
 
     for (nodes) |node| {
         const element = blk: {
@@ -87,7 +118,7 @@ fn createElements(self: *Self, nodes: []const Tree.Node) Errors!?[]const Element
                 .StaticText => {
                     if (node.text_part.tail) |content| {
                         break :blk Element{
-                            .StaticText = try self.allocator.dupe(u8, content),
+                            .StaticText = try self.gpa.dupe(u8, content),
                         };
                     } else {
                         // Empty tag
@@ -103,10 +134,10 @@ fn createElements(self: *Self, nodes: []const Tree.Node) Errors!?[]const Element
 
                 else => |part_type| {
                     const key = try self.parseIdentificator(&node.text_part);
-                    errdefer self.allocator.free(key);
+                    errdefer self.gpa.free(key);
 
                     const content = if (node.children) |children| try self.createElements(children) else null;
-                    errdefer if (content) |content_value| Element.freeMany(self.allocator, content_value);
+                    errdefer if (content) |content_value| Element.freeMany(self.gpa, content_value);
 
                     break :blk switch (part_type) {
                         .Interpolation,
@@ -162,62 +193,16 @@ fn createElements(self: *Self, nodes: []const Tree.Node) Errors!?[]const Element
         };
 
         if (element) |valid| {
-            try list.append(self.allocator, valid);
+            try list.append(self.gpa, valid);
         }
     }
 
     if (list.items.len == 0) {
-        list.clearAndFree(self.allocator);
+        list.clearAndFree(self.gpa);
         return null;
     } else {
-        return list.toOwnedSlice(self.allocator);
+        return list.toOwnedSlice(self.gpa);
     }
-}
-
-fn parseTree(self: *Self, arena: Allocator) Errors![]const Tree.Node {
-    var tree = try Tree.init(arena, self.options.delimiters);
-    var text_scanner = TextScanner.init(self.template_text, self.options.delimiters);
-
-    while (text_scanner.next()) |*text_part| {
-        var part_type = (try self.matchPartType(text_part)) orelse continue;
-
-        tree.trimStandAlone(part_type, text_part);
-
-        if (part_type == .Delimiters) {
-            const new_delimiters = try self.parseDelimiters(text_part);
-
-            //Apply the new delimiters to the reader immediately
-            tree.setCurrentDelimiters(new_delimiters);
-            text_scanner.delimiters = new_delimiters;
-        }
-
-        try tree.addNode(part_type, text_part);
-
-        switch (part_type) {
-            .Section,
-            .InvertedSection,
-            .Partials,
-            .Inheritance,
-            => {
-                try tree.nextLevel();
-            },
-
-            .CloseSection => {
-                tree.endLevel() catch |err| {
-                    return self.setLastError(err, text_part, null);
-                };
-
-                // Restore parent delimiters
-                text_scanner.delimiters = tree.getCurrentDelimiters();
-            },
-
-            else => {},
-        }
-    }
-
-    return tree.endRoot() catch |err| {
-        return self.setLastError(err, null, null);
-    };
 }
 
 fn matchPartType(self: *Self, part: *TextPart) Errors!?PartType {
@@ -291,12 +276,137 @@ fn parseIdentificator(self: *Self, part: *const TextPart) Errors![]const u8 {
         var tokenizer = std.mem.tokenize(u8, text, " \t");
         if (tokenizer.next()) |token| {
             if (tokenizer.next() == null) {
-                return try self.allocator.dupe(u8, token);
+                return try self.gpa.dupe(u8, token);
             }
         }
     }
 
     return self.setLastError(ParseErrors.InvalidIdentifier, part, null);
+}
+
+fn parseTree(self: *Self) Errors![]const Node {
+    var text_scanner = TextScanner.init(self.template_text, self.current_level.delimiters);
+
+    while (text_scanner.next()) |*text_part| {
+        var part_type = (try self.matchPartType(text_part)) orelse continue;
+
+        self.trimStandAlone(part_type, text_part);
+
+        if (part_type == .Delimiters) {
+
+            //Apply the new delimiters to the reader immediately
+            const new_delimiters = try self.parseDelimiters(text_part);
+            self.current_level.delimiters = new_delimiters;
+            text_scanner.delimiters = new_delimiters;
+        }
+
+        try self.addNode(part_type, text_part);
+
+        switch (part_type) {
+            .Section,
+            .InvertedSection,
+            .Partials,
+            .Inheritance,
+            => {
+                try self.nextLevel();
+            },
+
+            .CloseSection => {
+                self.endLevel() catch |err| {
+                    return self.setLastError(err, text_part, null);
+                };
+
+                // Restore parent delimiters
+                text_scanner.delimiters = self.current_level.delimiters;
+            },
+
+            else => {},
+        }
+    }
+
+    if (self.current_level != self.root) {
+        return self.setLastError(ParseErrors.UnexpectedEof, null, null);
+    }
+
+    return self.root.list.toOwnedSlice(self.arena);
+}
+
+fn addNode(self: *Self, part_type: PartType, text_part: *const TextPart) Allocator.Error!void {
+    try self.current_level.list.append(
+        self.arena,
+        .{
+            .part_type = part_type,
+            .text_part = text_part.*,
+        },
+    );
+}
+
+fn nextLevel(self: *Self) Allocator.Error!void {
+    var current_level = self.current_level;
+    var next_level = try self.arena.create(Level);
+
+    next_level.* = .{
+        .parent = current_level,
+        .delimiters = current_level.delimiters,
+    };
+
+    self.current_level = next_level;
+}
+
+fn endLevel(self: *Self) ParseErrors!void {
+    var current_level = self.current_level;
+    var prev_level = current_level.parent orelse return ParseErrors.UnexpectedCloseSection;
+    var last_node = prev_level.peekNode() orelse return ParseErrors.UnexpectedCloseSection;
+
+    last_node.children = current_level.list.toOwnedSlice(self.arena);
+    self.arena.destroy(current_level);
+
+    self.current_level = prev_level;
+}
+
+fn trimStandAlone(self: *const Self, part_type: PartType, text_part: *TextPart) void {
+
+    // Lines containing tags without any static text or interpolation
+    // must be fully removed from the rendered result
+    //
+    // Examples:
+    //
+    // 1. TRIM LEFT stand alone tags
+    //
+    //                                            ┌ any white space after the tag must be TRIMMED,
+    //                                            ↓ including the EOL
+    // var template_text = \\{{! Comments block }}
+    //                     \\Hello World
+    //
+    // 2. TRIM RIGHT stand alone tags
+    //
+    //                            ┌ any white space before the tag must be trimmed,
+    //                            ↓
+    // var template_text = \\      {{! Comments block }}
+    //                     \\Hello World
+    //
+    // 3. PRESERVE interpolation tags
+    //
+    //                                     ┌ all white space and the line break after that must be PRESERVED,
+    //                                     ↓
+    // var template_text = \\      {{Name}}
+    //                     \\      {{Address}}
+    //                            ↑
+    //                            └ all white space before that must be PRESERVED,
+
+    if (part_type == .StaticText) {
+        if (self.current_level.peekNode()) |node| {
+            if (node.part_type.canBeStandAlone()) {
+                text_part.trimStandAlone(.Left);
+            }
+        }
+    } else if (part_type.canBeStandAlone()) {
+        if (self.current_level.peekNode()) |node| {
+            if (node.part_type == .StaticText) {
+                node.text_part.trimStandAlone(.Right);
+            }
+        }
+    }
 }
 
 fn setLastError(self: *Self, err: ParseErrors, part: ?*const TextPart, detail: ?[]const u8) ParseErrors {
@@ -310,89 +420,7 @@ fn setLastError(self: *Self, err: ParseErrors, part: ?*const TextPart, detail: ?
     return err;
 }
 
-test "DOM2" {
-    const template_text =
-        \\{{! Comments block }}
-        \\  Hello
-        \\  {{#section}}
-        \\Name: {{name}}
-        \\Comments: {{&comments}}
-        \\{{^inverted}}Inverted text{{/inverted}}
-        \\{{/section}}
-        \\World
-    ;
-
-    const allocator = testing.allocator;
-
-    var parser = Self.init(allocator, template_text, .{});
-    var template = try testParseTemplate(&parser);
-    defer template.deinit();
-
-    const elements = template.elements orelse {
-        try testing.expect(false);
-        return;
-    };
-    try testing.expectEqual(@as(usize, 3), elements.len);
-
-    try testing.expectEqual(Element.StaticText, elements[0]);
-    try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
-
-    try testing.expectEqual(Element.Section, elements[1]);
-    try testing.expectEqualStrings("section", elements[1].Section.key);
-    if (elements[1].Section.content) |section| {
-        try testing.expectEqual(@as(usize, 6), section.len);
-
-        try testing.expectEqual(Element.StaticText, section[0]);
-        try testing.expectEqualStrings("Name: ", section[0].StaticText);
-
-        try testing.expectEqual(Element.Interpolation, section[1]);
-        try testing.expectEqualStrings("name", section[1].Interpolation.key);
-        try testing.expectEqual(true, section[1].Interpolation.escaped);
-
-        try testing.expectEqual(Element.StaticText, section[2]);
-        try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
-
-        try testing.expectEqual(Element.Interpolation, section[3]);
-        try testing.expectEqualStrings("comments", section[3].Interpolation.key);
-        try testing.expectEqual(false, section[3].Interpolation.escaped);
-
-        try testing.expectEqual(Element.StaticText, section[4]);
-        try testing.expectEqualStrings("\n", section[4].StaticText);
-
-        try testing.expectEqual(Element.Section, section[5]);
-        try testing.expectEqualStrings("inverted", section[5].Section.key);
-        try testing.expectEqual(true, section[5].Section.inverted);
-        if (section[5].Section.content) |inverted| {
-            try testing.expectEqual(@as(usize, 1), inverted.len);
-
-            try testing.expectEqual(Element.StaticText, inverted[0]);
-            try testing.expectEqualStrings("Inverted text", inverted[0].StaticText);
-        } else {
-            try testing.expect(false);
-        }
-    } else {
-        try testing.expect(false);
-    }
-
-    try testing.expectEqual(Element.StaticText, elements[2]);
-    try testing.expectEqualStrings("World", elements[2].StaticText);
-}
-
-test "DOM" {
-    const template_text =
-        \\{{! Comments block }}
-        \\  Hello
-        \\  {{#section wrong}}{{/section}}
-        \\World
-    ;
-
-    const allocator = testing.allocator;
-    var parser = Self.init(allocator, template_text, .{});
-    var template = try testParseTemplate(&parser);
-    defer template.deinit();
-}
-
-test "basic test" {
+test "Basic parse" {
     const template_text =
         \\{{! Comments block }}
         \\  Hello
@@ -408,8 +436,8 @@ test "basic test" {
     var arena = ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var parser = Self.init(allocator, template_text, .{});
-    var ret = try testParseTree(arena.allocator(), &parser);
+    var parser = try Self.init(allocator, arena.allocator(), template_text, .{});
+    var ret = try testParseTree(&parser);
 
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 4), parts.len);
@@ -464,8 +492,8 @@ test "Scan standAlone tags" {
     var arena = ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var parser = Self.init(allocator, template_text, .{});
-    var ret = try testParseTree(arena.allocator(), &parser);
+    var parser = try Self.init(allocator, arena.allocator(), template_text, .{});
+    var ret = try testParseTree(&parser);
 
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 3), parts.len);
@@ -488,13 +516,12 @@ test "Scan delimiters Tags" {
         \\[interpolation]
     ;
 
-    var arena = ArenaAllocator.init(testing.allocator);
+    const allocator = testing.allocator;
+    var arena = ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var allocator = arena.allocator();
-
-    var parser = Self.init(allocator, template_text, .{});
-    var ret = try testParseTree(allocator, &parser);
+    var parser = try Self.init(allocator, arena.allocator(), template_text, .{});
+    var ret = try testParseTree(&parser);
 
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 3), parts.len);
@@ -512,8 +539,8 @@ test "Scan delimiters Tags" {
     }
 }
 
-fn testParseTree(arena: Allocator, parser: *Self) !?[]const Tree.Node {
-    return parser.parseTree(arena) catch |e| {
+fn testParseTree(parser: *Self) !?[]const Node {
+    return parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
             std.log.err("template {s} at row {}, col {};", .{ @errorName(err.last_error), err.row, err.col });
             try testing.expect(false);
