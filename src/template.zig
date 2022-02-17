@@ -199,7 +199,6 @@ pub const Template = struct {
     last_error: ?LastError,
 
     pub fn init(allocator: Allocator, template_text: []const u8, delimiters: Delimiters) !Template {
-
         var arena = ArenaAllocator.init(allocator);
         defer arena.deinit();
 
@@ -218,72 +217,430 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-test "Basic DOM test" {
-    const template_text =
-        \\{{! Comments block }}
-        \\  Hello
-        \\  {{#section}}
-        \\Name: {{name}}
-        \\Comments: {{&comments}}
-        \\{{^inverted}}Inverted text{{/inverted}}
-        \\{{/section}}
-        \\World
-    ;
+const tests = struct {
+    test {
+        _ = comments;
+        _ = delimiters;
+    }
 
-    const allocator = testing.allocator;
+    pub fn getTemplate(template_text: []const u8) !Template {
+        const allocator = testing.allocator;
 
-    var template = try Template.init(allocator, template_text, .{});
-    defer template.deinit();
+        var template = try Template.init(allocator, template_text, .{});
 
-    try testing.expect(template.last_error == null);
+        if (template.last_error) |last_error| {
+            std.log.err("{s} row {}, col {}", .{ @errorName(last_error.last_error), last_error.row, last_error.col });
+            return last_error.last_error;
+        }
 
-    const elements = template.elements orelse {
-        try testing.expect(false);
-        return;
+        try testing.expect(template.elements != null);
+
+        return template;
+    }
+
+    const comments = struct {
+
+        //
+        // Comment blocks should be removed from the template.
+        test "Inline" {
+            const template_text = "12345{{! Comment Block! }}67890";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("12345", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("67890", elements[1].StaticText);
+        }
+
+        //
+        // Multiline comments should be permitted.
+        test "Multiline" {
+            const template_text =
+                \\12345{{!
+                \\  This is a
+                \\  multi-line comment...
+                \\}}67890
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("12345", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("67890", elements[1].StaticText);
+        }
+
+        //
+        // All standalone comment lines should be removed.
+        test "Standalone" {
+            const template_text =
+                \\Begin.
+                \\{{! Comment Block! }}
+                \\End.
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].StaticText);
+        }
+
+        //
+        // All standalone comment lines should be removed.
+        test "Indented Standalone" {
+            const template_text =
+                \\Begin.
+                \\    {{! Indented Comment Block! }}
+                \\End.
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].StaticText);
+        }
+
+        //
+        // "\r\n" should be considered a newline for standalone tags.
+        test "Standalone Line Endings" {
+            const template_text = "|\r\n{{! Standalone Comment }}\r\n|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+
+            //TODO:::
+            //try testing.expectEqualStrings("|", elements[1].StaticText);
+        }
+
+        //
+        // Standalone tags should not require a newline to precede them.
+        test "Standalone Without Previous Line" {
+            const template_text = "!\n  {{! I'm Still Standalone }}";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 1), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("!\n", elements[0].StaticText);
+        }
+
+        //
+        // All standalone comment lines should be removed.
+        test "Multiline Standalone" {
+            const template_text =
+                \\Begin.
+                \\{{!
+                \\Something's going on here... 
+                \\}}
+                \\End.
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].StaticText);
+        }
+
+        //
+        // All standalone comment lines should be removed.
+        test "Indented Multiline Standalone" {
+            const template_text =
+                \\Begin.
+                \\  {{!
+                \\    Something's going on here... 
+                \\  }}
+                \\End.
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].StaticText);
+        }
+
+        //
+        // Inline comments should not strip whitespace.
+        test "Indented Inline" {
+            const template_text = "  12 {{! 34 }}\n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            //try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("  12 ", elements[0].StaticText);
+
+            // TODO
+            //try testing.expectEqual(Element.StaticText, elements[1]);
+            //try testing.expectEqualStrings("\n", elements[1].StaticText);
+        }
+
+        //
+        // Comment removal should preserve surrounding whitespace.
+        test "Surrounding Whitespace" {
+            const template_text = "12345 {{! Comment Block! }} 67890";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("12345 ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings(" 67890", elements[1].StaticText);
+        }
     };
 
-    try testing.expectEqual(@as(usize, 3), elements.len);
+    const delimiters = struct {
 
-    try testing.expectEqual(Element.StaticText, elements[0]);
-    try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
+        //
+        // The equals sign (used on both sides) should permit delimiter changes.
+        test "Pair Behavior" {
+            const template_text = "{{=<% %>=}}(<%text%>)";
 
-    try testing.expectEqual(Element.Section, elements[1]);
-    try testing.expectEqualStrings("section", elements[1].Section.key);
-    if (elements[1].Section.content) |section| {
-        try testing.expectEqual(@as(usize, 6), section.len);
+            var template = try getTemplate(template_text);
+            defer template.deinit();
 
-        try testing.expectEqual(Element.StaticText, section[0]);
-        try testing.expectEqualStrings("Name: ", section[0].StaticText);
+            const elements = template.elements orelse unreachable;
 
-        try testing.expectEqual(Element.Interpolation, section[1]);
-        try testing.expectEqualStrings("name", section[1].Interpolation.key);
-        try testing.expectEqual(true, section[1].Interpolation.escaped);
+            try testing.expectEqual(@as(usize, 3), elements.len);
 
-        try testing.expectEqual(Element.StaticText, section[2]);
-        try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("(", elements[0].StaticText);
 
-        try testing.expectEqual(Element.Interpolation, section[3]);
-        try testing.expectEqualStrings("comments", section[3].Interpolation.key);
-        try testing.expectEqual(false, section[3].Interpolation.escaped);
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("text", elements[1].Interpolation.key);
 
-        try testing.expectEqual(Element.StaticText, section[4]);
-        try testing.expectEqualStrings("\n", section[4].StaticText);
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(")", elements[2].StaticText);
+        }
 
-        try testing.expectEqual(Element.Section, section[5]);
-        try testing.expectEqualStrings("inverted", section[5].Section.key);
-        try testing.expectEqual(true, section[5].Section.inverted);
-        if (section[5].Section.content) |inverted| {
-            try testing.expectEqual(@as(usize, 1), inverted.len);
+        //
+        // Characters with special meaning regexen should be valid delimiters.
+        test "Special Characters" {
+            const template_text = "({{=[ ]=}}[text])";
 
-            try testing.expectEqual(Element.StaticText, inverted[0]);
-            try testing.expectEqualStrings("Inverted text", inverted[0].StaticText);
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("(", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("text", elements[1].Interpolation.key);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(")", elements[2].StaticText);
+        }
+
+        //
+        // Delimiters set outside sections should persist.
+        test "Sections" {
+            const template_text =
+                \\[
+                \\{{#section}}
+                \\  {{data}}
+                \\  |data|
+                \\{{/section}}
+                \\{{= | | =}}
+                \\|#section|
+                \\  {{data}}
+                \\  |data|
+                \\|/section|
+                \\]
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 4), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("[\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("section", elements[1].Section.key);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 3), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("  ", section[0].StaticText);
+
+                try testing.expectEqual(Element.Interpolation, section[1]);
+                try testing.expectEqualStrings("data", section[1].Interpolation.key);
+
+                try testing.expectEqual(Element.StaticText, section[2]);
+                try testing.expectEqualStrings("\n  |data|\n", section[2].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            // Delimiters changed
+
+            try testing.expectEqual(Element.Section, elements[2]);
+            try testing.expectEqualStrings("section", elements[2].Section.key);
+
+            if (elements[2].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 3), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("  {{data}}\n  ", section[0].StaticText);
+
+                try testing.expectEqual(Element.Interpolation, section[1]);
+                try testing.expectEqualStrings("data", section[1].Interpolation.key);
+
+                try testing.expectEqual(Element.StaticText, section[2]);
+                try testing.expectEqualStrings("\n", section[2].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[3]);
+            try testing.expectEqualStrings("]", elements[3].StaticText);
+        }
+    };
+
+    test "Basic DOM test" {
+        const template_text =
+            \\{{! Comments block }}
+            \\  Hello
+            \\  {{#section}}
+            \\Name: {{name}}
+            \\Comments: {{&comments}}
+            \\{{^inverted}}Inverted text{{/inverted}}
+            \\{{/section}}
+            \\World
+        ;
+
+        const allocator = testing.allocator;
+
+        var template = try Template.init(allocator, template_text, .{});
+        defer template.deinit();
+
+        try testing.expect(template.last_error == null);
+
+        const elements = template.elements orelse {
+            try testing.expect(false);
+            return;
+        };
+
+        try testing.expectEqual(@as(usize, 3), elements.len);
+
+        try testing.expectEqual(Element.StaticText, elements[0]);
+        try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
+
+        try testing.expectEqual(Element.Section, elements[1]);
+        try testing.expectEqualStrings("section", elements[1].Section.key);
+        if (elements[1].Section.content) |section| {
+            try testing.expectEqual(@as(usize, 6), section.len);
+
+            try testing.expectEqual(Element.StaticText, section[0]);
+            try testing.expectEqualStrings("Name: ", section[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, section[1]);
+            try testing.expectEqualStrings("name", section[1].Interpolation.key);
+            try testing.expectEqual(true, section[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, section[2]);
+            try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, section[3]);
+            try testing.expectEqualStrings("comments", section[3].Interpolation.key);
+            try testing.expectEqual(false, section[3].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, section[4]);
+            try testing.expectEqualStrings("\n", section[4].StaticText);
+
+            try testing.expectEqual(Element.Section, section[5]);
+            try testing.expectEqualStrings("inverted", section[5].Section.key);
+            try testing.expectEqual(true, section[5].Section.inverted);
+            if (section[5].Section.content) |inverted| {
+                try testing.expectEqual(@as(usize, 1), inverted.len);
+
+                try testing.expectEqual(Element.StaticText, inverted[0]);
+                try testing.expectEqualStrings("Inverted text", inverted[0].StaticText);
+            } else {
+                try testing.expect(false);
+            }
         } else {
             try testing.expect(false);
         }
-    } else {
-        try testing.expect(false);
-    }
 
-    try testing.expectEqual(Element.StaticText, elements[2]);
-    try testing.expectEqualStrings("World", elements[2].StaticText);
-}
+        try testing.expectEqual(Element.StaticText, elements[2]);
+        try testing.expectEqualStrings("World", elements[2].StaticText);
+    }
+};
