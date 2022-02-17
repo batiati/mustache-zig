@@ -1,8 +1,8 @@
 const std = @import("std");
 
+pub const Tree = @import("Tree.zig");
 pub const TextScanner = @import("TextScanner.zig");
 pub const TextPart = @import("TextPart.zig");
-pub const Parser = @import("Parser.zig");
 
 pub const tokens = struct {
     pub const Comments = '!';
@@ -68,7 +68,5 @@ pub const Event = union(enum) {
 };
 
 test {
-    _ = Parser;
-    _ = TextScanner;
-    _ = TextPart;
+    std.testing.refAllDecls(@This());
 }

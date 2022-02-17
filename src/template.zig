@@ -6,12 +6,10 @@ const MustacheError = mustache.MustacheError;
 const TemplateOptions = mustache.TemplateOptions;
 const Delimiters = mustache.Delimiters;
 
-const scanner = @import("scanner/scanner.zig");
-
-pub const Parser = scanner.Parser;
+const Parser = @import("scanner/Parser.zig");
 
 pub const LastError = struct {
-    last_error: MustacheError,
+    last_error: anyerror,
     row: usize,
     col: usize,
     detail: ?[]const u8 = null,
@@ -151,32 +149,33 @@ pub const Element = union(enum) {
     /// names live in a namespace that is distinct from both Partials and the context.
     Inheritance: Inheritance,
 
-    pub fn free(self: *Element, allocator: Allocator) void {
+    pub fn free(self: Element, allocator: Allocator) void {
         switch (self) {
             .StaticText => |content| allocator.free(content),
             .Interpolation => |interpolation| allocator.free(interpolation.key),
             .Section => |section| {
                 allocator.free(section.key);
-                freeChildren(allocator, section.content);
+                freeMany(allocator, section.content);
             },
 
             .Partials => |partials| {
                 allocator.free(partials.key);
-                freeChildren(allocator, partials.content);
+                freeMany(allocator, partials.content);
             },
 
             .Inheritance => |inheritance| {
                 allocator.free(inheritance.key);
-                freeChildren(allocator, inheritance.content);
+                freeMany(allocator, inheritance.content);
             },
         }
     }
 
-    fn freeChildren(allocator: Allocator, content: ?[]Element) void {
-        if (content) |children| {
-            for (children) |child| {
-                child.free(allocator);
+    pub fn freeMany(allocator: Allocator, many: ?[]const Element) void {
+        if (many) |items| {
+            for (items) |item| {
+                item.free(allocator);
             }
+            allocator.free(items);
         }
     }
 };
@@ -189,23 +188,22 @@ pub const Template = struct {
     last_error: ?LastError,
 
     pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) !Template {
-        var parser = scanner.Parser.init(allocator, template_text, options);
+        var parser = Parser.init(allocator, template_text, options);
         defer parser.deinit();
 
         return try parser.parse();
     }
 
     pub fn deinit(self: *Self) void {
-        const allocator = self.allocator;
-
-        for (self.elements) |element| {
-            element.free(allocator);
+        if (self.elements) |elements| {
+            for (elements) |*element| {
+                element.free(self.allocator);
+            }
+            self.allocator.free(elements);
         }
-
-        allocator.free(self.elements);
     }
 };
 
 test {
-    _ = @import("scanner/scanner.zig");
+    std.testing.refAllDecls(@This());
 }
