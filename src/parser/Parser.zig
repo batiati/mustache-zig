@@ -56,6 +56,7 @@ const Level = struct {
 pub const Node = struct {
     block_type: BlockType,
     text_block: TextBlock,
+    stand_alone: bool,
     children: ?[]const Node = null,
 };
 
@@ -293,7 +294,22 @@ fn parseTree(self: *Self) Errors![]const Node {
     while (text_scanner.next()) |*text_block| {
         var block_type = (try self.matchBlockType(text_block)) orelse continue;
 
-        self.trimStandAlone(block_type, text_block);
+        // Befone adding,
+        if (block_type != .StaticText) {
+            switch (text_block.event) {
+                .Mark => |mark| {
+                    const is_triple_mustache = mark.delimiter_type == .NoScapeDelimiter;
+                    if (is_triple_mustache) {
+                        if (block_type == .Interpolation) {
+                            block_type = .NoScapeInterpolation;
+                        } else {
+                            return self.setLastError(ParseErrors.InvalidDelimiters, text_block, null);
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
 
         if (block_type == .Delimiters) {
 
@@ -306,8 +322,11 @@ fn parseTree(self: *Self) Errors![]const Node {
             };
         }
 
-        try self.addNode(block_type, text_block);
+        // Adding,
+        const stand_alone = self.trimStandAlone(block_type, text_block);
+        try self.addNode(block_type, text_block, stand_alone);
 
+        // After adding
         switch (block_type) {
             .Section,
             .InvertedSection,
@@ -339,12 +358,13 @@ fn parseTree(self: *Self) Errors![]const Node {
     return self.root.list.toOwnedSlice(self.arena);
 }
 
-fn addNode(self: *Self, block_type: BlockType, text_block: *const TextBlock) Allocator.Error!void {
+fn addNode(self: *Self, block_type: BlockType, text_block: *const TextBlock, stand_alone: bool) Allocator.Error!void {
     try self.current_level.list.append(
         self.arena,
         .{
             .block_type = block_type,
             .text_block = text_block.*,
+            .stand_alone = stand_alone,
         },
     );
 }
@@ -372,7 +392,7 @@ fn endLevel(self: *Self) ParseErrors!void {
     self.current_level = prev_level;
 }
 
-fn trimStandAlone(self: *const Self, block_type: BlockType, text_block: *TextBlock) void {
+fn trimStandAlone(self: *const Self, block_type: BlockType, text_block: *TextBlock) bool {
 
     // Lines containing tags without any static text or interpolation
     // must be fully removed from the rendered result
@@ -402,25 +422,29 @@ fn trimStandAlone(self: *const Self, block_type: BlockType, text_block: *TextBlo
     //                            ↑
     //                            └ all white space before that must be PRESERVED,
 
-    // abc {{! comment }}  \r\n
-
     if (block_type == .StaticText) {
         if (self.current_level.peekNode()) |prev_node| {
 
             // Shoud not exist two continous "StaticText" blocks
             assert(prev_node.block_type != .StaticText);
 
-            if (prev_node.block_type.canBeStandAlone()) {
-                _ = text_block.trimStandAlone(.Left);
+            if (prev_node.stand_alone) {
+                return text_block.trimStandAlone(.Left);
             }
         }
+
+        return true;
     } else if (block_type.canBeStandAlone()) {
         if (self.current_level.peekNode()) |prev_node| {
             if (prev_node.block_type == .StaticText) {
-                _ = prev_node.text_block.trimStandAlone(.Right);
+                return prev_node.text_block.trimStandAlone(.Right);
             }
         }
+
+        return true;
     }
+
+    return false;
 }
 
 fn setLastError(self: *Self, err: ParseErrors, text_block: ?*const TextBlock, detail: ?[]const u8) ParseErrors {
