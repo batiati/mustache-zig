@@ -334,6 +334,10 @@ const tests = struct {
         test "Standalone Line Endings" {
             const template_text = "|\r\n{{! Standalone Comment }}\r\n|";
 
+            //const utf_16 = std.unicode.utf8ToUtf16LeStringLiteral(template_text);
+            //onst new_text = @ptrCast([*]const u8, utf_16[0..])[0..utf_16.len * 2];
+            //std.log.warn("{s}", .{ new_text });
+
             var template = try getTemplate(template_text);
             defer template.deinit();
 
@@ -346,8 +350,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.StaticText, elements[1]);
 
-            //TODO:::
-            //try testing.expectEqualStrings("|", elements[1].StaticText);
+            try testing.expectEqualStrings("|", elements[1].StaticText);
         }
 
         //
@@ -426,14 +429,13 @@ const tests = struct {
 
             const elements = template.elements orelse unreachable;
 
-            //try testing.expectEqual(@as(usize, 2), elements.len);
+            try testing.expectEqual(@as(usize, 2), elements.len);
 
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("  12 ", elements[0].StaticText);
 
-            // TODO
-            //try testing.expectEqual(Element.StaticText, elements[1]);
-            //try testing.expectEqualStrings("\n", elements[1].StaticText);
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("\n", elements[1].StaticText);
         }
 
         //

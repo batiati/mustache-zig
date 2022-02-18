@@ -11,19 +11,100 @@ const DelimiterType = scanner.DelimiterType;
 const TextPart = scanner.TextPart;
 const Delimiters = scanner.Delimiters;
 
+const mustache = @import("../mustache.zig");
+const ParseErrors = mustache.template.ParseErrors;
+
 const Self = @This();
+
+const MAX_DELIMITERS = 4;
+const Delimiter = struct {
+    delimiter: []const u8,
+    mark_type: MarkType,
+    delimiter_type: DelimiterType,
+
+    pub fn match(self: Delimiter, slice: []const u8) ?Mark {
+        if (std.mem.startsWith(u8, slice, self.delimiter)) {
+            return Mark{
+                .mark_type = self.mark_type,
+                .delimiter_type = self.delimiter_type,
+                .delimiter = self.delimiter,
+            };
+        } else {
+            return null;
+        }
+    }
+};
 
 content: []const u8,
 index: usize = 0,
 row: usize = 1,
 col: usize = 1,
-delimiters: Delimiters,
+delimiters: [MAX_DELIMITERS]Delimiter = undefined,
+delimiters_count: usize = 0,
 
-pub fn init(content: []const u8, delimiters: Delimiters) Self {
+pub fn init(content: []const u8) Self {
     return .{
         .content = content,
-        .delimiters = delimiters,
     };
+}
+
+pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
+    if (delimiters.starting_delimiter.len == 0) return ParseErrors.InvalidDelimiters;
+    if (delimiters.ending_delimiter.len == 0) return ParseErrors.InvalidDelimiters;
+
+    var index: usize = 0;
+
+    if (std.mem.eql(u8, delimiters.starting_delimiter, delimiters.ending_delimiter)) {
+        self.delimiters[index] = .{
+            .delimiter = delimiters.starting_delimiter,
+            .mark_type = .Both,
+            .delimiter_type = .Regular,
+        };
+        index += 1;
+    } else {
+        self.delimiters[index] = .{
+            .delimiter = delimiters.starting_delimiter,
+            .mark_type = .Starting,
+            .delimiter_type = .Regular,
+        };
+        index += 1;
+
+        self.delimiters[index] = .{
+            .delimiter = delimiters.ending_delimiter,
+            .mark_type = .Ending,
+            .delimiter_type = .Regular,
+        };
+        index += 1;
+    }
+
+    if (!std.mem.eql(u8, delimiters.starting_delimiter, Delimiters.NoScapeStartingDelimiter)) {
+        self.delimiters[index] = .{
+            .delimiter = Delimiters.NoScapeStartingDelimiter,
+            .mark_type = .Starting,
+            .delimiter_type = .NoScapeDelimiter,
+        };
+        index += 1;
+    }
+
+    if (!std.mem.eql(u8, delimiters.ending_delimiter, Delimiters.NoScapeEndingDelimiter)) {
+        self.delimiters[index] = .{
+            .delimiter = Delimiters.NoScapeEndingDelimiter,
+            .mark_type = .Ending,
+            .delimiter_type = .NoScapeDelimiter,
+        };
+        index += 1;
+    }
+
+    const order = struct {
+        pub fn desc(context: void, lhs: Delimiter, rhs: Delimiter) bool {
+            _ = context;
+
+            return lhs.delimiter.len >= rhs.delimiter.len;
+        }
+    };
+
+    self.delimiters_count = index;
+    std.sort.sort(Delimiter, self.delimiters[0..self.delimiters_count], {}, order.desc);
 }
 
 ///
@@ -75,33 +156,13 @@ pub fn next(self: *Self) ?TextPart {
 fn matchTagMark(self: *Self) ?Mark {
     const slice = self.content[self.index..];
 
-    if (std.mem.startsWith(u8, slice, Delimiters.NoScapeStartingDelimiter)) {
-        return Mark{
-            .mark_type = .Starting,
-            .delimiter_type = .NoScapeDelimiter,
-            .delimiter = Delimiters.NoScapeStartingDelimiter,
-        };
-    } else if (std.mem.startsWith(u8, slice, Delimiters.NoScapeEndingDelimiter)) {
-        return Mark{
-            .mark_type = .Ending,
-            .delimiter_type = .NoScapeDelimiter,
-            .delimiter = Delimiters.NoScapeEndingDelimiter,
-        };
-    } else if (std.mem.startsWith(u8, slice, self.delimiters.starting_delimiter)) {
-        return Mark{
-            .mark_type = .Starting,
-            .delimiter_type = .Regular,
-            .delimiter = self.delimiters.starting_delimiter,
-        };
-    } else if (std.mem.startsWith(u8, slice, self.delimiters.ending_delimiter)) {
-        return Mark{
-            .mark_type = .Ending,
-            .delimiter_type = .Regular,
-            .delimiter = self.delimiters.ending_delimiter,
-        };
-    } else {
-        return null;
+    for (self.delimiters[0..self.delimiters_count]) |delimiter| {
+        if (delimiter.match(slice)) |mark| {
+            return mark;
+        }
     }
+
+    return null;
 }
 
 const testing = std.testing;
@@ -111,7 +172,8 @@ test "basic tests" {
         \\World{{{ tag2 }}}Until eof
     ;
 
-    var reader = Self.init(content, .{});
+    var reader = Self.init(content);
+    try reader.setDelimiters(.{});
 
     var part_1 = reader.next();
     try testing.expect(part_1 != null);
@@ -170,7 +232,8 @@ test "custom tags" {
         \\World[ tag2 ]Until eof
     ;
 
-    var reader = Self.init(content, .{ .starting_delimiter = "[", .ending_delimiter = "]" });
+    var reader = Self.init(content);
+    try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
     var part_1 = reader.next();
     try testing.expect(part_1 != null);
@@ -226,8 +289,8 @@ test "custom tags" {
 test "EOF" {
     const content = "{{tag1}}";
 
-    //var reader = Self.init(content, .{ .starting_delimiter = "[", .ending_delimiter = "]"});
-    var reader = Self.init(content, .{});
+    var reader = Self.init(content);
+    try reader.setDelimiters(.{});
 
     var part_1 = reader.next();
     try testing.expect(part_1 != null);
@@ -256,7 +319,8 @@ test "EOF" {
 test "EOF custom tags" {
     const content = "[tag1]";
 
-    var reader = Self.init(content, .{ .starting_delimiter = "[", .ending_delimiter = "]" });
+    var reader = Self.init(content);
+    try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
     var part_1 = reader.next();
     try testing.expect(part_1 != null);

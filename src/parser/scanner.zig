@@ -54,6 +54,9 @@ pub const MarkType = enum {
 
     /// A ending tag mark, such '}}', '}}}' or any configured delimiter
     Ending,
+
+    /// The same tag mark is used both for staring and ending, such '%' or '|'
+    Both,
 };
 
 pub const DelimiterType = enum {

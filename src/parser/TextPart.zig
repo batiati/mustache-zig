@@ -40,7 +40,7 @@ pub fn readPartType(self: *Self) ?PartType {
     return null;
 }
 
-pub fn trimStandAlone(self: *Self, trim: enum { Left, Right }) void {
+pub fn trimStandAlone(self: *Self, trim: enum { Left, Right }) bool {
     if (self.tail) |tail| {
         if (tail.len > 0) {
             switch (trim) {
@@ -48,12 +48,12 @@ pub fn trimStandAlone(self: *Self, trim: enum { Left, Right }) void {
                     var index: usize = 0;
                     while (index < tail.len) : (index += 1) {
                         switch (tail[index]) {
-                            ' ', '\t' => {},
-                            '\r', '\n' => {
+                            ' ', '\t', '\r' => {},
+                            '\n' => {
                                 self.tail = if (index == tail.len - 1) null else tail[index + 1 ..];
-                                return;
+                                return true;
                             },
-                            else => return,
+                            else => return false,
                         }
                     }
                 },
@@ -61,14 +61,14 @@ pub fn trimStandAlone(self: *Self, trim: enum { Left, Right }) void {
                 .Right => {
                     var index: usize = 0;
                     while (index < tail.len) : (index += 1) {
-                        const end = tail.len - index - 1;
+                        var end = tail.len - index - 1;
                         switch (tail[end]) {
-                            ' ', '\t' => {},
-                            '\r', '\n' => {
+                            ' ', '\t', '\r' => {},
+                            '\n' => {
                                 self.tail = if (end == tail.len) null else tail[0 .. end + 1];
-                                return;
+                                return true;
                             },
-                            else => return,
+                            else => return false,
                         }
                     }
                 },
@@ -78,4 +78,6 @@ pub fn trimStandAlone(self: *Self, trim: enum { Left, Right }) void {
         // Empty or white space is represented as "null"
         self.tail = null;
     }
+
+    return true;
 }

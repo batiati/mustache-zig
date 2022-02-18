@@ -56,6 +56,7 @@ const Level = struct {
 pub const Node = struct {
     part_type: PartType,
     text_part: TextPart,
+    is_stand_alone: enum { Yes, No, NotChecked },
     children: ?[]const Node = null,
 };
 
@@ -285,22 +286,28 @@ fn parseIdentificator(self: *Self, part: *const TextPart) Errors![]const u8 {
 }
 
 fn parseTree(self: *Self) Errors![]const Node {
-    var text_scanner = TextScanner.init(self.template_text, self.current_level.delimiters);
+    var text_scanner = TextScanner.init(self.template_text);
+    text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
+        return self.setLastError(err, null, null);
+    };
 
     while (text_scanner.next()) |*text_part| {
         var part_type = (try self.matchPartType(text_part)) orelse continue;
 
-        self.trimStandAlone(part_type, text_part);
+        const trimmed = self.trimStandAlone(part_type, text_part);
 
         if (part_type == .Delimiters) {
 
             //Apply the new delimiters to the reader immediately
             const new_delimiters = try self.parseDelimiters(text_part);
             self.current_level.delimiters = new_delimiters;
-            text_scanner.delimiters = new_delimiters;
+
+            text_scanner.setDelimiters(new_delimiters) catch |err| {
+                return self.setLastError(err, text_part, null);
+            };
         }
 
-        try self.addNode(part_type, text_part);
+        try self.addNode(part_type, text_part, trimmed);
 
         switch (part_type) {
             .Section,
@@ -317,7 +324,9 @@ fn parseTree(self: *Self) Errors![]const Node {
                 };
 
                 // Restore parent delimiters
-                text_scanner.delimiters = self.current_level.delimiters;
+                text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
+                    return self.setLastError(err, text_part, null);
+                };
             },
 
             else => {},
@@ -331,12 +340,13 @@ fn parseTree(self: *Self) Errors![]const Node {
     return self.root.list.toOwnedSlice(self.arena);
 }
 
-fn addNode(self: *Self, part_type: PartType, text_part: *const TextPart) Allocator.Error!void {
+fn addNode(self: *Self, part_type: PartType, text_part: *const TextPart, trimmed: bool) Allocator.Error!void {
     try self.current_level.list.append(
         self.arena,
         .{
             .part_type = part_type,
             .text_part = text_part.*,
+            .is_stand_alone = if (trimmed) .Yes else .NotChecked,
         },
     );
 }
@@ -364,7 +374,7 @@ fn endLevel(self: *Self) ParseErrors!void {
     self.current_level = prev_level;
 }
 
-fn trimStandAlone(self: *const Self, part_type: PartType, text_part: *TextPart) void {
+fn trimStandAlone(self: *const Self, part_type: PartType, text_part: *TextPart) bool {
 
     // Lines containing tags without any static text or interpolation
     // must be fully removed from the rendered result
@@ -397,16 +407,21 @@ fn trimStandAlone(self: *const Self, part_type: PartType, text_part: *TextPart) 
     if (part_type == .StaticText) {
         if (self.current_level.peekNode()) |node| {
             if (node.part_type.canBeStandAlone()) {
-                text_part.trimStandAlone(.Left);
+                const trimmed = text_part.trimStandAlone(.Left);
+                return trimmed;
             }
         }
     } else if (part_type.canBeStandAlone()) {
         if (self.current_level.peekNode()) |node| {
             if (node.part_type == .StaticText) {
-                node.text_part.trimStandAlone(.Right);
+                const trimmed = node.text_part.trimStandAlone(.Right);
+                node.is_stand_alone = if (trimmed) .Yes else .No;
+                return trimmed;
             }
         }
     }
+
+    return false;
 }
 
 fn setLastError(self: *Self, err: ParseErrors, part: ?*const TextPart, detail: ?[]const u8) ParseErrors {
