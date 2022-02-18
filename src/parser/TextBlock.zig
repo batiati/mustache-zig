@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const scanner = @import("scanner.zig");
 const tokens = scanner.tokens;
 const Event = scanner.Event;
-const PartType = scanner.PartType;
+const BlockType = scanner.BlockType;
 const Mark = scanner.Mark;
 const MarkType = scanner.MarkType;
 const DelimiterType = scanner.DelimiterType;
@@ -17,9 +17,9 @@ tail: ?[]const u8,
 row: usize,
 col: usize,
 
-pub fn readPartType(self: *Self) ?PartType {
+pub fn readBlockType(self: *Self) ?BlockType {
     if (self.tail) |tail| {
-        const match: ?PartType = switch (tail[0]) {
+        const match: ?BlockType = switch (tail[0]) {
             tokens.Comments => .Comment,
             tokens.Section => .Section,
             tokens.InvertedSection => .InvertedSection,
@@ -31,9 +31,9 @@ pub fn readPartType(self: *Self) ?PartType {
             else => null,
         };
 
-        if (match) |part_type| {
+        if (match) |block_type| {
             self.tail = tail[1..];
-            return part_type;
+            return block_type;
         }
     }
 

@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const TextScanner = @import("TextScanner.zig");
-pub const TextPart = @import("TextPart.zig");
+pub const TextBlock = @import("TextBlock.zig");
 
 pub const Delimiters = struct {
     pub const DefaultStartingDelimiter = "{{";
@@ -24,7 +24,7 @@ pub const tokens = struct {
     pub const Delimiters = '=';
 };
 
-pub const PartType = enum {
+pub const BlockType = enum {
     StaticText,
     Comment,
     Delimiters,
@@ -36,7 +36,7 @@ pub const PartType = enum {
     Partials,
     Inheritance,
 
-    pub fn canBeStandAlone(self: PartType) bool {
+    pub fn canBeStandAlone(self: BlockType) bool {
         return switch (self) {
             .StaticText,
             .Interpolation,

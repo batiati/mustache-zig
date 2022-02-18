@@ -8,8 +8,8 @@ const Event = scanner.Event;
 const Mark = scanner.Mark;
 const MarkType = scanner.MarkType;
 const DelimiterType = scanner.DelimiterType;
-const TextPart = scanner.TextPart;
 const Delimiters = scanner.Delimiters;
+const TextBlock = scanner.TextBlock;
 
 const mustache = @import("../mustache.zig");
 const ParseErrors = mustache.template.ParseErrors;
@@ -109,7 +109,7 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
 
 ///
 /// Reads until the next delimiter mark or EOF
-pub fn next(self: *Self) ?TextPart {
+pub fn next(self: *Self) ?TextBlock {
 
     // TODO: identify the proper NEW_LINE constant
     // This is used only to show rownumbers in error messages
@@ -131,7 +131,7 @@ pub fn next(self: *Self) ?TextPart {
         }
 
         if (self.matchTagMark()) |mark| {
-            const part = TextPart{
+            const block = TextBlock{
                 .event = .{ .Mark = mark },
                 .tail = if (self.index > initial_index) self.content[initial_index..self.index] else null,
                 .row = self.row,
@@ -139,9 +139,9 @@ pub fn next(self: *Self) ?TextPart {
             };
 
             increment = mark.delimiter.len;
-            return part;
+            return block;
         } else if (self.index == self.content.len - 1) {
-            return TextPart{
+            return TextBlock{
                 .event = .Eof,
                 .tail = self.content[initial_index..],
                 .row = self.row,

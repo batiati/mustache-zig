@@ -20,8 +20,8 @@ const Errors = ParseErrors || Allocator.Error;
 const scanner = @import("scanner.zig");
 const TextScanner = scanner.TextScanner;
 const tokens = scanner.tokens;
-const TextPart = scanner.TextPart;
-const PartType = scanner.PartType;
+const TextBlock = scanner.TextBlock;
+const BlockType = scanner.BlockType;
 const Mark = scanner.Mark;
 
 const assert = std.debug.assert;
@@ -54,9 +54,8 @@ const Level = struct {
 };
 
 pub const Node = struct {
-    part_type: PartType,
-    text_part: TextPart,
-    is_stand_alone: enum { Yes, No, NotChecked },
+    block_type: BlockType,
+    text_block: TextBlock,
     children: ?[]const Node = null,
 };
 
@@ -115,9 +114,9 @@ fn createElements(self: *Self, nodes: []const Node) Errors!?[]const Element {
 
     for (nodes) |node| {
         const element = blk: {
-            switch (node.part_type) {
+            switch (node.block_type) {
                 .StaticText => {
-                    if (node.text_part.tail) |content| {
+                    if (node.text_block.tail) |content| {
                         break :blk Element{
                             .StaticText = try self.gpa.dupe(u8, content),
                         };
@@ -133,20 +132,20 @@ fn createElements(self: *Self, nodes: []const Node) Errors!?[]const Element {
                 .CloseSection,
                 => break :blk null,
 
-                else => |part_type| {
-                    const key = try self.parseIdentificator(&node.text_part);
+                else => |block_type| {
+                    const key = try self.parseIdentificator(&node.text_block);
                     errdefer self.gpa.free(key);
 
                     const content = if (node.children) |children| try self.createElements(children) else null;
                     errdefer if (content) |content_value| Element.freeMany(self.gpa, content_value);
 
-                    break :blk switch (part_type) {
+                    break :blk switch (block_type) {
                         .Interpolation,
                         .NoScapeInterpolation,
                         => {
                             break :blk Element{
                                 .Interpolation = Interpolation{
-                                    .escaped = part_type != .NoScapeInterpolation,
+                                    .escaped = block_type != .NoScapeInterpolation,
                                     .key = key,
                                 },
                             };
@@ -157,7 +156,7 @@ fn createElements(self: *Self, nodes: []const Node) Errors!?[]const Element {
                         => {
                             break :blk Element{
                                 .Section = Section{
-                                    .inverted = part_type == .InvertedSection,
+                                    .inverted = block_type == .InvertedSection,
                                     .key = key,
                                     .content = content,
                                 },
@@ -206,19 +205,19 @@ fn createElements(self: *Self, nodes: []const Node) Errors!?[]const Element {
     }
 }
 
-fn matchPartType(self: *Self, part: *TextPart) Errors!?PartType {
-    switch (part.event) {
+fn matchBlockType(self: *Self, text_block: *TextBlock) Errors!?BlockType {
+    switch (text_block.event) {
         .Mark => |tag_mark| {
             switch (self.state) {
                 .WaitingStaringTag => {
                     defer self.state = .WaitingEndingTag;
 
                     if (tag_mark.mark_type == .Ending) {
-                        return self.setLastError(ParseErrors.EndingDelimiterMismatch, part, null);
+                        return self.setLastError(ParseErrors.EndingDelimiterMismatch, text_block, null);
                     }
 
                     // If there is no current action, any content is a static text
-                    if (part.tail != null) {
+                    if (text_block.tail != null) {
                         return .StaticText;
                     }
                 },
@@ -227,16 +226,16 @@ fn matchPartType(self: *Self, part: *TextPart) Errors!?PartType {
                     defer self.state = .WaitingStaringTag;
 
                     if (tag_mark.mark_type == .Starting) {
-                        return self.setLastError(ParseErrors.StartingDelimiterMismatch, part, null);
+                        return self.setLastError(ParseErrors.StartingDelimiterMismatch, text_block, null);
                     }
 
                     // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, $, =, &, /)
-                    return part.readPartType() orelse PartType.Interpolation;
+                    return text_block.readBlockType() orelse .Interpolation;
                 },
             }
         },
         .Eof => {
-            if (part.tail != null) {
+            if (text_block.tail != null) {
                 return .StaticText;
             }
         },
@@ -245,15 +244,15 @@ fn matchPartType(self: *Self, part: *TextPart) Errors!?PartType {
     return null;
 }
 
-fn parseDelimiters(self: *Self, part: *TextPart) Errors!Delimiters {
-    var delimiter: ?Delimiters = if (part.tail) |content| blk: {
+fn parseDelimiters(self: *Self, text_block: *TextBlock) Errors!Delimiters {
+    var delimiter: ?Delimiters = if (text_block.tail) |content| blk: {
 
         // Delimiters are the only case of match closing tags {{= and =}}
         // Validate if the content ends with the proper "=" symbol before parsing the delimiters
         if (content[content.len - 1] != tokens.Delimiters) break :blk null;
-        part.tail = content[0 .. content.len - 1];
+        text_block.tail = content[0 .. content.len - 1];
 
-        var iterator = std.mem.tokenize(u8, part.tail.?, " \t");
+        var iterator = std.mem.tokenize(u8, text_block.tail.?, " \t");
 
         var starting_delimiter = iterator.next() orelse break :blk null;
         var ending_delimiter = iterator.next() orelse break :blk null;
@@ -268,12 +267,12 @@ fn parseDelimiters(self: *Self, part: *TextPart) Errors!Delimiters {
     if (delimiter) |ret| {
         return ret;
     } else {
-        return self.setLastError(ParseErrors.InvalidDelimiters, part, null);
+        return self.setLastError(ParseErrors.InvalidDelimiters, text_block, null);
     }
 }
 
-fn parseIdentificator(self: *Self, part: *const TextPart) Errors![]const u8 {
-    if (part.tail) |text| {
+fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const u8 {
+    if (text_block.tail) |text| {
         var tokenizer = std.mem.tokenize(u8, text, " \t");
         if (tokenizer.next()) |token| {
             if (tokenizer.next() == null) {
@@ -282,7 +281,7 @@ fn parseIdentificator(self: *Self, part: *const TextPart) Errors![]const u8 {
         }
     }
 
-    return self.setLastError(ParseErrors.InvalidIdentifier, part, null);
+    return self.setLastError(ParseErrors.InvalidIdentifier, text_block, null);
 }
 
 fn parseTree(self: *Self) Errors![]const Node {
@@ -291,25 +290,25 @@ fn parseTree(self: *Self) Errors![]const Node {
         return self.setLastError(err, null, null);
     };
 
-    while (text_scanner.next()) |*text_part| {
-        var part_type = (try self.matchPartType(text_part)) orelse continue;
+    while (text_scanner.next()) |*text_block| {
+        var block_type = (try self.matchBlockType(text_block)) orelse continue;
 
-        const trimmed = self.trimStandAlone(part_type, text_part);
+        self.trimStandAlone(block_type, text_block);
 
-        if (part_type == .Delimiters) {
+        if (block_type == .Delimiters) {
 
             //Apply the new delimiters to the reader immediately
-            const new_delimiters = try self.parseDelimiters(text_part);
+            const new_delimiters = try self.parseDelimiters(text_block);
             self.current_level.delimiters = new_delimiters;
 
             text_scanner.setDelimiters(new_delimiters) catch |err| {
-                return self.setLastError(err, text_part, null);
+                return self.setLastError(err, text_block, null);
             };
         }
 
-        try self.addNode(part_type, text_part, trimmed);
+        try self.addNode(block_type, text_block);
 
-        switch (part_type) {
+        switch (block_type) {
             .Section,
             .InvertedSection,
             .Partials,
@@ -320,12 +319,12 @@ fn parseTree(self: *Self) Errors![]const Node {
 
             .CloseSection => {
                 self.endLevel() catch |err| {
-                    return self.setLastError(err, text_part, null);
+                    return self.setLastError(err, text_block, null);
                 };
 
                 // Restore parent delimiters
                 text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
-                    return self.setLastError(err, text_part, null);
+                    return self.setLastError(err, text_block, null);
                 };
             },
 
@@ -340,13 +339,12 @@ fn parseTree(self: *Self) Errors![]const Node {
     return self.root.list.toOwnedSlice(self.arena);
 }
 
-fn addNode(self: *Self, part_type: PartType, text_part: *const TextPart, trimmed: bool) Allocator.Error!void {
+fn addNode(self: *Self, block_type: BlockType, text_block: *const TextBlock) Allocator.Error!void {
     try self.current_level.list.append(
         self.arena,
         .{
-            .part_type = part_type,
-            .text_part = text_part.*,
-            .is_stand_alone = if (trimmed) .Yes else .NotChecked,
+            .block_type = block_type,
+            .text_block = text_block.*,
         },
     );
 }
@@ -374,7 +372,7 @@ fn endLevel(self: *Self) ParseErrors!void {
     self.current_level = prev_level;
 }
 
-fn trimStandAlone(self: *const Self, part_type: PartType, text_part: *TextPart) bool {
+fn trimStandAlone(self: *const Self, block_type: BlockType, text_block: *TextBlock) void {
 
     // Lines containing tags without any static text or interpolation
     // must be fully removed from the rendered result
@@ -404,31 +402,32 @@ fn trimStandAlone(self: *const Self, part_type: PartType, text_part: *TextPart) 
     //                            ↑
     //                            └ all white space before that must be PRESERVED,
 
-    if (part_type == .StaticText) {
-        if (self.current_level.peekNode()) |node| {
-            if (node.part_type.canBeStandAlone()) {
-                const trimmed = text_part.trimStandAlone(.Left);
-                return trimmed;
+    // abc {{! comment }}  \r\n
+
+    if (block_type == .StaticText) {
+        if (self.current_level.peekNode()) |prev_node| {
+
+            // Shoud not exist two continous "StaticText" blocks
+            assert(prev_node.block_type != .StaticText);
+
+            if (prev_node.block_type.canBeStandAlone()) {
+                _ = text_block.trimStandAlone(.Left);
             }
         }
-    } else if (part_type.canBeStandAlone()) {
-        if (self.current_level.peekNode()) |node| {
-            if (node.part_type == .StaticText) {
-                const trimmed = node.text_part.trimStandAlone(.Right);
-                node.is_stand_alone = if (trimmed) .Yes else .No;
-                return trimmed;
+    } else if (block_type.canBeStandAlone()) {
+        if (self.current_level.peekNode()) |prev_node| {
+            if (prev_node.block_type == .StaticText) {
+                _ = prev_node.text_block.trimStandAlone(.Right);
             }
         }
     }
-
-    return false;
 }
 
-fn setLastError(self: *Self, err: ParseErrors, part: ?*const TextPart, detail: ?[]const u8) ParseErrors {
+fn setLastError(self: *Self, err: ParseErrors, text_block: ?*const TextBlock, detail: ?[]const u8) ParseErrors {
     self.last_error = LastError{
         .last_error = err,
-        .row = if (part) |p| p.row else 0,
-        .col = if (part) |p| p.col else 0,
+        .row = if (text_block) |p| p.row else 0,
+        .col = if (text_block) |p| p.col else 0,
         .detail = detail,
     };
 
@@ -456,37 +455,37 @@ test "Basic parse" {
 
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 4), parts.len);
-        try testing.expectEqual(PartType.Comment, parts[0].part_type);
+        try testing.expectEqual(BlockType.Comment, parts[0].block_type);
 
-        try testing.expectEqual(PartType.StaticText, parts[1].part_type);
-        try testing.expectEqualStrings("  Hello\n", parts[1].text_part.tail.?);
+        try testing.expectEqual(BlockType.StaticText, parts[1].block_type);
+        try testing.expectEqualStrings("  Hello\n", parts[1].text_block.tail.?);
 
-        try testing.expectEqual(PartType.Section, parts[2].part_type);
+        try testing.expectEqual(BlockType.Section, parts[2].block_type);
 
-        try testing.expectEqual(PartType.StaticText, parts[3].part_type);
-        try testing.expectEqualStrings("World", parts[3].text_part.tail.?);
+        try testing.expectEqual(BlockType.StaticText, parts[3].block_type);
+        try testing.expectEqualStrings("World", parts[3].text_block.tail.?);
 
         if (parts[2].children) |section| {
             try testing.expectEqual(@as(usize, 8), section.len);
-            try testing.expectEqual(PartType.StaticText, section[0].part_type);
+            try testing.expectEqual(BlockType.StaticText, section[0].block_type);
 
-            try testing.expectEqual(PartType.Interpolation, section[1].part_type);
-            try testing.expectEqualStrings("name", section[1].text_part.tail.?);
+            try testing.expectEqual(BlockType.Interpolation, section[1].block_type);
+            try testing.expectEqualStrings("name", section[1].text_block.tail.?);
 
-            try testing.expectEqual(PartType.StaticText, section[2].part_type);
+            try testing.expectEqual(BlockType.StaticText, section[2].block_type);
 
-            try testing.expectEqual(PartType.NoScapeInterpolation, section[3].part_type);
-            try testing.expectEqualStrings("comments", section[3].text_part.tail.?);
+            try testing.expectEqual(BlockType.NoScapeInterpolation, section[3].block_type);
+            try testing.expectEqualStrings("comments", section[3].text_block.tail.?);
 
-            try testing.expectEqual(PartType.StaticText, section[4].part_type);
-            try testing.expectEqualStrings("\n", section[4].text_part.tail.?);
+            try testing.expectEqual(BlockType.StaticText, section[4].block_type);
+            try testing.expectEqualStrings("\n", section[4].text_block.tail.?);
 
-            try testing.expectEqual(PartType.InvertedSection, section[5].part_type);
+            try testing.expectEqual(BlockType.InvertedSection, section[5].block_type);
 
-            try testing.expectEqual(PartType.StaticText, section[6].part_type);
-            try testing.expect(section[6].text_part.tail == null);
+            try testing.expectEqual(BlockType.StaticText, section[6].block_type);
+            try testing.expect(section[6].text_block.tail == null);
 
-            try testing.expectEqual(PartType.CloseSection, section[7].part_type);
+            try testing.expectEqual(BlockType.CloseSection, section[7].block_type);
         } else {
             try testing.expect(false);
         }
@@ -513,13 +512,13 @@ test "Scan standAlone tags" {
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 3), parts.len);
 
-        try testing.expectEqual(PartType.StaticText, parts[0].part_type);
-        try testing.expect(parts[0].text_part.tail == null);
+        try testing.expectEqual(BlockType.StaticText, parts[0].block_type);
+        try testing.expect(parts[0].text_block.tail == null);
 
-        try testing.expectEqual(PartType.Comment, parts[1].part_type);
+        try testing.expectEqual(BlockType.Comment, parts[1].block_type);
 
-        try testing.expectEqual(PartType.StaticText, parts[2].part_type);
-        try testing.expectEqualStrings("Hello", parts[2].text_part.tail.?);
+        try testing.expectEqual(BlockType.StaticText, parts[2].block_type);
+        try testing.expectEqualStrings("Hello", parts[2].text_block.tail.?);
     } else {
         try testing.expect(false);
     }
@@ -541,14 +540,14 @@ test "Scan delimiters Tags" {
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 3), parts.len);
 
-        try testing.expectEqual(PartType.Delimiters, parts[0].part_type);
-        try testing.expectEqualStrings("[ ]", parts[0].text_part.tail.?);
+        try testing.expectEqual(BlockType.Delimiters, parts[0].block_type);
+        try testing.expectEqualStrings("[ ]", parts[0].text_block.tail.?);
 
-        try testing.expectEqual(PartType.StaticText, parts[1].part_type);
-        try testing.expect(parts[1].text_part.tail == null);
+        try testing.expectEqual(BlockType.StaticText, parts[1].block_type);
+        try testing.expect(parts[1].text_block.tail == null);
 
-        try testing.expectEqual(PartType.Interpolation, parts[2].part_type);
-        try testing.expectEqualStrings("interpolation", parts[2].text_part.tail.?);
+        try testing.expectEqual(BlockType.Interpolation, parts[2].block_type);
+        try testing.expectEqualStrings("interpolation", parts[2].text_block.tail.?);
     } else {
         try testing.expect(false);
     }
