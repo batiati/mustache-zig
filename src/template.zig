@@ -221,6 +221,7 @@ const tests = struct {
     test {
         _ = comments;
         _ = delimiters;
+        _ = interpolation;
     }
 
     pub fn getTemplate(template_text: []const u8) !Template {
@@ -573,6 +574,528 @@ const tests = struct {
 
             try testing.expectEqual(Element.StaticText, elements[3]);
             try testing.expectEqualStrings("]", elements[3].StaticText);
+        }
+
+        //
+        // Delimiters set outside inverted sections should persist.
+        test "Inverted Sections" {
+            const template_text =
+                \\[
+                \\{{^section}}
+                \\  {{data}}
+                \\  |data|
+                \\{{/section}}
+                \\{{= | | =}}
+                \\|^section|
+                \\  {{data}}
+                \\  |data|
+                \\|/section|
+                \\]
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 4), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("[\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("section", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 3), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("  ", section[0].StaticText);
+
+                try testing.expectEqual(Element.Interpolation, section[1]);
+                try testing.expectEqualStrings("data", section[1].Interpolation.key);
+
+                try testing.expectEqual(Element.StaticText, section[2]);
+                try testing.expectEqualStrings("\n  |data|\n", section[2].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            // Delimiters changed
+
+            try testing.expectEqual(Element.Section, elements[2]);
+            try testing.expectEqualStrings("section", elements[2].Section.key);
+            try testing.expectEqual(true, elements[2].Section.inverted);
+
+            if (elements[2].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 3), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("  {{data}}\n  ", section[0].StaticText);
+
+                try testing.expectEqual(Element.Interpolation, section[1]);
+                try testing.expectEqualStrings("data", section[1].Interpolation.key);
+
+                try testing.expectEqual(Element.StaticText, section[2]);
+                try testing.expectEqualStrings("\n", section[2].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[3]);
+            try testing.expectEqualStrings("]", elements[3].StaticText);
+        }
+
+        //
+        // Surrounding whitespace should be left untouched.
+        test "Surrounding Whitespace" {
+            const template_text = "| {{=@ @=}} |";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings(" |", elements[1].StaticText);
+        }
+
+        //
+        // Whitespace should be left untouched.
+        test "Outlying Whitespace (Inline)" {
+            const template_text = " | {{=@ @=}}\n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("\n", elements[1].StaticText);
+        }
+
+        //
+        // Standalone lines should be removed from the template.
+        test "Standalone Tag" {
+            const template_text =
+                \\Begin.
+                \\{{=@ @=}}
+                \\End.
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].StaticText);
+        }
+
+        //
+        // Indented standalone lines should be removed from the template.
+        test "Indented Standalone Tag" {
+            const template_text =
+                \\Begin.
+                \\{{=@ @=}}
+                \\End.
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].StaticText);
+        }
+
+        //
+        // "\r\n" should be considered a newline for standalone tags.
+        test "Standalone Line Endings" {
+            const template_text = "|\r\n{{= @ @ =}}\r\n|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+
+            try testing.expectEqualStrings("|", elements[1].StaticText);
+        }
+
+        //
+        // Standalone tags should not require a newline to precede them.
+        test "Standalone Without Previous Line" {
+            const template_text = "  {{=@ @=}}\n=";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 1), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("=", elements[0].StaticText);
+        }
+
+        //
+        // Standalone tags should not require a newline to follow them.
+        test "Standalone Without Newline" {
+            const template_text = "=\n  {{=@ @=}}";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 1), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("=\n", elements[0].StaticText);
+        }
+
+        //
+        // Superfluous in-tag whitespace should be ignored.
+        test "Pair with Padding" {
+            const template_text = "|{{= @   @ =}}|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].StaticText);
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("|", elements[1].StaticText);
+        }
+    };
+
+    const interpolation = struct {
+
+        // Mustache-free templates should render as-is.
+        test "No Interpolation" {
+            const template_text = "Hello from {Mustache}!";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 1), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("Hello from {Mustache}!", elements[0].StaticText);
+        }
+
+        // Unadorned tags should interpolate content into the template.
+        test "Basic Interpolation" {
+            const template_text = "Hello, {{subject}}!";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("Hello, ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("subject", elements[1].Interpolation.key);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("!", elements[2].StaticText);
+        }
+
+        // Basic interpolation should be HTML escaped.
+        test "HTML Escaping" {
+            const template_text = "These characters should be HTML escaped: {{forbidden}}";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("These characters should be HTML escaped: ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("forbidden", elements[1].Interpolation.key);
+            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+        }
+
+        // Triple mustaches should interpolate without HTML escaping.
+        test "Triple Mustache" {
+            const template_text = "These characters should not be HTML escaped: {{{forbidden}}}";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("forbidden", elements[1].Interpolation.key);
+            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+        }
+
+        // Ampersand should interpolate without HTML escaping.
+        test "Ampersand" {
+            const template_text = "These characters should not be HTML escaped: {{&forbidden}}";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("forbidden", elements[1].Interpolation.key);
+            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+        }
+
+        // Interpolation should not alter surrounding whitespace.
+        test "Interpolation - Surrounding Whitespace" {
+            const template_text = "| {{string}} |";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(" |", elements[2].StaticText);
+        }
+
+        // Interpolation should not alter surrounding whitespace.
+        test "Triple Mustache - Surrounding Whitespace" {
+            const template_text = "| {{{string}}} |";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(" |", elements[2].StaticText);
+        }
+
+        // Interpolation should not alter surrounding whitespace.
+        test "Ampersand - Surrounding Whitespace" {
+            const template_text = "| {{&string}} |";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(" |", elements[2].StaticText);
+        }
+
+        // Standalone interpolation should not alter surrounding whitespace.
+        test "Interpolation - Standalone" {
+            const template_text = "  {{string}}\n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("  ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n", elements[2].StaticText);
+        }
+
+        // Standalone interpolation should not alter surrounding whitespace.
+        test "Triple Mustache - Standalone" {
+            const template_text = "  {{{string}}}\n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("  ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n", elements[2].StaticText);
+        }
+
+        // Standalone interpolation should not alter surrounding whitespace.
+        test "Ampersand - Standalone" {
+            const template_text = "  {{&string}}\n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("  ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n", elements[2].StaticText);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Interpolation With Padding" {
+            const template_text = "|{{ string }}|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Triple Mustache With Padding" {
+            const template_text = "|{{{ string }}}|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Ampersand With Padding" {
+            const template_text = "|{{& string }}|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.elements orelse unreachable;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
+            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
         }
     };
 
