@@ -10,13 +10,23 @@ const MarkType = scanner.MarkType;
 const DelimiterType = scanner.DelimiterType;
 const Delimiters = scanner.Delimiters;
 const TextBlock = scanner.TextBlock;
+const Trimmer = @import("Trimmer.zig");
 
 const mustache = @import("../mustache.zig");
 const ParseErrors = mustache.template.ParseErrors;
 
 const Self = @This();
 
+///
+/// Mustache allows changing delimiters while processing
+/// Implements a list of runtime-known delimiters to split the text
+/// Custom delimiters can be anything
+///
+/// Triple-mustache delimiters '{{{' and ''}}}' are fixed
+/// It is not defined by mustache's specs, but some implementations use the current delimiter + '{' or '}' to represent the unescaped tag.
+/// The '&' symbol can be used instead of the triple-mustache for custom delimiters use cases.
 const MAX_DELIMITERS = 4;
+
 const Delimiter = struct {
     delimiter: []const u8,
     mark_type: MarkType,
@@ -37,8 +47,9 @@ const Delimiter = struct {
 
 content: []const u8,
 index: usize = 0,
-row: usize = 1,
-col: usize = 1,
+block_index: usize = 0,
+row: u32 = 1,
+col: u32 = 1,
 delimiters: [MAX_DELIMITERS]Delimiter = undefined,
 delimiters_count: usize = 0,
 
@@ -53,6 +64,24 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
     if (delimiters.ending_delimiter.len == 0) return ParseErrors.InvalidDelimiters;
 
     var index: usize = 0;
+
+    if (!std.mem.eql(u8, delimiters.starting_delimiter, Delimiters.NoScapeStartingDelimiter)) {
+        self.delimiters[index] = .{
+            .delimiter = Delimiters.NoScapeStartingDelimiter,
+            .mark_type = .Starting,
+            .delimiter_type = .NoScapeDelimiter,
+        };
+        index += 1;
+    }
+
+    if (!std.mem.eql(u8, delimiters.ending_delimiter, Delimiters.NoScapeEndingDelimiter)) {
+        self.delimiters[index] = .{
+            .delimiter = Delimiters.NoScapeEndingDelimiter,
+            .mark_type = .Ending,
+            .delimiter_type = .NoScapeDelimiter,
+        };
+        index += 1;
+    }
 
     if (std.mem.eql(u8, delimiters.starting_delimiter, delimiters.ending_delimiter)) {
         self.delimiters[index] = .{
@@ -77,24 +106,7 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
         index += 1;
     }
 
-    if (!std.mem.eql(u8, delimiters.starting_delimiter, Delimiters.NoScapeStartingDelimiter)) {
-        self.delimiters[index] = .{
-            .delimiter = Delimiters.NoScapeStartingDelimiter,
-            .mark_type = .Starting,
-            .delimiter_type = .NoScapeDelimiter,
-        };
-        index += 1;
-    }
-
-    if (!std.mem.eql(u8, delimiters.ending_delimiter, Delimiters.NoScapeEndingDelimiter)) {
-        self.delimiters[index] = .{
-            .delimiter = Delimiters.NoScapeEndingDelimiter,
-            .mark_type = .Ending,
-            .delimiter_type = .NoScapeDelimiter,
-        };
-        index += 1;
-    }
-
+    // Order desc by the delimiter length, avoiding ambiguity during the "startsWith" comparison
     const order = struct {
         pub fn desc(context: void, lhs: Delimiter, rhs: Delimiter) bool {
             _ = context;
@@ -110,17 +122,13 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
 ///
 /// Reads until the next delimiter mark or EOF
 pub fn next(self: *Self) ?TextBlock {
-
-    // TODO: identify the proper NEW_LINE constant
-    // This is used only to show rownumbers in error messages
-    const NEW_LINE = '\n';
-
-    const initial_index = self.index;
+    self.block_index = self.index;
+    var trimmer = Trimmer{ .text_scanner = self };
 
     while (self.index < self.content.len) {
-        var increment: usize = 1;
+        var increment: u32 = 1;
         defer {
-            if (self.content[self.index] == NEW_LINE) {
+            if (self.content[self.index] == '\n') {
                 self.row += 1;
                 self.col = 1;
             } else {
@@ -133,21 +141,27 @@ pub fn next(self: *Self) ?TextBlock {
         if (self.matchTagMark()) |mark| {
             const block = TextBlock{
                 .event = .{ .Mark = mark },
-                .tail = if (self.index > initial_index) self.content[initial_index..self.index] else null,
+                .tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null,
                 .row = self.row,
                 .col = self.col,
+                .trim_left_index = trimmer.getLeftIndex(),
+                .trim_right_index = trimmer.getRightIndex(),
             };
 
-            increment = mark.delimiter.len;
+            increment = @intCast(u32, mark.delimiter.len);
             return block;
         } else if (self.index == self.content.len - 1) {
             return TextBlock{
                 .event = .Eof,
-                .tail = self.content[initial_index..],
+                .tail = self.content[self.block_index..],
                 .row = self.row,
                 .col = self.col,
+                .trim_left_index = trimmer.getLeftIndex(),
+                .trim_right_index = trimmer.getRightIndex(),
             };
         }
+
+        trimmer.move();
     }
 
     return null;

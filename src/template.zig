@@ -1335,7 +1335,6 @@ const tests = struct {
 
                 try testing.expectEqual(Element.StaticText, section[0]);
                 try testing.expectEqualStrings("#", section[0].StaticText);
-
             } else {
                 try testing.expect(false);
                 unreachable;
@@ -1343,7 +1342,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.StaticText, elements[1]);
             try testing.expectEqualStrings("\n/", elements[1].StaticText);
-        }        
+        }
 
         // Standalone tags should not require a newline to follow them.
         test "Standalone Without Newline" {
@@ -1357,7 +1356,7 @@ const tests = struct {
             try testing.expectEqual(@as(usize, 2), elements.len);
 
             try testing.expectEqual(Element.StaticText, elements[0]);
-            try testing.expectEqualStrings("#", elements[0].StaticText);            
+            try testing.expectEqualStrings("#", elements[0].StaticText);
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
@@ -1367,12 +1366,11 @@ const tests = struct {
 
                 try testing.expectEqual(Element.StaticText, section[0]);
                 try testing.expectEqualStrings("\n/\n", section[0].StaticText);
-
             } else {
                 try testing.expect(false);
                 unreachable;
             }
-        }  
+        }
 
         // "\r\n" should be considered a newline for standalone tags.
         test "Standalone Line Endings" {
@@ -1409,7 +1407,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("| A Line", elements[2].StaticText);
-        }        
+        }
     };
 
     test "Basic DOM test" {

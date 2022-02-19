@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const assert = std.debug.assert;
 
 const scanner = @import("scanner.zig");
@@ -14,8 +15,10 @@ const Self = @This();
 
 event: Event,
 tail: ?[]const u8,
-row: usize,
-col: usize,
+row: u32,
+col: u32,
+trim_right_index: ?usize = null,
+trim_left_index: ?usize = null,
 
 pub fn readBlockType(self: *Self) ?BlockType {
     if (self.tail) |tail| {
@@ -41,44 +44,46 @@ pub fn readBlockType(self: *Self) ?BlockType {
     return null;
 }
 
-pub fn trimStandAlone(self: *Self, trim: enum { Left, Right }) bool {
-    if (self.tail) |tail| {
-        if (tail.len > 0) {
-            switch (trim) {
-                .Left => {
-                    var index: usize = 0;
-                    while (index < tail.len) : (index += 1) {
-                        switch (tail[index]) {
-                            ' ', '\t', '\r', '\x00' => {},
-                            '\n' => {
-                                self.tail = if (index == tail.len - 1) null else tail[index + 1 ..];
-                                return true;
-                            },
-                            else => return false,
-                        }
-                    }
-                },
+pub fn trimRight(self: *Self) bool {
 
-                .Right => {
-                    var index: usize = 0;
-                    while (index < tail.len) : (index += 1) {
-                        var end = tail.len - index - 1;
-                        switch (tail[end]) {
-                            ' ', '\t', '\r', '\x00' => {},
-                            '\n' => {
-                                self.tail = if (end == tail.len) null else tail[0 .. end + 1];
-                                return true;
-                            },
-                            else => return false,
-                        }
-                    }
-                },
-            }
+    if (self.trim_right_index) |trim_right_index| {
+        if (self.tail) |tail| {
+
+            self.tail = if (trim_right_index > 0) tail[0..trim_right_index] else null;
+            self.trim_right_index = null;
+            return true;
         }
+    } 
+    
+    return false;
+}
 
-        // Empty or white space is represented as "null"
-        self.tail = null;
-    }
+pub fn trimLeft(self: *Self) bool {
 
-    return true;
+    if (self.trim_left_index) |trim_left_index| {
+        if (self.tail) |tail| {
+
+            if (self.trim_right_index) |trim_right_index| {
+
+                // Update the right index after trimming left
+                // BEFORE:
+                //                 2      7
+                //                 ↓      ↓
+                //const value = "  \nABC\n  "
+                //
+                // AFTER:
+                //                    4
+                //                    ↓
+                //const value = "ABC\n  "                
+                self.trim_right_index = trim_right_index - trim_left_index - 1;
+
+            }
+
+            self.tail = if (trim_left_index < tail.len -1) tail[trim_left_index + 1..] else null;
+            self.trim_left_index = null;
+            return true;
+        }
+    } 
+    
+    return false;
 }

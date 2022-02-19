@@ -36,7 +36,55 @@ const State = enum {
 const Level = struct {
     parent: ?*Level,
     delimiters: Delimiters,
-    list: std.ArrayListUnmanaged(Node) = .{},
+    current_node: ?*Node,
+    list: std.ArrayListUnmanaged(*Node) = .{},
+
+    pub fn init(arena: Allocator, delimiters: Delimiters) Allocator.Error!*Level {
+        var self = try arena.create(Level);
+        self.* = .{
+            .parent = null,
+            .delimiters = delimiters,
+            .current_node = null,
+        };
+
+        return self;
+    }
+
+    pub fn addNode(self: *Level, arena: Allocator, block_type: BlockType, text_block: *const TextBlock) Allocator.Error!*Node {
+        var node = try arena.create(Node);
+        node.* = .{
+            .block_type = block_type,
+            .text_block = text_block.*,
+            .prev_node = self.current_node,
+        };
+
+        try self.list.append(arena, node);
+        self.current_node = node;
+
+        return node;
+    }
+
+    pub fn nextLevel(self: *Level, arena: Allocator) Allocator.Error!*Level {
+        var next_level = try arena.create(Level);
+
+        next_level.* = .{
+            .parent = self,
+            .delimiters = self.delimiters,
+            .current_node = self.current_node,
+        };
+
+        return next_level;
+    }
+
+    fn endLevel(self: *Level, arena: Allocator) ParseErrors!*Level {
+        var prev_level = self.parent orelse return ParseErrors.UnexpectedCloseSection;
+        var parent_node = prev_level.current_node orelse return ParseErrors.UnexpectedCloseSection;
+
+        parent_node.children = self.list.toOwnedSlice(arena);
+
+        prev_level.current_node = self.current_node;
+        return prev_level;
+    }
 
     pub fn peekNode(self: *const Level) ?*Node {
         var level: ?*const Level = self;
@@ -46,7 +94,7 @@ const Level = struct {
             if (items.len == 0) {
                 level = current_level.parent;
             } else {
-                return &items[items.len - 1];
+                return items[items.len - 1];
             }
         }
 
@@ -57,8 +105,97 @@ const Level = struct {
 pub const Node = struct {
     block_type: BlockType,
     text_block: TextBlock,
-    stand_alone: bool,
-    children: ?[]const Node = null,
+    prev_node: ?*Node = null,
+    children: ?[]const *Node = null,
+
+    pub fn trimStandAlone(self: *Node) void {
+
+        // Lines containing tags without any static text or interpolation
+        // must be fully removed from the rendered result
+        //
+        // Examples:
+        //
+        // 1. TRIM LEFT stand alone tags
+        //
+        //                                            ┌ any white space after the tag must be TRIMMED,
+        //                                            ↓ including the EOL
+        // var template_text = \\{{! Comments block }}
+        //                     \\Hello World
+        //
+        // 2. TRIM RIGHT stand alone tags
+        //
+        //                            ┌ any white space before the tag must be trimmed,
+        //                            ↓
+        // var template_text = \\      {{! Comments block }}
+        //                     \\Hello World
+        //
+        // 3. PRESERVE interpolation tags
+        //
+        //                                     ┌ all white space and the line break after that must be PRESERVED,
+        //                                     ↓
+        // var template_text = \\      {{Name}}
+        //                     \\      {{Address}}
+        //                            ↑
+        //                            └ all white space before that must be PRESERVED,
+
+        //     ┌ #0 No trim, can be stand-alone
+        //     ↓
+        // |  \n{{#boolean}}\n#{{/boolean}}\n/
+
+        //     ┌ #1 Trim right
+        //     |           ┌ #1 Can be stand-alone
+        //     ↓           ↓
+        // |  \n{{#boolean}}\n#{{/boolean}}\n/
+
+        //                 ┌ #2 Trim left
+        //                 |  ┌ #2 Can be stand-alone
+        //                 ↓  ↓
+        // |  \n{{#boolean}}\n#{{/boolean}}\n/
+
+        //                    ┌ #3 Trim right
+        //                    |          ┌ #3 Can't be stand-alone
+        //                    ↓          ↓
+        // |  \n{{#boolean}}\n#{{/boolean}}\n/
+
+        //                               ┌ #4 No trim
+        //                               |  ┌ #4 Can't be stand-alone
+        //                               ↓  ↓
+        // |  {{#boolean}}\n#{{/boolean}}\n/
+
+        if (self.block_type == .StaticText) {
+            if (self.prev_node) |prev_node| {
+
+                std.log.err("hey, trimming static text: \"{s}\"", .{ self.text_block.tail.? });
+                if (trimRight(prev_node)) {
+                    _ = self.text_block.trimLeft();
+                    std.log.err("trimmed text: \"{s}\"", .{ if (self.text_block.tail) |tail| tail else "NULL" });
+                } else {
+                    std.log.err("trim right false :-(", .{ });
+                }
+            }
+        }
+    }    
+
+    fn trimRight(parent_node: ?*Node) bool {
+        if (parent_node) |node| {
+            std.log.err("trim right a node ... ", .{});
+            if (node.block_type == .StaticText) {
+                std.log.err("trim right a node \"{s}\"... ", .{ if (node.text_block.tail) |tail| tail else "NULL" });
+                const ret = node.text_block.trimRight();
+                std.log.err("trim right {} value \"{s}\" ... ", .{ ret, if (node.text_block.tail) |tail| tail else "NULL"});
+                return ret;
+
+            } else if (node.block_type.canBeStandAlone()) {
+                std.log.err("trim right a \"{}\"... ", .{ node.block_type } );
+                return trimRight(node.prev_node);
+            } else {
+                return false;
+            }
+        } else {
+            std.log.err("trim right root true ... ", .{});
+            return true;
+        }
+    }    
 };
 
 const Self = @This();
@@ -72,11 +209,7 @@ current_level: *Level,
 last_error: ?LastError = null,
 
 pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, delimiters: Delimiters) Allocator.Error!Self {
-    var root = try arena.create(Level);
-    root.* = .{
-        .parent = null,
-        .delimiters = delimiters,
-    };
+    var root = try Level.init(arena, delimiters);
 
     return Self{
         .gpa = gpa,
@@ -110,7 +243,7 @@ fn fromError(self: *Self, err: Errors) Allocator.Error!Template {
     }
 }
 
-fn createElements(self: *Self, nodes: []const Node) Errors![]const Element {
+fn createElements(self: *Self, nodes: []const *Node) Errors![]const Element {
     var list = std.ArrayListUnmanaged(Element){};
     errdefer Element.freeMany(self.gpa, list.toOwnedSlice(self.gpa));
 
@@ -289,7 +422,7 @@ fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const 
     return self.setLastError(ParseErrors.InvalidIdentifier, text_block, null);
 }
 
-fn parseTree(self: *Self) Errors![]const Node {
+fn parseTree(self: *Self) Errors![]const *Node {
     var text_scanner = TextScanner.init(self.template_text);
     text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
         return self.setLastError(err, null, null);
@@ -327,9 +460,9 @@ fn parseTree(self: *Self) Errors![]const Node {
         }
 
         // Adding,
-        const stand_alone = self.trimStandAlone(block_type, text_block);
-        try self.addNode(block_type, text_block, stand_alone);
-
+        var node = try self.current_level.addNode(self.arena, block_type, text_block);
+        node.trimStandAlone();
+        
         // After adding
         switch (block_type) {
             .Section,
@@ -337,11 +470,11 @@ fn parseTree(self: *Self) Errors![]const Node {
             .Parent,
             .Block,
             => {
-                try self.nextLevel();
+                self.current_level = try self.current_level.nextLevel(self.arena);
             },
 
             .CloseSection => {
-                self.endLevel() catch |err| {
+                self.current_level = self.current_level.endLevel(self.arena) catch |err| {
                     return self.setLastError(err, text_block, null);
                 };
 
@@ -360,95 +493,6 @@ fn parseTree(self: *Self) Errors![]const Node {
     }
 
     return self.root.list.toOwnedSlice(self.arena);
-}
-
-fn addNode(self: *Self, block_type: BlockType, text_block: *const TextBlock, stand_alone: bool) Allocator.Error!void {
-    try self.current_level.list.append(
-        self.arena,
-        .{
-            .block_type = block_type,
-            .text_block = text_block.*,
-            .stand_alone = stand_alone,
-        },
-    );
-}
-
-fn nextLevel(self: *Self) Allocator.Error!void {
-    var current_level = self.current_level;
-    var next_level = try self.arena.create(Level);
-
-    next_level.* = .{
-        .parent = current_level,
-        .delimiters = current_level.delimiters,
-    };
-
-    self.current_level = next_level;
-}
-
-fn endLevel(self: *Self) ParseErrors!void {
-    var current_level = self.current_level;
-    var prev_level = current_level.parent orelse return ParseErrors.UnexpectedCloseSection;
-    var last_node = prev_level.peekNode() orelse return ParseErrors.UnexpectedCloseSection;
-
-    last_node.children = current_level.list.toOwnedSlice(self.arena);
-    self.arena.destroy(current_level);
-
-    self.current_level = prev_level;
-}
-
-fn trimStandAlone(self: *const Self, block_type: BlockType, text_block: *TextBlock) bool {
-
-    // Lines containing tags without any static text or interpolation
-    // must be fully removed from the rendered result
-    //
-    // Examples:
-    //
-    // 1. TRIM LEFT stand alone tags
-    //
-    //                                            ┌ any white space after the tag must be TRIMMED,
-    //                                            ↓ including the EOL
-    // var template_text = \\{{! Comments block }}
-    //                     \\Hello World
-    //
-    // 2. TRIM RIGHT stand alone tags
-    //
-    //                            ┌ any white space before the tag must be trimmed,
-    //                            ↓
-    // var template_text = \\      {{! Comments block }}
-    //                     \\Hello World
-    //
-    // 3. PRESERVE interpolation tags
-    //
-    //                                     ┌ all white space and the line break after that must be PRESERVED,
-    //                                     ↓
-    // var template_text = \\      {{Name}}
-    //                     \\      {{Address}}
-    //                            ↑
-    //                            └ all white space before that must be PRESERVED,
-
-    if (block_type == .StaticText) {
-        if (self.current_level.peekNode()) |prev_node| {
-
-            // Shoud not exist two continous "StaticText" blocks
-            assert(prev_node.block_type != .StaticText);
-
-            if (prev_node.stand_alone) {
-                return text_block.trimStandAlone(.Left);
-            }
-        }
-
-        return true;
-    } else if (block_type.canBeStandAlone()) {
-        if (self.current_level.peekNode()) |prev_node| {
-            if (prev_node.block_type == .StaticText) {
-                return prev_node.text_block.trimStandAlone(.Right);
-            }
-        }
-
-        return true;
-    }
-
-    return false;
 }
 
 fn setLastError(self: *Self, err: ParseErrors, text_block: ?*const TextBlock, detail: ?[]const u8) ParseErrors {
@@ -581,7 +625,7 @@ test "Scan delimiters Tags" {
     }
 }
 
-fn testParseTree(parser: *Self) !?[]const Node {
+fn testParseTree(parser: *Self) !?[]const *Node {
     return parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
             std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.row, err.col });
