@@ -49,7 +49,7 @@ pub fn trimStandAlone(self: *Self, trim: enum { Left, Right }) bool {
                     var index: usize = 0;
                     while (index < tail.len) : (index += 1) {
                         switch (tail[index]) {
-                            ' ', '\t', '\r' => {},
+                            ' ', '\t', '\r', '\x00' => {},
                             '\n' => {
                                 self.tail = if (index == tail.len - 1) null else tail[index + 1 ..];
                                 return true;
@@ -64,7 +64,7 @@ pub fn trimStandAlone(self: *Self, trim: enum { Left, Right }) bool {
                     while (index < tail.len) : (index += 1) {
                         var end = tail.len - index - 1;
                         switch (tail[end]) {
-                            ' ', '\t', '\r' => {},
+                            ' ', '\t', '\r', '\x00' => {},
                             '\n' => {
                                 self.tail = if (end == tail.len) null else tail[0 .. end + 1];
                                 return true;

@@ -262,6 +262,7 @@ const tests = struct {
         _ = comments;
         _ = delimiters;
         _ = interpolation;
+        _ = sections;
     }
 
     pub fn getTemplate(template_text: []const u8) !Template {
@@ -1137,6 +1138,278 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
         }
+    };
+
+    const sections = struct {
+
+        // Sections should not alter surrounding whitespace.
+        test "Surrounding Whitespace" {
+            const template_text = " | {{#boolean}}\t|\t{{/boolean}} | \n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("\t|\t", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(" | \n", elements[2].StaticText);
+        }
+
+        // Sections should not alter internal whitespace.
+        test "Internal Whitespace" {
+            const template_text = " | {{#boolean}} {{! Important Whitespace }}\n {{/boolean}} | \n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 2), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings(" ", section[0].StaticText);
+
+                try testing.expectEqual(Element.StaticText, section[1]);
+                try testing.expectEqualStrings("\n ", section[1].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(" | \n", elements[2].StaticText);
+        }
+
+        // Single-line sections should not alter surrounding whitespace.
+        test "Indented Inline Sections" {
+            const template_text = " {{#boolean}}YES{{/boolean}}\n {{#boolean}}GOOD{{/boolean}}\n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 5), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings(" ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("YES", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n ", elements[2].StaticText);
+
+            if (elements[3].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("GOOD", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[4]);
+            try testing.expectEqualStrings("\n ", elements[4].StaticText);
+        }
+
+        // Standalone lines should be removed from the template.
+        test "Standalone Lines" {
+            const template_text =
+                \\| This Is
+                \\{{#boolean}}
+                \\|
+                \\{{/boolean}}
+                \\| A Line
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("|\n", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+        }
+
+        // Indented standalone lines should be removed from the template.
+        test "Standalone Lines" {
+            const template_text = "|\r\n{{#boolean}}\r\n{{/boolean}}\r\n|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 0), section.len);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
+        }
+
+        // Standalone tags should not require a newline to precede them.
+        test "Standalone Without Previous Line" {
+            const template_text = "  {{#boolean}}\n#{{/boolean}}\n/";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.Section, elements[0]);
+            try testing.expectEqualStrings("boolean", elements[0].Section.key);
+
+            if (elements[0].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("#", section[0].StaticText);
+
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("\n/", elements[1].StaticText);
+        }        
+
+        // Standalone tags should not require a newline to follow them.
+        test "Standalone Without Newline" {
+            const template_text = "#{{#boolean}}\n/\n  {{/boolean}}";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("#", elements[0].StaticText);            
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("\n/\n", section[0].StaticText);
+
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+        }  
+
+        // "\r\n" should be considered a newline for standalone tags.
+        test "Standalone Line Endings" {
+            const template_text =
+                \\| This Is
+                \\		{{#boolean}}
+                \\|
+                \\		{{/boolean}}
+                \\| A Line
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("|\n", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+        }        
     };
 
     test "Basic DOM test" {
