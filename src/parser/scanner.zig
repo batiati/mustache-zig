@@ -18,8 +18,9 @@ pub const tokens = struct {
     pub const Section = '#';
     pub const InvertedSection = '^';
     pub const CloseSection = '/';
-    pub const Partials = '>';
-    pub const Inheritance = '$';
+    pub const Partial = '>';
+    pub const Parent = '<';
+    pub const Block = '$';
     pub const NoEscape = '&';
     pub const Delimiters = '=';
 };
@@ -33,8 +34,9 @@ pub const BlockType = enum {
     Section,
     InvertedSection,
     CloseSection,
-    Partials,
-    Inheritance,
+    Partial,
+    Parent,
+    Block,
 
     pub fn canBeStandAlone(self: BlockType) bool {
         return switch (self) {

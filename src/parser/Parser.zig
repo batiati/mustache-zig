@@ -10,8 +10,9 @@ const Template = mustache.template.Template;
 const Element = mustache.template.Element;
 const Interpolation = mustache.template.Interpolation;
 const Section = mustache.template.Section;
-const Partials = mustache.template.Partials;
-const Inheritance = mustache.template.Inheritance;
+const Partial = mustache.template.Partial;
+const Parent = mustache.template.Parent;
+const Block = mustache.template.Block;
 const LastError = mustache.template.LastError;
 
 const ParseErrors = mustache.template.ParseErrors;
@@ -93,8 +94,7 @@ pub fn parse(self: *Self) Allocator.Error!Template {
 
     return Template{
         .allocator = self.gpa,
-        .elements = elements,
-        .last_error = null,
+        .result = .{ .Elements = elements },
     };
 }
 
@@ -103,13 +103,14 @@ fn fromError(self: *Self, err: Errors) Allocator.Error!Template {
         Allocator.Error.OutOfMemory => |alloc| return alloc,
         else => return Template{
             .allocator = self.gpa,
-            .elements = null,
-            .last_error = self.last_error,
+            .result = .{
+                .Error = self.last_error orelse .{ .error_code = err },
+            },
         },
     }
 }
 
-fn createElements(self: *Self, nodes: []const Node) Errors!?[]const Element {
+fn createElements(self: *Self, nodes: []const Node) Errors![]const Element {
     var list = std.ArrayListUnmanaged(Element){};
     errdefer Element.freeMany(self.gpa, list.toOwnedSlice(self.gpa));
 
@@ -164,18 +165,26 @@ fn createElements(self: *Self, nodes: []const Node) Errors!?[]const Element {
                             };
                         },
 
-                        .Partials => {
+                        .Partial => {
                             break :blk Element{
-                                .Partials = Partials{
+                                .Partial = Partial{
+                                    .key = key,
+                                },
+                            };
+                        },
+
+                        .Parent => {
+                            break :blk Element{
+                                .Parent = Parent{
                                     .key = key,
                                     .content = content,
                                 },
                             };
                         },
 
-                        .Inheritance => {
+                        .Block => {
                             break :blk Element{
-                                .Inheritance = Inheritance{
+                                .Block = Block{
                                     .key = key,
                                     .content = content,
                                 },
@@ -198,12 +207,7 @@ fn createElements(self: *Self, nodes: []const Node) Errors!?[]const Element {
         }
     }
 
-    if (list.items.len == 0) {
-        list.clearAndFree(self.gpa);
-        return null;
-    } else {
-        return list.toOwnedSlice(self.gpa);
-    }
+    return list.toOwnedSlice(self.gpa);
 }
 
 fn matchBlockType(self: *Self, text_block: *TextBlock) Errors!?BlockType {
@@ -330,8 +334,8 @@ fn parseTree(self: *Self) Errors![]const Node {
         switch (block_type) {
             .Section,
             .InvertedSection,
-            .Partials,
-            .Inheritance,
+            .Parent,
+            .Block,
             => {
                 try self.nextLevel();
             },
@@ -449,7 +453,7 @@ fn trimStandAlone(self: *const Self, block_type: BlockType, text_block: *TextBlo
 
 fn setLastError(self: *Self, err: ParseErrors, text_block: ?*const TextBlock, detail: ?[]const u8) ParseErrors {
     self.last_error = LastError{
-        .last_error = err,
+        .error_code = err,
         .row = if (text_block) |p| p.row else 0,
         .col = if (text_block) |p| p.col else 0,
         .detail = detail,
@@ -580,7 +584,7 @@ test "Scan delimiters Tags" {
 fn testParseTree(parser: *Self) !?[]const Node {
     return parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
-            std.log.err("template {s} at row {}, col {};", .{ @errorName(err.last_error), err.row, err.col });
+            std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.row, err.col });
             try testing.expect(false);
         }
 
@@ -591,7 +595,7 @@ fn testParseTree(parser: *Self) !?[]const Node {
 fn testParseTemplate(parser: *Self) !Template {
     return parser.parse() catch |e| {
         if (parser.last_error) |err| {
-            std.log.err("template {s} at row {}, col {};", .{ @errorName(err.last_error), err.row, err.col });
+            std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.row, err.col });
             try testing.expect(false);
         }
 
