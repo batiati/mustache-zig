@@ -39,6 +39,7 @@ pub const Section = struct {
 
 pub const Partial = struct {
     key: []const u8,
+    indentation: ?[]const u8,
 };
 
 pub const Parent = struct {
@@ -204,6 +205,7 @@ pub const Element = union(enum) {
 
             .Partial => |partial| {
                 allocator.free(partial.key);
+                if (partial.indentation) |indentation| allocator.free(indentation);
             },
 
             .Parent => |inheritance| {
@@ -263,6 +265,8 @@ const tests = struct {
         _ = delimiters;
         _ = interpolation;
         _ = sections;
+        _ = inverted;
+        _ = partials;
     }
 
     pub fn getTemplate(template_text: []const u8) !Template {
@@ -1154,6 +1158,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1185,6 +1190,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 2), section.len);
@@ -1219,6 +1225,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1232,6 +1239,10 @@ const tests = struct {
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("\n ", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[3]);
+            try testing.expectEqualStrings("boolean", elements[3].Section.key);
+            try testing.expectEqual(false, elements[3].Section.inverted);
 
             if (elements[3].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1269,6 +1280,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1285,7 +1297,7 @@ const tests = struct {
         }
 
         // Indented standalone lines should be removed from the template.
-        test "Standalone Lines" {
+        test "Indented Standalone Lines" {
             const template_text = "|\r\n{{#boolean}}\r\n{{/boolean}}\r\n|";
 
             var template = try getTemplate(template_text);
@@ -1300,6 +1312,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 0), section.len);
@@ -1325,6 +1338,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[0]);
             try testing.expectEqualStrings("boolean", elements[0].Section.key);
+            try testing.expectEqual(false, elements[0].Section.inverted);
 
             if (elements[0].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1356,6 +1370,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1390,6 +1405,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1403,6 +1419,517 @@ const tests = struct {
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Padding" {
+            const template_text = "|{{# boolean }}={{/ boolean }}|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(false, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("=", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
+        }
+    };
+
+    const inverted = struct {
+
+        // Sections should not alter surrounding whitespace.
+        test "Surrounding Whitespace" {
+            const template_text = " | {{^boolean}}\t|\t{{/boolean}} | \n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("\t|\t", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(" | \n", elements[2].StaticText);
+        }
+
+        // Sections should not alter internal whitespace.
+        test "Internal Whitespace" {
+            const template_text = " | {{^boolean}} {{! Important Whitespace }}\n {{/boolean}} | \n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 2), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings(" ", section[0].StaticText);
+
+                try testing.expectEqual(Element.StaticText, section[1]);
+                try testing.expectEqualStrings("\n ", section[1].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(" | \n", elements[2].StaticText);
+        }
+
+        // Single-line sections should not alter surrounding whitespace.
+        test "Indented Inline Sections" {
+            const template_text = " {{^boolean}}NO{{/boolean}}\n {{^boolean}}WAY{{/boolean}}\n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 5), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings(" ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("NO", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n ", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[3]);
+            try testing.expectEqualStrings("boolean", elements[3].Section.key);
+            try testing.expectEqual(true, elements[3].Section.inverted);
+
+            if (elements[3].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("WAY", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[4]);
+            try testing.expectEqualStrings("\n", elements[4].StaticText);
+        }
+
+        // Standalone lines should be removed from the template.
+        test "Standalone Lines" {
+            const template_text =
+                \\| This Is
+                \\{{^boolean}}
+                \\|
+                \\{{/boolean}}
+                \\| A Line
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("|\n", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+        }
+
+        // Indented standalone lines should be removed from the template.
+        test "Indented Standalone Lines" {
+            const template_text = "|\r\n{{^boolean}}\r\n{{/boolean}}\r\n|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 0), section.len);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
+        }
+
+        // Standalone tags should not require a newline to precede them.
+        test "Standalone Without Previous Line" {
+            const template_text = "  {{^boolean}}\n^{{/boolean}}\n/";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.Section, elements[0]);
+            try testing.expectEqualStrings("boolean", elements[0].Section.key);
+            try testing.expectEqual(true, elements[0].Section.inverted);
+
+            if (elements[0].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("^", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings("\n/", elements[1].StaticText);
+        }
+
+        // Standalone tags should not require a newline to follow them.
+        test "Standalone Without Newline" {
+            const template_text = "^{{^boolean}}\n/\n  {{/boolean}}";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("^", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("\n/\n", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+        }
+
+        // Standalone indented lines should be removed from the template.
+        test "Standalone Indented Lines" {
+            const template_text =
+                \\| This Is
+                \\		{{^boolean}}
+                \\|
+                \\		{{/boolean}}
+                \\| A Line
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("|\n", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Padding" {
+            const template_text = "|{{^ boolean }}={{/ boolean }}|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(true, elements[1].Section.inverted);
+
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 1), section.len);
+
+                try testing.expectEqual(Element.StaticText, section[0]);
+                try testing.expectEqualStrings("=", section[0].StaticText);
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
+        }
+    };
+
+    const partials = struct {
+
+        // The greater-than operator should not alter surrounding whitespace.
+        test "Surrounding Whitespace" {
+            const template_text = "| {{>partial}} |";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].Partial.key);
+            try testing.expect(elements[1].Partial.indentation == null);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(" |", elements[2].StaticText);
+        }
+
+        // Whitespace should be left untouched.
+        test "Inline Indentation" {
+            const template_text = "  {{data}}  {{> partial}}\n";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 5), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("  ", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, elements[1]);
+            try testing.expectEqualStrings("data", elements[1].Interpolation.key);
+            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("  ", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Partial, elements[3]);
+            try testing.expectEqualStrings("partial", elements[3].Partial.key);
+            try testing.expect(elements[3].Partial.indentation == null);
+
+            try testing.expectEqual(Element.StaticText, elements[4]);
+            try testing.expectEqualStrings("\n", elements[4].StaticText);
+        }
+
+        // "\r\n" should be considered a newline for standalone tags.
+        test "Standalone Line Endings" {
+            const template_text = "|\r\n{{>partial}}\r\n|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].Partial.key);
+            try testing.expect(elements[1].Partial.indentation == null);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
+        }
+
+        // Standalone tags should not require a newline to precede them.
+        test "Standalone Without Previous Line" {
+            const template_text = "  {{>partial}}\n>";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.Partial, elements[0]);
+            try testing.expectEqualStrings("partial", elements[0].Partial.key);
+            try testing.expect(elements[0].Partial.indentation != null);
+            try testing.expectEqualStrings("  ", elements[0].Partial.indentation.?);            
+            
+
+            try testing.expectEqual(Element.StaticText, elements[1]);
+            try testing.expectEqualStrings(">", elements[1].StaticText);
+        }
+
+        // Standalone tags should not require a newline to follow them.
+        test "Standalone Without Newline" {
+            const template_text = ">\n  {{>partial}}";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 2), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings(">\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].Partial.key);
+            try testing.expect(elements[1].Partial.indentation != null);
+            try testing.expectEqualStrings("  ", elements[1].Partial.indentation.?);
+        }
+
+        // Each line of the partial should be indented before rendering.
+        test "Standalone Indentation" {
+            const template_text =
+                \\  \
+                \\   {{>partial}}
+                \\  /
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("  \\\n", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].Partial.key);
+            try testing.expect(elements[1].Partial.indentation != null);
+            try testing.expectEqualStrings("   ", elements[1].Partial.indentation.?);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("  /", elements[2].StaticText);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Padding" {
+            const template_text = "|{{> partial }}|";
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].Partial.key);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].StaticText);
         }
     };
 
@@ -1457,11 +1984,11 @@ const tests = struct {
             try testing.expectEqualStrings("inverted", section[5].Section.key);
             try testing.expectEqual(true, section[5].Section.inverted);
 
-            if (section[5].Section.content) |inverted| {
-                try testing.expectEqual(@as(usize, 1), inverted.len);
+            if (section[5].Section.content) |inverted_section| {
+                try testing.expectEqual(@as(usize, 1), inverted_section.len);
 
-                try testing.expectEqual(Element.StaticText, inverted[0]);
-                try testing.expectEqualStrings("Inverted text", inverted[0].StaticText);
+                try testing.expectEqual(Element.StaticText, inverted_section[0]);
+                try testing.expectEqualStrings("Inverted text", inverted_section[0].StaticText);
             } else {
                 try testing.expect(false);
             }

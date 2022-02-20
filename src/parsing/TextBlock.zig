@@ -18,8 +18,9 @@ event: Event,
 tail: ?[]const u8,
 row: u32,
 col: u32,
-right_trimming: Trimming = .PreserveWhitespaces,
 left_trimming: Trimming = .PreserveWhitespaces,
+right_trimming: Trimming = .PreserveWhitespaces,
+indentation: ?[]const u8,
 
 pub fn readBlockType(self: *Self) ?BlockType {
     if (self.tail) |tail| {

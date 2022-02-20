@@ -18,9 +18,8 @@ const Trimmer = parsing.Trimmer;
 const Self = @This();
 
 ///
-/// Mustache allows changing delimiters while processing
+/// Mustache allows changing delimiters while processing the text, by special tags {{=[ ]=}}
 /// Implements a list of runtime-known delimiters to split the text
-/// Custom delimiters can be anything
 ///
 /// Triple-mustache delimiters '{{{' and ''}}}' are fixed
 /// It is not defined by mustache's specs, but some implementations use the current delimiter + '{' or '}' to represent the unescaped tag.
@@ -139,6 +138,9 @@ pub fn next(self: *Self) ?TextBlock {
         }
 
         if (self.matchTagMark()) |mark| {
+
+            
+
             const block = TextBlock{
                 .event = .{ .Mark = mark },
                 .tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null,
@@ -146,7 +148,10 @@ pub fn next(self: *Self) ?TextBlock {
                 .col = self.col,
                 .left_trimming = trimmer.getLeftTrimming(),
                 .right_trimming = trimmer.getRightTrimming(),
+                .indentation = trimmer.getIndentation(),
             };
+
+
 
             increment = @intCast(u32, mark.delimiter.len);
             return block;
@@ -162,6 +167,7 @@ pub fn next(self: *Self) ?TextBlock {
                 .col = self.col,
                 .left_trimming = trimmer.getLeftTrimming(),
                 .right_trimming = trimmer.getRightTrimming(),
+                .indentation = trimmer.getIndentation(),
             };
         }
     }

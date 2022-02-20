@@ -104,6 +104,25 @@ pub fn getRightTrimming(self: Self) Trimming {
     };
 }
 
+pub fn getIndentation(self: Self) ?[]const u8 {
+    const text_scanner = self.text_scanner;
+
+    return switch (self.right_lf) {
+        .Waiting => blk: {
+            if (self.left_lf == .Scanning) {
+                break :blk if (text_scanner.index > text_scanner.block_index) text_scanner.content[text_scanner.block_index..text_scanner.index] else null;
+            } else {
+                break :blk null;
+            }
+        },
+        .Found => |index| blk: {
+            const trim_index = text_scanner.block_index + index + 1;
+            break :blk if (trim_index < text_scanner.index) text_scanner.content[trim_index..text_scanner.index] else null;
+        },
+        .NotFound => null,
+    };
+}
+
 test "Line breaks" {
 
     //                                     2      7
@@ -164,7 +183,7 @@ test "Multiple line breaks" {
     try testing.expectEqual(@as(usize, 11), block.?.right_trimming.AllowTrimming.index);
 
     block.?.trimLeft();
-    try testing.expectEqual(Trimming.Trimmed, block.?.left_trimming); 
+    try testing.expectEqual(Trimming.Trimmed, block.?.left_trimming);
     try testing.expectEqualStrings("ABC\nABC\n  ", block.?.tail.?);
 
     block.?.trimRight();
