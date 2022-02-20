@@ -1,9 +1,11 @@
 const std = @import("std");
 
-pub const TextScanner = @import("TextScanner.zig");
-pub const TextBlock = @import("TextBlock.zig");
 pub const Level = @import("Level.zig");
 pub const Node = @import("Node.zig");
+pub const Parser = @import("Parser.zig");
+pub const TextBlock = @import("TextBlock.zig");
+pub const TextScanner = @import("TextScanner.zig");
+pub const Trimmer = @import("Trimmer.zig");
 
 pub const Delimiters = struct {
     pub const DefaultStartingDelimiter = "{{";

@@ -9,9 +9,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
 
-const scanner = @import("scanner.zig");
-const TextScanner = scanner.TextScanner;
-const Trimming = scanner.Trimming;
+const parsing = @import("parsing.zig");
+const TextScanner = parsing.TextScanner;
+const Trimming = parsing.Trimming;
 
 const Self = @This();
 

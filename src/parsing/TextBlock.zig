@@ -2,15 +2,15 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const scanner = @import("scanner.zig");
-const tokens = scanner.tokens;
-const Event = scanner.Event;
-const BlockType = scanner.BlockType;
-const Mark = scanner.Mark;
-const MarkType = scanner.MarkType;
-const DelimiterType = scanner.DelimiterType;
-const Delimiters = scanner.Delimiters;
-const Trimming = scanner.Trimming;
+const parsing = @import("parsing.zig");
+const tokens = parsing.tokens;
+const Event = parsing.Event;
+const BlockType = parsing.BlockType;
+const Mark = parsing.Mark;
+const MarkType = parsing.MarkType;
+const DelimiterType = parsing.DelimiterType;
+const Delimiters = parsing.Delimiters;
+const Trimming = parsing.Trimming;
 
 const Self = @This();
 

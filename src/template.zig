@@ -5,10 +5,10 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const mustache = @import("mustache.zig");
-const Delimiters = mustache.Delimiters;
+const parsing = @import("parsing/parsing.zig");
+const Parser = parsing.Parser;
 
-const Parser = @import("parser/Parser.zig");
+pub const Delimiters = parsing.Delimiters;
 
 pub const ParseErrors = error{
     StartingDelimiterMismatch,

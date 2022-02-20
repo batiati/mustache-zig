@@ -3,17 +3,17 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const scanner = @import("scanner.zig");
-const Event = scanner.Event;
-const Mark = scanner.Mark;
-const MarkType = scanner.MarkType;
-const DelimiterType = scanner.DelimiterType;
-const Delimiters = scanner.Delimiters;
-const TextBlock = scanner.TextBlock;
-const Trimmer = @import("Trimmer.zig");
-
 const mustache = @import("../mustache.zig");
 const ParseErrors = mustache.template.ParseErrors;
+
+const parsing = @import("parsing.zig");
+const Event = parsing.Event;
+const Mark = parsing.Mark;
+const MarkType = parsing.MarkType;
+const DelimiterType = parsing.DelimiterType;
+const Delimiters = parsing.Delimiters;
+const TextBlock = parsing.TextBlock;
+const Trimmer = parsing.Trimmer;
 
 const Self = @This();
 

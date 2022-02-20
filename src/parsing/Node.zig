@@ -1,8 +1,8 @@
 const std = @import("std");
 
-const scanner = @import("scanner.zig");
-const TextBlock = scanner.TextBlock;
-const BlockType = scanner.BlockType;
+const parsing = @import("parsing.zig");
+const TextBlock = parsing.TextBlock;
+const BlockType = parsing.BlockType;
 
 const assert = std.debug.assert;
 const testing = std.testing;

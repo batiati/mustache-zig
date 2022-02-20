@@ -3,8 +3,7 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 const mustache = @import("../mustache.zig");
-const Delimiters = mustache.Delimiters;
-const TemplateOptions = mustache.TemplateOptions;
+const Delimiters = mustache.template.Delimiters;
 
 const Template = mustache.template.Template;
 const Element = mustache.template.Element;
@@ -18,14 +17,14 @@ const LastError = mustache.template.LastError;
 const ParseErrors = mustache.template.ParseErrors;
 const Errors = ParseErrors || Allocator.Error;
 
-const scanner = @import("scanner.zig");
-const TextScanner = scanner.TextScanner;
-const tokens = scanner.tokens;
-const TextBlock = scanner.TextBlock;
-const BlockType = scanner.BlockType;
-const Mark = scanner.Mark;
-const Level = scanner.Level;
-const Node = scanner.Node;
+const parsing = @import("parsing.zig");
+const TextScanner = parsing.TextScanner;
+const tokens = parsing.tokens;
+const TextBlock = parsing.TextBlock;
+const BlockType = parsing.BlockType;
+const Mark = parsing.Mark;
+const Level = parsing.Level;
+const Node = parsing.Node;
 
 const assert = std.debug.assert;
 const testing = std.testing;
