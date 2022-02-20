@@ -2,6 +2,8 @@ const std = @import("std");
 
 pub const TextScanner = @import("TextScanner.zig");
 pub const TextBlock = @import("TextBlock.zig");
+pub const Level = @import("Level.zig");
+pub const Node = @import("Node.zig");
 
 pub const Delimiters = struct {
     pub const DefaultStartingDelimiter = "{{";
@@ -38,7 +40,7 @@ pub const BlockType = enum {
     Parent,
     Block,
 
-    pub fn canBeStandAlone(self: BlockType) bool {
+    pub inline fn canBeStandAlone(self: BlockType) bool {
         return switch (self) {
             .StaticText,
             .Interpolation,
@@ -79,6 +81,12 @@ pub const Mark = struct {
 pub const Event = union(enum) {
     Mark: Mark,
     Eof,
+};
+
+pub const Trimming = union(enum) {
+    PreserveWhitespaces,
+    AllowTrimming: usize,
+    Trimmed,
 };
 
 test {

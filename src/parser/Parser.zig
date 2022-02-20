@@ -24,6 +24,8 @@ const tokens = scanner.tokens;
 const TextBlock = scanner.TextBlock;
 const BlockType = scanner.BlockType;
 const Mark = scanner.Mark;
+const Level = scanner.Level;
+const Node = scanner.Node;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -31,171 +33,6 @@ const testing = std.testing;
 const State = enum {
     WaitingStaringTag,
     WaitingEndingTag,
-};
-
-const Level = struct {
-    parent: ?*Level,
-    delimiters: Delimiters,
-    current_node: ?*Node,
-    list: std.ArrayListUnmanaged(*Node) = .{},
-
-    pub fn init(arena: Allocator, delimiters: Delimiters) Allocator.Error!*Level {
-        var self = try arena.create(Level);
-        self.* = .{
-            .parent = null,
-            .delimiters = delimiters,
-            .current_node = null,
-        };
-
-        return self;
-    }
-
-    pub fn addNode(self: *Level, arena: Allocator, block_type: BlockType, text_block: *const TextBlock) Allocator.Error!*Node {
-        var node = try arena.create(Node);
-        node.* = .{
-            .block_type = block_type,
-            .text_block = text_block.*,
-            .prev_node = self.current_node,
-        };
-
-        try self.list.append(arena, node);
-        self.current_node = node;
-
-        return node;
-    }
-
-    pub fn nextLevel(self: *Level, arena: Allocator) Allocator.Error!*Level {
-        var next_level = try arena.create(Level);
-
-        next_level.* = .{
-            .parent = self,
-            .delimiters = self.delimiters,
-            .current_node = self.current_node,
-        };
-
-        return next_level;
-    }
-
-    fn endLevel(self: *Level, arena: Allocator) ParseErrors!*Level {
-        var prev_level = self.parent orelse return ParseErrors.UnexpectedCloseSection;
-        var parent_node = prev_level.current_node orelse return ParseErrors.UnexpectedCloseSection;
-
-        parent_node.children = self.list.toOwnedSlice(arena);
-
-        prev_level.current_node = self.current_node;
-        return prev_level;
-    }
-
-    pub fn peekNode(self: *const Level) ?*Node {
-        var level: ?*const Level = self;
-
-        while (level) |current_level| {
-            const items = current_level.list.items;
-            if (items.len == 0) {
-                level = current_level.parent;
-            } else {
-                return items[items.len - 1];
-            }
-        }
-
-        return null;
-    }
-};
-
-pub const Node = struct {
-    block_type: BlockType,
-    text_block: TextBlock,
-    prev_node: ?*Node = null,
-    children: ?[]const *Node = null,
-
-    pub fn trimStandAlone(self: *Node) void {
-
-        // Lines containing tags without any static text or interpolation
-        // must be fully removed from the rendered result
-        //
-        // Examples:
-        //
-        // 1. TRIM LEFT stand alone tags
-        //
-        //                                            ┌ any white space after the tag must be TRIMMED,
-        //                                            ↓ including the EOL
-        // var template_text = \\{{! Comments block }}
-        //                     \\Hello World
-        //
-        // 2. TRIM RIGHT stand alone tags
-        //
-        //                            ┌ any white space before the tag must be trimmed,
-        //                            ↓
-        // var template_text = \\      {{! Comments block }}
-        //                     \\Hello World
-        //
-        // 3. PRESERVE interpolation tags
-        //
-        //                                     ┌ all white space and the line break after that must be PRESERVED,
-        //                                     ↓
-        // var template_text = \\      {{Name}}
-        //                     \\      {{Address}}
-        //                            ↑
-        //                            └ all white space before that must be PRESERVED,
-
-        //     ┌ #0 No trim, can be stand-alone
-        //     ↓
-        // |  \n{{#boolean}}\n#{{/boolean}}\n/
-
-        //     ┌ #1 Trim right
-        //     |           ┌ #1 Can be stand-alone
-        //     ↓           ↓
-        // |  \n{{#boolean}}\n#{{/boolean}}\n/
-
-        //                 ┌ #2 Trim left
-        //                 |  ┌ #2 Can be stand-alone
-        //                 ↓  ↓
-        // |  \n{{#boolean}}\n#{{/boolean}}\n/
-
-        //                    ┌ #3 Trim right
-        //                    |          ┌ #3 Can't be stand-alone
-        //                    ↓          ↓
-        // |  \n{{#boolean}}\n#{{/boolean}}\n/
-
-        //                               ┌ #4 No trim
-        //                               |  ┌ #4 Can't be stand-alone
-        //                               ↓  ↓
-        // |  {{#boolean}}\n#{{/boolean}}\n/
-
-        if (self.block_type == .StaticText) {
-            if (self.prev_node) |prev_node| {
-
-                std.log.err("hey, trimming static text: \"{s}\"", .{ self.text_block.tail.? });
-                if (trimRight(prev_node)) {
-                    _ = self.text_block.trimLeft();
-                    std.log.err("trimmed text: \"{s}\"", .{ if (self.text_block.tail) |tail| tail else "NULL" });
-                } else {
-                    std.log.err("trim right false :-(", .{ });
-                }
-            }
-        }
-    }    
-
-    fn trimRight(parent_node: ?*Node) bool {
-        if (parent_node) |node| {
-            std.log.err("trim right a node ... ", .{});
-            if (node.block_type == .StaticText) {
-                std.log.err("trim right a node \"{s}\"... ", .{ if (node.text_block.tail) |tail| tail else "NULL" });
-                const ret = node.text_block.trimRight();
-                std.log.err("trim right {} value \"{s}\" ... ", .{ ret, if (node.text_block.tail) |tail| tail else "NULL"});
-                return ret;
-
-            } else if (node.block_type.canBeStandAlone()) {
-                std.log.err("trim right a \"{}\"... ", .{ node.block_type } );
-                return trimRight(node.prev_node);
-            } else {
-                return false;
-            }
-        } else {
-            std.log.err("trim right root true ... ", .{});
-            return true;
-        }
-    }    
 };
 
 const Self = @This();
@@ -233,11 +70,11 @@ pub fn parse(self: *Self) Allocator.Error!Template {
 
 fn fromError(self: *Self, err: Errors) Allocator.Error!Template {
     switch (err) {
-        Allocator.Error.OutOfMemory => |alloc| return alloc,
-        else => return Template{
+        Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
+        else => |parse_err| return Template{
             .allocator = self.gpa,
             .result = .{
-                .Error = self.last_error orelse .{ .error_code = err },
+                .Error = self.last_error orelse .{ .error_code = parse_err },
             },
         },
     }
@@ -252,6 +89,10 @@ fn createElements(self: *Self, nodes: []const *Node) Errors![]const Element {
             switch (node.block_type) {
                 .StaticText => {
                     if (node.text_block.tail) |content| {
+
+                        //Empty strings are represented as NULL slices
+                        assert(content.len > 0);
+
                         break :blk Element{
                             .StaticText = try self.gpa.dupe(u8, content),
                         };
@@ -428,6 +269,8 @@ fn parseTree(self: *Self) Errors![]const *Node {
         return self.setLastError(err, null, null);
     };
 
+    var static_text_block: ?*Node = null;
+
     while (text_scanner.next()) |*text_block| {
         var block_type = (try self.matchBlockType(text_block)) orelse continue;
 
@@ -460,11 +303,17 @@ fn parseTree(self: *Self) Errors![]const *Node {
         }
 
         // Adding,
-        var node = try self.current_level.addNode(self.arena, block_type, text_block);
-        node.trimStandAlone();
-        
+        try self.current_level.addNode(self.arena, block_type, text_block.*);
+
         // After adding
         switch (block_type) {
+            .StaticText => {
+                static_text_block = self.current_level.current_node;
+                assert(static_text_block != null);
+
+                static_text_block.?.trimStandAlone();
+            },
+
             .Section,
             .InvertedSection,
             .Parent,
@@ -490,6 +339,12 @@ fn parseTree(self: *Self) Errors![]const *Node {
 
     if (self.current_level != self.root) {
         return self.setLastError(ParseErrors.UnexpectedEof, null, null);
+    }
+
+    if (static_text_block) |static_text| {
+        if (self.current_level.current_node) |last_node| {
+            static_text.trimLast(last_node);
+        }
     }
 
     return self.root.list.toOwnedSlice(self.arena);
@@ -555,7 +410,7 @@ test "Basic parse" {
             try testing.expectEqual(BlockType.InvertedSection, section[5].block_type);
 
             try testing.expectEqual(BlockType.StaticText, section[6].block_type);
-            try testing.expect(section[6].text_block.tail == null);
+            try testing.expectEqualStrings("\n", section[6].text_block.tail.?);
 
             try testing.expectEqual(BlockType.CloseSection, section[7].block_type);
         } else {

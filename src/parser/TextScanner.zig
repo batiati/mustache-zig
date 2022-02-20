@@ -144,24 +144,26 @@ pub fn next(self: *Self) ?TextBlock {
                 .tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null,
                 .row = self.row,
                 .col = self.col,
-                .trim_left_index = trimmer.getLeftIndex(),
-                .trim_right_index = trimmer.getRightIndex(),
+                .left_trimming = trimmer.getLeftTrimming(),
+                .right_trimming = trimmer.getRightTrimming(),
             };
 
             increment = @intCast(u32, mark.delimiter.len);
             return block;
-        } else if (self.index == self.content.len - 1) {
+        }
+
+        trimmer.move();
+
+        if (self.index == self.content.len - 1) {
             return TextBlock{
                 .event = .Eof,
                 .tail = self.content[self.block_index..],
                 .row = self.row,
                 .col = self.col,
-                .trim_left_index = trimmer.getLeftIndex(),
-                .trim_right_index = trimmer.getRightIndex(),
+                .left_trimming = trimmer.getLeftTrimming(),
+                .right_trimming = trimmer.getRightTrimming(),
             };
         }
-
-        trimmer.move();
     }
 
     return null;

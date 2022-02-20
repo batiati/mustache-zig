@@ -376,10 +376,6 @@ const tests = struct {
         test "Standalone Line Endings" {
             const template_text = "|\r\n{{! Standalone Comment }}\r\n|";
 
-            //const utf_16 = std.unicode.utf8ToUtf16LeStringLiteral(template_text);
-            //onst new_text = @ptrCast([*]const u8, utf_16[0..])[0..utf_16.len * 2];
-            //std.log.warn("{s}", .{ new_text });
-
             var template = try getTemplate(template_text);
             defer template.deinit();
 
@@ -1438,7 +1434,7 @@ const tests = struct {
         try testing.expectEqual(Element.Section, elements[1]);
         try testing.expectEqualStrings("section", elements[1].Section.key);
         if (elements[1].Section.content) |section| {
-            try testing.expectEqual(@as(usize, 6), section.len);
+            try testing.expectEqual(@as(usize, 7), section.len);
 
             try testing.expectEqual(Element.StaticText, section[0]);
             try testing.expectEqualStrings("Name: ", section[0].StaticText);
@@ -1460,6 +1456,7 @@ const tests = struct {
             try testing.expectEqual(Element.Section, section[5]);
             try testing.expectEqualStrings("inverted", section[5].Section.key);
             try testing.expectEqual(true, section[5].Section.inverted);
+
             if (section[5].Section.content) |inverted| {
                 try testing.expectEqual(@as(usize, 1), inverted.len);
 
@@ -1468,6 +1465,9 @@ const tests = struct {
             } else {
                 try testing.expect(false);
             }
+
+            try testing.expectEqual(Element.StaticText, section[6]);
+            try testing.expectEqualStrings("\n", section[6].StaticText);
         } else {
             try testing.expect(false);
         }

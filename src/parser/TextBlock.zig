@@ -10,6 +10,7 @@ const Mark = scanner.Mark;
 const MarkType = scanner.MarkType;
 const DelimiterType = scanner.DelimiterType;
 const Delimiters = scanner.Delimiters;
+const Trimming = scanner.Trimming;
 
 const Self = @This();
 
@@ -17,8 +18,8 @@ event: Event,
 tail: ?[]const u8,
 row: u32,
 col: u32,
-trim_right_index: ?usize = null,
-trim_left_index: ?usize = null,
+right_trimming: Trimming = .PreserveWhitespaces,
+left_trimming: Trimming = .PreserveWhitespaces,
 
 pub fn readBlockType(self: *Self) ?BlockType {
     if (self.tail) |tail| {
@@ -45,45 +46,58 @@ pub fn readBlockType(self: *Self) ?BlockType {
 }
 
 pub fn trimRight(self: *Self) bool {
+    switch (self.right_trimming) {
+        .PreserveWhitespaces => return false,
+        .Trimmed => return true,
+        .AllowTrimming => |trim_right_index| {
+            if (self.tail) |tail| {
+                if (trim_right_index == 0) {
+                    self.tail = null;
+                } else if (trim_right_index < tail.len) {
+                    self.tail = tail[0..trim_right_index];
+                }
+            }
 
-    if (self.trim_right_index) |trim_right_index| {
-        if (self.tail) |tail| {
-
-            self.tail = if (trim_right_index > 0) tail[0..trim_right_index] else null;
-            self.trim_right_index = null;
+            self.right_trimming = .Trimmed;
             return true;
-        }
-    } 
-    
-    return false;
+        },
+    }
 }
 
 pub fn trimLeft(self: *Self) bool {
+    switch (self.left_trimming) {
+        .PreserveWhitespaces => return false,
+        .Trimmed => return true,
+        .AllowTrimming => |trim_left_index| {
+            if (self.tail) |tail| {
+                switch (self.right_trimming) {
+                    .AllowTrimming => |trim_right_index| {
 
-    if (self.trim_left_index) |trim_left_index| {
-        if (self.tail) |tail| {
+                        // Update the right index after trimming left
+                        // BEFORE:
+                        //                 2      7
+                        //                 ↓      ↓
+                        //const value = "  \nABC\n  "
+                        //
+                        // AFTER:
+                        //                    4
+                        //                    ↓
+                        //const value = "ABC\n  "
+                        self.right_trimming = .{ .AllowTrimming = trim_right_index - trim_left_index - 1 };
+                    },
 
-            if (self.trim_right_index) |trim_right_index| {
+                    else => {},
+                }
 
-                // Update the right index after trimming left
-                // BEFORE:
-                //                 2      7
-                //                 ↓      ↓
-                //const value = "  \nABC\n  "
-                //
-                // AFTER:
-                //                    4
-                //                    ↓
-                //const value = "ABC\n  "                
-                self.trim_right_index = trim_right_index - trim_left_index - 1;
-
+                if (trim_left_index >= tail.len - 1) {
+                    self.tail = null;
+                } else {
+                    self.tail = tail[trim_left_index + 1 ..];
+                }
             }
 
-            self.tail = if (trim_left_index < tail.len -1) tail[trim_left_index + 1..] else null;
-            self.trim_left_index = null;
+            self.left_trimming = .Trimmed;
             return true;
-        }
-    } 
-    
-    return false;
+        },
+    }
 }
