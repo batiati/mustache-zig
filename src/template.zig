@@ -1244,7 +1244,7 @@ const tests = struct {
             }
 
             try testing.expectEqual(Element.StaticText, elements[4]);
-            try testing.expectEqualStrings("\n ", elements[4].StaticText);
+            try testing.expectEqualStrings("\n", elements[4].StaticText);
         }
 
         // Standalone lines should be removed from the template.

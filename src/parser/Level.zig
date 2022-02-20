@@ -4,7 +4,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const mustache = @import("../mustache.zig");
 const Delimiters = mustache.Delimiters;
-const ParseErrors =  mustache.template.ParseErrors;
+const ParseErrors = mustache.template.ParseErrors;
 
 const scanner = @import("scanner.zig");
 const BlockType = scanner.BlockType;

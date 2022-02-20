@@ -15,39 +15,20 @@ prev_node: ?*Self = null,
 children: ?[]const *Self = null,
 
 pub fn trimStandAlone(self: *Self) void {
-
-    // Lines containing tags without any static text or interpolation
-    // must be fully removed from the rendered result
-    //
-    // Examples:
-    //
-    // 1. TRIM LEFT stand alone tags
-    //
-    //                                            ┌ any white space after the tag must be TRIMMED,
-    //                                            ↓ including the EOL
-    // var template_text = \\{{! Comments block }}
-    //                     \\Hello World
-    //
-    // 2. TRIM RIGHT stand alone tags
-    //
-    //                            ┌ any white space before the tag must be trimmed,
-    //                            ↓
-    // var template_text = \\      {{! Comments block }}
-    //                     \\Hello World
-    //
-    // 3. PRESERVE interpolation tags
-    //
-    //                                     ┌ all white space and the line break after that must be PRESERVED,
-    //                                     ↓
-    // var template_text = \\      {{Name}}
-    //                     \\      {{Address}}
-    //                            ↑
-    //                            └ all white space before that must be PRESERVED,
-
     if (self.block_type == .StaticText) {
         if (self.prev_node) |prev_node| {
-            if (trimRight(prev_node)) {
-                _ = self.text_block.trimLeft();
+            switch (self.text_block.left_trimming) {
+                .PreserveWhitespaces => {},
+                .Trimmed => assert(false),
+                .AllowTrimming => {
+                    const can_trim = trimPreviousNodesRight(prev_node);
+
+                    if (can_trim) {
+                        self.text_block.trimLeft();
+                    } else {
+                        self.text_block.left_trimming = .PreserveWhitespaces;
+                    }
+                },
             }
         }
     }
@@ -69,23 +50,38 @@ pub fn trimLast(self: *Self, last_node: *Self) void {
             }
         }
 
-        _ = node.text_block.trimRight();
+        node.text_block.trimRight();
     }
 }
 
-fn trimRight(parent_node: ?*Self) bool {
+fn trimPreviousNodesRight(parent_node: ?*Self) bool {
     if (parent_node) |node| {
         if (node.block_type == .StaticText) {
-            return node.text_block.trimRight();
+            switch (node.text_block.right_trimming) {
+                .AllowTrimming => |trimming| {
+
+                    // Non standalone tags must check the previous node
+                    const can_trim = trimming.stand_alone or trimPreviousNodesRight(node.prev_node);
+                    if (can_trim) {
+                        node.text_block.trimRight();
+                        return true;
+                    } else {
+                        node.text_block.right_trimming = .PreserveWhitespaces;
+                        return false;
+                    }
+                },
+                .Trimmed => return true,
+                .PreserveWhitespaces => return false,
+            }
         } else if (node.block_type.canBeStandAlone()) {
             // Depends on the previous node
-            return trimRight(node.prev_node);
+            return trimPreviousNodesRight(node.prev_node);
         } else {
             // Interpolation tags must preserve whitespaces
             return false;
         }
     } else {
-        // No parent node, the first node can trim Right
+        // No parent node, the first node can always be considered stand-alone
         return true;
     }
 }

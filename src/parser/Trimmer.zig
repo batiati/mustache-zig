@@ -67,7 +67,12 @@ pub fn move(self: *Self) void {
 pub fn getLeftTrimming(self: Self) Trimming {
     return switch (self.left_lf) {
         .Scanning, .NotFound => .PreserveWhitespaces,
-        .Found => |index| .{ .AllowTrimming = index },
+        .Found => |index| .{
+            .AllowTrimming = .{
+                .index = index,
+                .stand_alone = true,
+            },
+        },
     };
 }
 
@@ -77,11 +82,25 @@ pub fn getRightTrimming(self: Self) Trimming {
 
             // If there are only whitespaces, it can be trimmed right
             // It depends on the previous text block to be an standalone tag
-            break :blk if (self.left_lf == .Scanning) Trimming{ .AllowTrimming = self.text_scanner.block_index } else .PreserveWhitespaces;
+            if (self.left_lf == .Scanning) {
+                break :blk Trimming{
+                    .AllowTrimming = .{
+                        .index = self.text_scanner.block_index,
+                        .stand_alone = false,
+                    },
+                };
+            } else {
+                break :blk .PreserveWhitespaces;
+            }
         },
 
         .NotFound => .PreserveWhitespaces,
-        .Found => |index| .{ .AllowTrimming = index + 1 },
+        .Found => |index| .{
+            .AllowTrimming = .{
+                .index = index + 1,
+                .stand_alone = true,
+            },
+        },
     };
 }
 
@@ -98,11 +117,11 @@ test "Line breaks" {
 
     // Trim all white-spaces, including the first line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming.index);
 
     // Trim all white-spaces, after the last line break
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 7), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 7), block.?.right_trimming.AllowTrimming.index);
 }
 
 test "Line breaks \\r\\n" {
@@ -118,11 +137,11 @@ test "Line breaks \\r\\n" {
 
     // Trim all white-spaces, including the first line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming.index);
 
     // Trim all white-spaces, after the last line break
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 9), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 9), block.?.right_trimming.AllowTrimming.index);
 }
 
 test "Multiple line breaks" {
@@ -138,16 +157,18 @@ test "Multiple line breaks" {
 
     // Trim all white-spaces, including the first line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming.index);
 
     // Trim all white-spaces, after the last line break
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 11), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 11), block.?.right_trimming.AllowTrimming.index);
 
-    try testing.expectEqual(true, block.?.trimLeft());
+    block.?.trimLeft();
+    try testing.expectEqual(Trimming.Trimmed, block.?.left_trimming); 
     try testing.expectEqualStrings("ABC\nABC\n  ", block.?.tail.?);
 
-    try testing.expectEqual(true, block.?.trimRight());
+    block.?.trimRight();
+    try testing.expectEqual(Trimming.Trimmed, block.?.right_trimming);
     try testing.expectEqualStrings("ABC\nABC\n", block.?.tail.?);
 }
 
@@ -164,16 +185,18 @@ test "Multiple line breaks \\r\\n" {
 
     // Trim all white-spaces, including the first line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming.index);
 
     // Trim all white-spaces, after the last line break
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 14), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 14), block.?.right_trimming.AllowTrimming.index);
 
-    try testing.expectEqual(true, block.?.trimLeft());
+    block.?.trimLeft();
+    try testing.expectEqual(Trimming.Trimmed, block.?.left_trimming);
     try testing.expectEqualStrings("ABC\r\nABC\r\n  ", block.?.tail.?);
 
-    try testing.expectEqual(true, block.?.trimRight());
+    block.?.trimRight();
+    try testing.expectEqual(Trimming.Trimmed, block.?.right_trimming);
     try testing.expectEqualStrings("ABC\r\nABC\r\n", block.?.tail.?);
 }
 
@@ -190,16 +213,18 @@ test "Whitespace text trimming" {
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming.index);
 
     // Trim all white-spaces, after the line break
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 3), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 3), block.?.right_trimming.AllowTrimming.index);
 
-    try testing.expectEqual(true, block.?.trimLeft());
+    block.?.trimLeft();
+    try testing.expectEqual(Trimming.Trimmed, block.?.left_trimming);
     try testing.expectEqualStrings("  ", block.?.tail.?);
 
-    try testing.expectEqual(true, block.?.trimRight());
+    block.?.trimRight();
+    try testing.expectEqual(Trimming.Trimmed, block.?.right_trimming);
     try testing.expect(block.?.tail == null);
 }
 
@@ -216,11 +241,12 @@ test "Whitespace text trimming \\r\\n" {
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming.index);
 
     // Trim all white-spaces, after the line break
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 4), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 4), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "resolve" { // Tabs text trimming" {
@@ -236,11 +262,12 @@ test "resolve" { // Tabs text trimming" {
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming.index);
 
     // Trim all white-spaces, after the line break
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 3), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 3), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Whitespace left trimming" {
@@ -256,10 +283,12 @@ test "Whitespace left trimming" {
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming.index);
 
     // Nothing to trim right (index == len)
-    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming);
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Whitespace left trimming \\r\\n" {
@@ -275,10 +304,12 @@ test "Whitespace left trimming \\r\\n" {
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming.index);
 
     // Nothing to trim right (index == len)
-    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming);
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Tabs left trimming" {
@@ -294,10 +325,12 @@ test "Tabs left trimming" {
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 2), block.?.left_trimming.AllowTrimming.index);
 
     // Nothing to trim right (index == len)
-    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming);
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Whitespace right trimming" {
@@ -313,11 +346,12 @@ test "Whitespace right trimming" {
 
     // line break belongs to the left side
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 0), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 0), block.?.left_trimming.AllowTrimming.index);
 
     // only white-spaces on the right side
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 1), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 1), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Whitespace right trimming \\r\\n" {
@@ -333,11 +367,12 @@ test "Whitespace right trimming \\r\\n" {
 
     // line break belongs to the left side
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 1), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 1), block.?.left_trimming.AllowTrimming.index);
 
     // only white-spaces on the right side
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 2), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 2), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Tabs right trimming" {
@@ -353,11 +388,12 @@ test "Tabs right trimming" {
 
     // line break belongs to the left side
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 0), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 0), block.?.left_trimming.AllowTrimming.index);
 
     // only white-spaces on the right side
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 1), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 1), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Single line break" {
@@ -373,10 +409,12 @@ test "Single line break" {
 
     // Trim the line-break
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 0), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 0), block.?.left_trimming.AllowTrimming.index);
 
     // Nothing to trim right (index == len)
-    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming);
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Single line break \\r\\n" {
@@ -391,10 +429,12 @@ test "Single line break \\r\\n" {
     try testing.expectEqualStrings("\r\n", block.?.tail.?);
 
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 1), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 1), block.?.left_trimming.AllowTrimming.index);
 
     // Nothing to trim right (index == len)
-    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming);
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "No trimming" {
@@ -428,7 +468,9 @@ test "No trimming, no whitespace" {
     try testing.expect(block.?.left_trimming == .PreserveWhitespaces);
 
     // Nothing to trim right (index == len)
-    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming);
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "No trimming, no whitespace \\r\\n" {
@@ -446,7 +488,9 @@ test "No trimming, no whitespace \\r\\n" {
     try testing.expect(block.?.left_trimming == .PreserveWhitespaces);
 
     // Nothing to trim right (index == len)
-    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming);
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(block.?.tail.?.len, block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "No trimming \\r\\n" {
@@ -493,7 +537,7 @@ test "Trimming left only" {
     try testing.expectEqualStrings("   \nABC   ", block.?.tail.?);
 
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 3), block.?.left_trimming.AllowTrimming.index);
 
     // No trimming right
     try testing.expect(block.?.right_trimming == .PreserveWhitespaces);
@@ -511,7 +555,7 @@ test "Trimming left only \\r\\n" {
     try testing.expectEqualStrings("   \r\nABC   ", block.?.tail.?);
 
     try testing.expect(block.?.left_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 4), block.?.left_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 4), block.?.left_trimming.AllowTrimming.index);
 
     // No trimming tight
     try testing.expect(block.?.right_trimming == .PreserveWhitespaces);
@@ -532,7 +576,8 @@ test "Trimming right only" {
     try testing.expect(block.?.left_trimming == .PreserveWhitespaces);
 
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 7), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 7), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Trimming right only \\r\\n" {
@@ -550,7 +595,8 @@ test "Trimming right only \\r\\n" {
     try testing.expect(block.?.left_trimming == .PreserveWhitespaces);
 
     try testing.expect(block.?.right_trimming == .AllowTrimming);
-    try testing.expectEqual(@as(usize, 8), block.?.right_trimming.AllowTrimming);
+    try testing.expectEqual(@as(usize, 8), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
 test "Only whitespace" {
@@ -568,5 +614,27 @@ test "Only whitespace" {
     try testing.expect(block.?.left_trimming == .PreserveWhitespaces);
 
     // Trim right from the begin can be allowed if the tag is stand-alone
-    try testing.expectEqual(@as(usize, 0), block.?.right_trimming.AllowTrimming);
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(@as(usize, 0), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(false, block.?.right_trimming.AllowTrimming.stand_alone);
+}
+
+test "Only tabs" {
+
+    //                                   0
+    //                                   ↓
+    var text_scanner = TextScanner.init("\t\t\t");
+
+    var block = text_scanner.next();
+    try testing.expect(block != null);
+    try testing.expect(block.?.tail != null);
+    try testing.expectEqualStrings("\t\t\t", block.?.tail.?);
+
+    // No trimming left
+    try testing.expect(block.?.left_trimming == .PreserveWhitespaces);
+
+    // Trim right from the begin can be allowed if the tag is stand-alone
+    try testing.expect(block.?.right_trimming == .AllowTrimming);
+    try testing.expectEqual(@as(usize, 0), block.?.right_trimming.AllowTrimming.index);
+    try testing.expectEqual(false, block.?.right_trimming.AllowTrimming.stand_alone);
 }

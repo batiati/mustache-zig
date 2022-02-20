@@ -45,33 +45,30 @@ pub fn readBlockType(self: *Self) ?BlockType {
     return null;
 }
 
-pub fn trimRight(self: *Self) bool {
+pub fn trimRight(self: *Self) void {
     switch (self.right_trimming) {
-        .PreserveWhitespaces => return false,
-        .Trimmed => return true,
-        .AllowTrimming => |trim_right_index| {
+        .PreserveWhitespaces, .Trimmed => {},
+        .AllowTrimming => |right_trimming| {
             if (self.tail) |tail| {
-                if (trim_right_index == 0) {
+                if (right_trimming.index == 0) {
                     self.tail = null;
-                } else if (trim_right_index < tail.len) {
-                    self.tail = tail[0..trim_right_index];
+                } else if (right_trimming.index < tail.len) {
+                    self.tail = tail[0..right_trimming.index];
                 }
             }
 
             self.right_trimming = .Trimmed;
-            return true;
         },
     }
 }
 
-pub fn trimLeft(self: *Self) bool {
+pub fn trimLeft(self: *Self) void {
     switch (self.left_trimming) {
-        .PreserveWhitespaces => return false,
-        .Trimmed => return true,
-        .AllowTrimming => |trim_left_index| {
+        .PreserveWhitespaces, .Trimmed => {},
+        .AllowTrimming => |left_trimming| {
             if (self.tail) |tail| {
                 switch (self.right_trimming) {
-                    .AllowTrimming => |trim_right_index| {
+                    .AllowTrimming => |right_trimming| {
 
                         // Update the right index after trimming left
                         // BEFORE:
@@ -83,21 +80,25 @@ pub fn trimLeft(self: *Self) bool {
                         //                    4
                         //                    ↓
                         //const value = "ABC\n  "
-                        self.right_trimming = .{ .AllowTrimming = trim_right_index - trim_left_index - 1 };
+                        self.right_trimming = .{
+                            .AllowTrimming = .{
+                                .index = right_trimming.index - left_trimming.index - 1,
+                                .stand_alone = right_trimming.stand_alone,
+                            },
+                        };
                     },
 
                     else => {},
                 }
 
-                if (trim_left_index >= tail.len - 1) {
+                if (left_trimming.index >= tail.len - 1) {
                     self.tail = null;
                 } else {
-                    self.tail = tail[trim_left_index + 1 ..];
+                    self.tail = tail[left_trimming.index + 1 ..];
                 }
             }
 
             self.left_trimming = .Trimmed;
-            return true;
         },
     }
 }
