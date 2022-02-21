@@ -138,20 +138,14 @@ pub fn next(self: *Self) ?TextBlock {
         }
 
         if (self.matchTagMark()) |mark| {
-
-            
-
             const block = TextBlock{
                 .event = .{ .Mark = mark },
                 .tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null,
                 .row = self.row,
                 .col = self.col,
-                .left_trimming = trimmer.getLeftTrimming(),
-                .right_trimming = trimmer.getRightTrimming(),
-                .indentation = trimmer.getIndentation(),
+                .left_trimming = trimmer.getLeftTrimmingIndex(),
+                .right_trimming = trimmer.getRightTrimmingIndex(),
             };
-
-
 
             increment = @intCast(u32, mark.delimiter.len);
             return block;
@@ -165,9 +159,8 @@ pub fn next(self: *Self) ?TextBlock {
                 .tail = self.content[self.block_index..],
                 .row = self.row,
                 .col = self.col,
-                .left_trimming = trimmer.getLeftTrimming(),
-                .right_trimming = trimmer.getRightTrimming(),
-                .indentation = trimmer.getIndentation(),
+                .left_trimming = trimmer.getLeftTrimmingIndex(),
+                .right_trimming = trimmer.getRightTrimmingIndex(),
             };
         }
     }

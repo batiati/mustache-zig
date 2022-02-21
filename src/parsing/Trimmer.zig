@@ -11,13 +11,13 @@ const testing = std.testing;
 
 const parsing = @import("parsing.zig");
 const TextScanner = parsing.TextScanner;
-const Trimming = parsing.Trimming;
+const TrimmingIndex = parsing.TrimmingIndex;
 
 const Self = @This();
 
 // Simple state-machine to track left and right line breaks while scanning the text
-const LeftLFState = union(enum) { Scanning, NotFound, Found: usize };
-const RightLFState = union(enum) { Waiting, NotFound, Found: usize };
+const LeftLFState = union(enum) { Scanning, NotFound, Found: u32 };
+const RightLFState = union(enum) { Waiting, NotFound, Found: u32 };
 
 // Line break and whitespace characters
 const CR = '\r';
@@ -42,9 +42,8 @@ pub fn move(self: *Self) void {
     switch (char) {
         CR, SPACE, TAB, NULL => {},
         LF => {
-            const lf_index = index - self.text_scanner.block_index;
-
-            assert(lf_index >= 0);
+            assert(index >= self.text_scanner.block_index);
+            const lf_index = @intCast(u32, index - self.text_scanner.block_index);
 
             if (self.left_lf == .Scanning) {
                 self.left_lf = .{ .Found = lf_index };
@@ -64,7 +63,7 @@ pub fn move(self: *Self) void {
     }
 }
 
-pub fn getLeftTrimming(self: Self) Trimming {
+pub fn getLeftTrimmingIndex(self: Self) TrimmingIndex {
     return switch (self.left_lf) {
         .Scanning, .NotFound => .PreserveWhitespaces,
         .Found => |index| .{
@@ -76,16 +75,16 @@ pub fn getLeftTrimming(self: Self) Trimming {
     };
 }
 
-pub fn getRightTrimming(self: Self) Trimming {
+pub fn getRightTrimmingIndex(self: Self) TrimmingIndex {
     return switch (self.right_lf) {
         .Waiting => blk: {
 
             // If there are only whitespaces, it can be trimmed right
             // It depends on the previous text block to be an standalone tag
             if (self.left_lf == .Scanning) {
-                break :blk Trimming{
+                break :blk TrimmingIndex{
                     .AllowTrimming = .{
-                        .index = self.text_scanner.block_index,
+                        .index = 0,
                         .stand_alone = false,
                     },
                 };
@@ -95,31 +94,12 @@ pub fn getRightTrimming(self: Self) Trimming {
         },
 
         .NotFound => .PreserveWhitespaces,
-        .Found => |index| .{
+        .Found => |index| TrimmingIndex{
             .AllowTrimming = .{
                 .index = index + 1,
                 .stand_alone = true,
             },
         },
-    };
-}
-
-pub fn getIndentation(self: Self) ?[]const u8 {
-    const text_scanner = self.text_scanner;
-
-    return switch (self.right_lf) {
-        .Waiting => blk: {
-            if (self.left_lf == .Scanning) {
-                break :blk if (text_scanner.index > text_scanner.block_index) text_scanner.content[text_scanner.block_index..text_scanner.index] else null;
-            } else {
-                break :blk null;
-            }
-        },
-        .Found => |index| blk: {
-            const trim_index = text_scanner.block_index + index + 1;
-            break :blk if (trim_index < text_scanner.index) text_scanner.content[trim_index..text_scanner.index] else null;
-        },
-        .NotFound => null,
     };
 }
 
@@ -183,11 +163,11 @@ test "Multiple line breaks" {
     try testing.expectEqual(@as(usize, 11), block.?.right_trimming.AllowTrimming.index);
 
     block.?.trimLeft();
-    try testing.expectEqual(Trimming.Trimmed, block.?.left_trimming);
+    try testing.expectEqual(TrimmingIndex.Trimmed, block.?.left_trimming);
     try testing.expectEqualStrings("ABC\nABC\n  ", block.?.tail.?);
 
     block.?.trimRight();
-    try testing.expectEqual(Trimming.Trimmed, block.?.right_trimming);
+    try testing.expectEqual(TrimmingIndex.Trimmed, block.?.right_trimming);
     try testing.expectEqualStrings("ABC\nABC\n", block.?.tail.?);
 }
 
@@ -211,11 +191,11 @@ test "Multiple line breaks \\r\\n" {
     try testing.expectEqual(@as(usize, 14), block.?.right_trimming.AllowTrimming.index);
 
     block.?.trimLeft();
-    try testing.expectEqual(Trimming.Trimmed, block.?.left_trimming);
+    try testing.expectEqual(TrimmingIndex.Trimmed, block.?.left_trimming);
     try testing.expectEqualStrings("ABC\r\nABC\r\n  ", block.?.tail.?);
 
     block.?.trimRight();
-    try testing.expectEqual(Trimming.Trimmed, block.?.right_trimming);
+    try testing.expectEqual(TrimmingIndex.Trimmed, block.?.right_trimming);
     try testing.expectEqualStrings("ABC\r\nABC\r\n", block.?.tail.?);
 }
 
@@ -239,11 +219,11 @@ test "Whitespace text trimming" {
     try testing.expectEqual(@as(usize, 3), block.?.right_trimming.AllowTrimming.index);
 
     block.?.trimLeft();
-    try testing.expectEqual(Trimming.Trimmed, block.?.left_trimming);
+    try testing.expectEqual(TrimmingIndex.Trimmed, block.?.left_trimming);
     try testing.expectEqualStrings("  ", block.?.tail.?);
 
     block.?.trimRight();
-    try testing.expectEqual(Trimming.Trimmed, block.?.right_trimming);
+    try testing.expectEqual(TrimmingIndex.Trimmed, block.?.right_trimming);
     try testing.expect(block.?.tail == null);
 }
 

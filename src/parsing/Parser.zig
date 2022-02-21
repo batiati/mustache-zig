@@ -139,12 +139,7 @@ fn createElements(self: *Self, nodes: []const *Node) Errors![]const Element {
                         },
 
                         .Partial => {
-
-                            const indentation: ?[]const u8 = indent_bkl: {
-                                const prev_node = node.prev_node orelse break :indent_bkl null;
-                                const pre_node_indentation = prev_node.text_block.indentation orelse break :indent_bkl null;
-                                break :indent_bkl try self.gpa.dupe(u8, pre_node_indentation);
-                            };
+                            const indentation = if (node.getIndentation()) |node_indentation| try self.gpa.dupe(u8, node_indentation) else null;
                             errdefer if (indentation) |indentation_value| self.gpa.free(indentation_value);
 
                             break :blk Element{

@@ -85,10 +85,10 @@ pub const Event = union(enum) {
     Eof,
 };
 
-pub const Trimming = union(enum) {
+pub const TrimmingIndex = union(enum) {
     PreserveWhitespaces,
     AllowTrimming: struct {
-        index: usize,
+        index: u32,
         stand_alone: bool,
     },
     Trimmed,

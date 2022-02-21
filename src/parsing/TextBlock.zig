@@ -10,7 +10,7 @@ const Mark = parsing.Mark;
 const MarkType = parsing.MarkType;
 const DelimiterType = parsing.DelimiterType;
 const Delimiters = parsing.Delimiters;
-const Trimming = parsing.Trimming;
+const TrimmingIndex = parsing.TrimmingIndex;
 
 const Self = @This();
 
@@ -18,9 +18,9 @@ event: Event,
 tail: ?[]const u8,
 row: u32,
 col: u32,
-left_trimming: Trimming = .PreserveWhitespaces,
-right_trimming: Trimming = .PreserveWhitespaces,
-indentation: ?[]const u8,
+left_trimming: TrimmingIndex = .PreserveWhitespaces,
+right_trimming: TrimmingIndex = .PreserveWhitespaces,
+indentation: ?[]const u8 = null,
 
 pub fn readBlockType(self: *Self) ?BlockType {
     if (self.tail) |tail| {
@@ -56,6 +56,12 @@ pub fn trimRight(self: *Self) void {
                 } else if (right_trimming.index < tail.len) {
                     self.tail = tail[0..right_trimming.index];
                 }
+
+                if (right_trimming.index >= tail.len - 1) {
+                    self.indentation = null;
+                } else {
+                    self.indentation = tail[right_trimming.index..];
+                }
             }
 
             self.right_trimming = .Trimmed;
@@ -68,19 +74,20 @@ pub fn trimLeft(self: *Self) void {
         .PreserveWhitespaces, .Trimmed => {},
         .AllowTrimming => |left_trimming| {
             if (self.tail) |tail| {
+
+                // Update the trim-right index and indentation after trimming left
+                // BEFORE:
+                //                 2      7
+                //                 ↓      ↓
+                //const value = "  \nABC\n  "
+                //
+                // AFTER:
+                //                    4
+                //                    ↓
+                //const value = "ABC\n  "
+
                 switch (self.right_trimming) {
                     .AllowTrimming => |right_trimming| {
-
-                        // Update the right index after trimming left
-                        // BEFORE:
-                        //                 2      7
-                        //                 ↓      ↓
-                        //const value = "  \nABC\n  "
-                        //
-                        // AFTER:
-                        //                    4
-                        //                    ↓
-                        //const value = "ABC\n  "
                         self.right_trimming = .{
                             .AllowTrimming = .{
                                 .index = right_trimming.index - left_trimming.index - 1,

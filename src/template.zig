@@ -1857,8 +1857,7 @@ const tests = struct {
             try testing.expectEqual(Element.Partial, elements[0]);
             try testing.expectEqualStrings("partial", elements[0].Partial.key);
             try testing.expect(elements[0].Partial.indentation != null);
-            try testing.expectEqualStrings("  ", elements[0].Partial.indentation.?);            
-            
+            try testing.expectEqualStrings("  ", elements[0].Partial.indentation.?);
 
             try testing.expectEqual(Element.StaticText, elements[1]);
             try testing.expectEqualStrings(">", elements[1].StaticText);

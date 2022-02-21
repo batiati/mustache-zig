@@ -54,6 +54,13 @@ pub fn trimLast(self: *Self, last_node: *Self) void {
     }
 }
 
+pub fn getIndentation(self: *const Self) ?[]const u8 {
+    return switch (self.block_type) {
+        .Partial => getPreviousNodeIndentation(self.prev_node),
+        else => null,
+    };
+}
+
 fn trimPreviousNodesRight(parent_node: ?*Self) bool {
     if (parent_node) |node| {
         if (node.block_type == .StaticText) {
@@ -67,6 +74,9 @@ fn trimPreviousNodesRight(parent_node: ?*Self) bool {
                         return true;
                     } else {
                         node.text_block.right_trimming = .PreserveWhitespaces;
+
+                        // If the space is preserved, it is not considered indentation
+                        node.text_block.indentation = null;
                         return false;
                     }
                 },
@@ -83,5 +93,16 @@ fn trimPreviousNodesRight(parent_node: ?*Self) bool {
     } else {
         // No parent node, the first node can always be considered stand-alone
         return true;
+    }
+}
+
+fn getPreviousNodeIndentation(parent_node: ?*const Self) ?[]const u8 {
+    if (parent_node) |node| {
+        return switch (node.block_type) {
+            .StaticText => node.text_block.indentation,
+            else => getPreviousNodeIndentation(node.prev_node),
+        };
+    } else {
+        return null;
     }
 }
