@@ -56,7 +56,7 @@ pub fn trimLast(self: *Self, last_node: *Self) void {
 
 pub fn getIndentation(self: *const Self) ?[]const u8 {
     return switch (self.block_type) {
-        .Partial => getPreviousNodeIndentation(self.prev_node),
+        .Partial, .Parent => getPreviousNodeIndentation(self.prev_node),
         else => null,
     };
 }

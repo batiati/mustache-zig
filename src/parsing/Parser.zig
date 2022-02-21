@@ -114,6 +114,9 @@ fn createElements(self: *Self, nodes: []const *Node) Errors![]const Element {
                     const content = if (node.children) |children| try self.createElements(children) else null;
                     errdefer if (content) |content_value| Element.freeMany(self.gpa, content_value);
 
+                    const indentation = if (node.getIndentation()) |node_indentation| try self.gpa.dupe(u8, node_indentation) else null;
+                    errdefer if (indentation) |indentation_value| self.gpa.free(indentation_value);
+
                     break :blk switch (block_type) {
                         .Interpolation,
                         .NoScapeInterpolation,
@@ -139,9 +142,6 @@ fn createElements(self: *Self, nodes: []const *Node) Errors![]const Element {
                         },
 
                         .Partial => {
-                            const indentation = if (node.getIndentation()) |node_indentation| try self.gpa.dupe(u8, node_indentation) else null;
-                            errdefer if (indentation) |indentation_value| self.gpa.free(indentation_value);
-
                             break :blk Element{
                                 .Partial = Partial{
                                     .key = key,
@@ -154,6 +154,7 @@ fn createElements(self: *Self, nodes: []const *Node) Errors![]const Element {
                             break :blk Element{
                                 .Parent = Parent{
                                     .key = key,
+                                    .indentation = indentation,
                                     .content = content,
                                 },
                             };

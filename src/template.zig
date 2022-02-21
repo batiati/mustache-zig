@@ -44,6 +44,7 @@ pub const Partial = struct {
 
 pub const Parent = struct {
     key: []const u8,
+    indentation: ?[]const u8,
     content: ?[]const Element,
 };
 
