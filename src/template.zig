@@ -17,6 +17,7 @@ pub const ParseErrors = error{
     UnexpectedCloseSection,
     InvalidDelimiters,
     InvalidIdentifier,
+    ClosingTagMismatch,
 };
 
 pub const LastError = struct {

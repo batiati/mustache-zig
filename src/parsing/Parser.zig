@@ -59,7 +59,7 @@ pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, delimit
 
 pub fn parse(self: *Self) Allocator.Error!Template {
     const nodes = self.parseTree() catch |err| return self.fromError(err);
-    const elements = self.createElements(nodes) catch |err| return self.fromError(err);
+    const elements = self.createElements(null, nodes) catch |err| return self.fromError(err);
 
     return Template{
         .allocator = self.gpa,
@@ -79,7 +79,7 @@ fn fromError(self: *Self, err: Errors) Allocator.Error!Template {
     }
 }
 
-fn createElements(self: *Self, nodes: []const *Node) Errors![]const Element {
+fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Errors![]const Element {
     var list = std.ArrayListUnmanaged(Element){};
     errdefer Element.freeMany(self.gpa, list.toOwnedSlice(self.gpa));
 
@@ -101,17 +101,30 @@ fn createElements(self: *Self, nodes: []const *Node) Errors![]const Element {
                     }
                 },
 
+                .CloseSection => {
+
+                    const parent_key_value = parent_key orelse {
+                        return self.setLastError(ParseErrors.UnexpectedCloseSection, &node.text_block, null);
+                    };
+
+                    const key = try self.parseIdentificator(&node.text_block);
+                    if (!std.mem.eql(u8, parent_key_value, key)) {
+                        return self.setLastError(ParseErrors.ClosingTagMismatch, &node.text_block, null);
+                    }
+
+                    break :blk null;
+                },                
+
                 // No output
                 .Comment,
                 .Delimiters,
-                .CloseSection,
-                => break :blk null,
+                => break :blk null,                
 
                 else => |block_type| {
-                    const key = try self.parseIdentificator(&node.text_block);
+                    const key = try self.gpa.dupe(u8, try self.parseIdentificator(&node.text_block));
                     errdefer self.gpa.free(key);
 
-                    const content = if (node.children) |children| try self.createElements(children) else null;
+                    const content = if (node.children) |children| try self.createElements(key, children) else null;
                     errdefer if (content) |content_value| Element.freeMany(self.gpa, content_value);
 
                     const indentation = if (node.getIndentation()) |node_indentation| try self.gpa.dupe(u8, node_indentation) else null;
@@ -212,8 +225,14 @@ fn matchBlockType(self: *Self, text_block: *TextBlock) Errors!?BlockType {
                         return self.setLastError(ParseErrors.StartingDelimiterMismatch, text_block, null);
                     }
 
-                    // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, $, =, &, /)
-                    return text_block.readBlockType() orelse .Interpolation;
+                    const is_triple_mustache = tag_mark.delimiter_type == .NoScapeDelimiter;
+                    if (is_triple_mustache) {
+                        return .NoScapeInterpolation;
+                    } else {
+
+                        // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, <, $, =, &, /)
+                        return text_block.readBlockType() orelse .Interpolation;
+                    }
                 },
             }
         },
@@ -259,7 +278,7 @@ fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const 
         var tokenizer = std.mem.tokenize(u8, text, " \t");
         if (tokenizer.next()) |token| {
             if (tokenizer.next() == null) {
-                return try self.gpa.dupe(u8, token);
+                return token;
             }
         }
     }
@@ -279,31 +298,25 @@ fn parseTree(self: *Self) Errors![]const *Node {
         var block_type = (try self.matchBlockType(text_block)) orelse continue;
 
         // Befone adding,
-        if (block_type != .StaticText) {
-            switch (text_block.event) {
-                .Mark => |mark| {
-                    const is_triple_mustache = mark.delimiter_type == .NoScapeDelimiter;
-                    if (is_triple_mustache) {
-                        if (block_type == .Interpolation) {
-                            block_type = .NoScapeInterpolation;
-                        } else {
-                            return self.setLastError(ParseErrors.InvalidDelimiters, text_block, null);
-                        }
-                    }
-                },
-                else => {},
-            }
-        }
+        switch (block_type) {
+            .StaticText => {
+                if (self.current_level.current_node) |current_node| {
+                    if (current_node.block_type.ignoreStaticText()) continue;
+                }
+            },
+            .Delimiters => {
 
-        if (block_type == .Delimiters) {
+                //Apply the new delimiters to the reader immediately
+                const new_delimiters = try self.parseDelimiters(text_block);
 
-            //Apply the new delimiters to the reader immediately
-            const new_delimiters = try self.parseDelimiters(text_block);
-            self.current_level.delimiters = new_delimiters;
+                text_scanner.setDelimiters(new_delimiters) catch |err| {
+                    return self.setLastError(err, text_block, null);
+                };
 
-            text_scanner.setDelimiters(new_delimiters) catch |err| {
-                return self.setLastError(err, text_block, null);
-            };
+                self.current_level.delimiters = new_delimiters;
+            },
+
+            else => {},
         }
 
         // Adding,

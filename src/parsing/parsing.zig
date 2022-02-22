@@ -51,6 +51,13 @@ pub const BlockType = enum {
             else => true,
         };
     }
+
+    pub inline fn ignoreStaticText(self: BlockType) bool {
+        return switch (self) {
+            .Parent => true,
+            else => false,
+        };
+    }
 };
 
 pub const MarkType = enum {
