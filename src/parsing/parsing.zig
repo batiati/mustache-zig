@@ -7,8 +7,6 @@ pub const TextBlock = @import("TextBlock.zig");
 pub const TextScanner = @import("TextScanner.zig");
 pub const Trimmer = @import("Trimmer.zig");
 
-pub const rope = @import("text_rope.zig");
-
 pub const Delimiters = struct {
     pub const DefaultStartingDelimiter = "{{";
     pub const DefaultEndingDelimiter = "}}";
