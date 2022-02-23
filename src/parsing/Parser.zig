@@ -102,7 +102,6 @@ fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Er
                 },
 
                 .CloseSection => {
-
                     const parent_key_value = parent_key orelse {
                         return self.setLastError(ParseErrors.UnexpectedCloseSection, &node.text_block, null);
                     };
@@ -113,12 +112,12 @@ fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Er
                     }
 
                     break :blk null;
-                },                
+                },
 
                 // No output
                 .Comment,
                 .Delimiters,
-                => break :blk null,                
+                => break :blk null,
 
                 else => |block_type| {
                     const key = try self.gpa.dupe(u8, try self.parseIdentificator(&node.text_block));
