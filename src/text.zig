@@ -112,7 +112,7 @@ pub const StringBuilder = struct {
         return;
     }
 
-    pub fn charAt(self: *const Self, index: usize) ?u8 {
+    pub fn charAt(self: *const Self, index: usize) u8 {
         var iter = Iterator.init(self);
         var pos: usize = 0;
         while (iter.next()) |chunk| {
@@ -126,20 +126,16 @@ pub const StringBuilder = struct {
             pos += slice_len;
         }
 
-        return null;
+        return '\x00';
     }
 
-    pub inline fn empty(self: *const Self) bool {
+    pub fn clear(self: *Self) void {
+        self.root = null;
+        self.current = null;
+    }
+
+    pub inline fn isEmpty(self: *const Self) bool {
         return self.root == null;
-    }
-
-    pub inline fn firstChar(self: *const Self) u8 {
-        var iter = Iterator.init(self);
-        if (iter.next()) |first| {
-            return first.value[0];
-        } else {
-            return '\x00';
-        }
     }
 
     pub fn len(self: *Self) usize {
