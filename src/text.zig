@@ -16,9 +16,9 @@ pub fn fromString(arena: Allocator, content: []const u8) Allocator.Error!TextRea
     return ctx.textReader();
 }
 
-pub fn fromFile(arena: Allocator, absolute_path: []const u8) Errors!TextReader {
+pub fn fromFile(arena: Allocator, absolute_path: []const u8, read_buffer_size: u32) Errors!TextReader {
     var file = try std.fs.openFileAbsolute(absolute_path, .{});
-    var stream = try StreamReader(std.fs.File).init(arena, file);
+    var stream = try StreamReader(std.fs.File).init(arena, file, read_buffer_size);
     return stream.textReader();
 }
 
@@ -47,6 +47,107 @@ pub const TextReader = struct {
         self.vtable.close(self.ctx);
     }
 };
+
+const StringReader = struct {
+    content: ?[]const u8,
+    const vtable = TextReader.VTable{
+        .read = read_fn,
+        .close = close_fn,
+    };
+
+    pub fn init(arena: Allocator, content: []const u8) Allocator.Error!*StringReader {
+        var self = try arena.create(StringReader);
+        self.* = .{ .content = content };
+
+        return self;
+    }
+
+    pub fn textReader(self: *StringReader) TextReader {
+        return .{
+            .ctx = self,
+            .vtable = &vtable,
+        };
+    }
+
+    fn read_fn(ctx: *anyopaque, ref_slice: *[]const u8, block_index: usize) Errors!TextReader.ReaderResult {
+        const alignment = @alignOf(*StringReader);
+        var self = @ptrCast(*StringReader, @alignCast(alignment, ctx));
+        _ = block_index;
+
+        if (self.content) |content| {
+            self.content = null;
+            ref_slice.* = content;
+            return .LastPart;
+        } else {
+            return .Eof;
+        }
+    }
+
+    fn close_fn(ctx: *anyopaque) void {
+        _ = ctx;
+    }
+};
+
+fn StreamReader(comptime TStream: type) type {
+    return struct {
+        const Self = @This();
+        const vtable = TextReader.VTable{
+            .read = read_fn,
+            .close = close_fn,
+        };
+
+        arena: Allocator,
+        stream: TStream,
+        read_buffer_size: u32,
+
+        pub fn init(arena: Allocator, stream: TStream, read_buffer_size: u32) Allocator.Error!*Self {
+            var self = try arena.create(Self);
+            self.* = .{
+                .arena = arena,
+                .stream = stream,
+                .read_buffer_size = read_buffer_size,
+            };
+
+            return self;
+        }
+
+        pub fn textReader(self: *Self) TextReader {
+            return .{
+                .ctx = self,
+                .vtable = &vtable,
+            };
+        }
+
+        fn read_fn(ctx: *anyopaque, ref_slice: *[]const u8, block_index: usize) Errors!TextReader.ReaderResult {
+            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
+
+            const start_index = ref_slice.*.len - block_index;
+            var buffer = try self.arena.alloc(u8, self.read_buffer_size + start_index);
+            if (start_index > 0) {
+                std.mem.copy(u8, buffer, ref_slice.*[block_index..]);
+            }
+
+            var size = try self.stream.read(buffer[start_index..]);
+
+            if (size == 0) {
+                self.arena.free(buffer[start_index..]);
+                return .Eof;
+            } else if (size < self.read_buffer_size) {
+                self.arena.free(buffer[start_index + size ..]);
+                ref_slice.* = buffer[0 .. start_index + size];
+                return .LastPart;
+            } else {
+                ref_slice.* = buffer;
+                return .Continue;
+            }
+        }
+
+        fn close_fn(ctx: *anyopaque) void {
+            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
+            self.stream.close();
+        }
+    };
+}
 
 pub const StringBuilder = struct {
     const Self = @This();
@@ -355,107 +456,79 @@ pub const StringBuilder = struct {
     }
 };
 
-const StringReader = struct {
-    content: ?[]const u8,
-    const vtable = TextReader.VTable{
-        .read = read_fn,
-        .close = close_fn,
-    };
-
-    pub fn init(arena: Allocator, content: []const u8) Allocator.Error!*StringReader {
-        var self = try arena.create(StringReader);
-        self.* = .{ .content = content };
-
-        return self;
-    }
-
-    pub fn textReader(self: *StringReader) TextReader {
-        return .{
-            .ctx = self,
-            .vtable = &vtable,
-        };
-    }
-
-    fn read_fn(ctx: *anyopaque, ref_slice: *[]const u8, block_index: usize) Errors!TextReader.ReaderResult {
-        const alignment = @alignOf(*StringReader);
-        var self = @ptrCast(*StringReader, @alignCast(alignment, ctx));
-        _ = block_index;
-
-        if (self.content) |content| {
-            self.content = null;
-            ref_slice.* = content;
-            return .LastPart;
-        } else {
-            return .Eof;
-        }
-    }
-
-    fn close_fn(ctx: *anyopaque) void {
-        _ = ctx;
-    }
-};
-
-fn StreamReader(comptime TStream: type) type {
-    return struct {
-        const BUFFER_SIZE = 4096;
-        const Self = @This();
-        const vtable = TextReader.VTable{
-            .read = read_fn,
-            .close = close_fn,
-        };
-
-        arena: Allocator,
-        stream: TStream,
-
-        pub fn init(arena: Allocator, stream: TStream) Allocator.Error!*Self {
-            var self = try arena.create(Self);
-            self.* = .{
-                .arena = arena,
-                .stream = stream,
-            };
-
-            return self;
-        }
-
-        pub fn textReader(self: *Self) TextReader {
-            return .{
-                .ctx = self,
-                .vtable = &vtable,
-            };
-        }
-
-        fn read_fn(ctx: *anyopaque, ref_slice: *[]const u8, block_index: usize) Errors!TextReader.ReaderResult {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
-
-            const start_index = ref_slice.*.len - block_index + 1;
-            var buffer = try self.arena.alloc(u8, BUFFER_SIZE + start_index);
-            if (start_index > 0) {
-                std.mem.copy(u8, buffer, ref_slice.*[block_index..]);
-            }
-
-            var size = try self.stream.read(buffer[start_index..]);
-            if (size == 0) {
-                self.arena.free(buffer[start_index..]);
-                return .Eof;
-            } else if (size < BUFFER_SIZE) {
-                self.arena.free(buffer[start_index + size ..]);
-                ref_slice.* = buffer[0..start_index + size];
-                return .LastPart;
-            } else {
-                ref_slice.* = buffer;
-                return .Continue;
-            }
-        }
-
-        //ABC01234
-
-        fn close_fn(ctx: *anyopaque) void {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
-            self.stream.close();
-        }
-    };
-}
-
 test {
     testing.refAllDecls(@This());
+}
+
+test "StreamReader.Slices" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Test the StreamReader slicing mechanism
+    // In a real use case, the reade_buffer_len is much larger than the amount needed to produce a token
+    // So we can parse many tokens on a single read, and read a new slice containing only the lasts unparsed bytes
+    //
+    // Just 5 chars in our test
+    const read_buffer_len: usize = 5;
+    //
+    //                           Block index
+    //              First slice  | Second slice
+    //           Block index  |  | |    Third slice
+    //                     ↓  ↓  ↓ ↓    ↓
+    const content_text = "{{name}}Just static";
+
+    // Creating a temp file
+    const path = try std.fs.selfExeDirPathAlloc(allocator);
+    const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "stream_reader_slices.tmp" });
+
+    var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
+    try file.writeAll(content_text);
+    file.close();
+    defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
+
+    file = try std.fs.openFileAbsolute(absolute_file_path, .{});
+    defer file.close();
+    var stream_reader = try StreamReader(std.fs.File).init(allocator, file, read_buffer_len);
+    var reader = stream_reader.textReader();
+
+    var slice: []const u8 = &.{};
+    try testing.expectEqualStrings("", slice);
+
+    // First read
+    // We got a slice with "read_buffer_len" size to parse
+    var read_1 = try reader.read(&slice, 0);
+    try testing.expectEqual(TextReader.ReaderResult.Continue, read_1);
+    try testing.expectEqual(read_buffer_len, slice.len);
+    try testing.expectEqualStrings("{{nam", slice);
+
+    // Second read,
+    // The parser produces the first token "{{" and reaches the EOF of this slice
+    // We need more data, the previous slice was parsed until the block_index = 2,
+    // so we expect the next read to return the remaining bytes plus new 5 bytes read
+    const first_block_index = 2;
+    var read_2 = try reader.read(&slice, first_block_index);
+
+    try testing.expectEqual(TextReader.ReaderResult.Continue, read_2);
+    try testing.expectEqualStrings("name}}Ju", slice);
+
+    // Third read,
+    // We parsed a next token '}}' at block_index = 6,
+    // so we need another slice
+    const second_block_index = 6;
+    var read_3 = try reader.read(&slice, second_block_index);
+
+    try testing.expectEqual(TextReader.ReaderResult.Continue, read_3);
+    try testing.expectEqualStrings("Just st", slice);
+
+    // Last read,
+    // Nothing was parsed, so we use block_index = 0,
+    var last_read = try reader.read(&slice, 0);
+    try testing.expectEqual(TextReader.ReaderResult.LastPart, last_read);
+    try testing.expectEqualStrings("Just static", slice);
+
+    // After that, the current slice remains unchanged
+    var after_that = try reader.read(&slice, 0);
+    try testing.expectEqual(TextReader.ReaderResult.Eof, after_that);
+    try testing.expectEqualStrings("Just static", slice);
 }

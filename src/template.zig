@@ -232,6 +232,11 @@ pub const Element = union(enum) {
     }
 };
 
+pub const TemplateOptions = struct {
+    delimiters: Delimiters = .{},
+    read_buffer_size: u32 = 4096,
+};
+
 pub const Template = struct {
     const Self = @This();
 
@@ -241,19 +246,19 @@ pub const Template = struct {
         Error: LastError,
     },
 
-    pub fn init(allocator: Allocator, template_text: []const u8, delimiters: Delimiters) !Template {
+    pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) !Template {
         var arena = ArenaAllocator.init(allocator);
         defer arena.deinit();
 
-        var parser = try Parser.init(allocator, arena.allocator(), template_text, delimiters);
+        var parser = try Parser.init(allocator, arena.allocator(), template_text, options);
         return try parser.parse();
     }
 
-    pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, delimiters: Delimiters) !Template {
+    pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, options: TemplateOptions) !Template {
         var arena = ArenaAllocator.init(allocator);
         defer arena.deinit();
 
-        var parser = try Parser.initFromFile(allocator, arena.allocator(), absolute_path, delimiters);
+        var parser = try Parser.initFromFile(allocator, arena.allocator(), absolute_path, options);
         return try parser.parse();
     }
 
@@ -1962,7 +1967,6 @@ const tests = struct {
         try testing.expect(template.result == .Elements);
         const elements = template.result.Elements;
 
-        std.log.err("{?}", .{ elements });
         try testing.expectEqual(@as(usize, 3), elements.len);
 
         try testing.expectEqual(Element.StaticText, elements[0]);
@@ -2036,15 +2040,14 @@ const tests = struct {
         var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
         try file.writeAll(template_text);
         file.close();
-        //defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
+        defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
 
-        var template = try Template.initFromFile(allocator, absolute_file_path, .{});
+        var template = try Template.initFromFile(allocator, absolute_file_path, .{ .read_buffer_size = 16 });
         defer template.deinit();
 
         try testing.expect(template.result == .Elements);
         const elements = template.result.Elements;
 
-        std.log.err("{?}", .{ elements });
         try testing.expectEqual(@as(usize, 3), elements.len);
 
         try testing.expectEqual(Element.StaticText, elements[0]);
@@ -2093,5 +2096,5 @@ const tests = struct {
 
         try testing.expectEqual(Element.StaticText, elements[2]);
         try testing.expectEqualStrings("World", elements[2].StaticText);
-    }    
+    }
 };

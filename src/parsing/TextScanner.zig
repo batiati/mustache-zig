@@ -55,6 +55,7 @@ row: u32 = 1,
 col: u32 = 1,
 delimiters: [MAX_DELIMITERS]Delimiter = undefined,
 delimiters_count: usize = 0,
+delimiter_max_size: u32 = 0,
 
 pub fn init(reader: TextReader) Self {
     return .{
@@ -67,6 +68,7 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
     if (delimiters.ending_delimiter.len == 0) return ParseErrors.InvalidDelimiters;
 
     var index: usize = 0;
+    var delimiter_max_size = std.math.max(Delimiters.NoScapeStartingDelimiter.len, Delimiters.NoScapeEndingDelimiter.len);
 
     if (!std.mem.eql(u8, delimiters.starting_delimiter, Delimiters.NoScapeStartingDelimiter)) {
         self.delimiters[index] = .{
@@ -93,6 +95,7 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
             .delimiter_type = .Regular,
         };
         index += 1;
+        if (delimiters.starting_delimiter.len > delimiter_max_size) delimiter_max_size = delimiters.starting_delimiter.len;
     } else {
         self.delimiters[index] = .{
             .delimiter = delimiters.starting_delimiter,
@@ -100,6 +103,7 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
             .delimiter_type = .Regular,
         };
         index += 1;
+        if (delimiters.starting_delimiter.len > delimiter_max_size) delimiter_max_size = delimiters.starting_delimiter.len;
 
         self.delimiters[index] = .{
             .delimiter = delimiters.ending_delimiter,
@@ -107,6 +111,7 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
             .delimiter_type = .Regular,
         };
         index += 1;
+        if (delimiters.ending_delimiter.len > delimiter_max_size) delimiter_max_size = delimiters.ending_delimiter.len;
     }
 
     // Order desc by the delimiter length, avoiding ambiguity during the "startsWith" comparison
@@ -123,24 +128,40 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
 }
 
 fn requestContent(self: *Self) !void {
-
     if (!self.finished and self.index >= self.content.len) {
-        const read = try self.reader.read(&self.content, self.block_index);
+
+        std.log.err("current slice {} {} before\"{s}\"", .{ self.block_index, self.index, self.content });
+        var content = self.content;        
+        const read = try self.reader.read(&content, self.block_index);
+        self.content = content;
+
         self.finished = read != .Continue;
         if (read != .Eof) {
-            self.index -= self.block_index;
-            self.block_index = 0;
+
+            if (self.block_index > 0) {
+                self.index -= self.block_index;
+
+                if (self.index >= self.delimiter_max_size) {
+                    self.index -= self.delimiter_max_size;
+                } else {
+                    self.index = 0;
+                }
+
+                self.block_index = 0;
+            }
+            //{{name}}
         }
+
+        std.log.err("current slice {} {} after {} \"{s}\"", .{ self.block_index, self.index, read, self.content });        
     }
 }
 
 ///
 /// Reads until the next delimiter mark or EOF
 pub fn next(self: *Self) !?TextBlock {
+    try self.requestContent();
     self.block_index = self.index;
     var trimmer = Trimmer{ .text_scanner = self };
-
-    try self.requestContent();
 
     while (self.index < self.content.len) {
         var increment: u32 = 1;
@@ -153,6 +174,11 @@ pub fn next(self: *Self) !?TextBlock {
             }
 
             self.index += increment;
+        }
+
+        // Request a new slice if next to the end
+        if (self.index + self.delimiter_max_size >= self.content.len - 1) {
+            try self.requestContent();
         }
 
         if (self.matchTagMark()) |mark| {
@@ -170,10 +196,6 @@ pub fn next(self: *Self) !?TextBlock {
         }
 
         trimmer.move();
-
-        if (self.index == self.content.len - 1) {
-            try self.requestContent();
-        }
 
         if (self.index == self.content.len - 1) {
             return TextBlock{

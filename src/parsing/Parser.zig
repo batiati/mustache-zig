@@ -4,6 +4,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const mustache = @import("../mustache.zig");
 const Delimiters = mustache.template.Delimiters;
+const TemplateOptions = mustache.template.TemplateOptions;
 
 const Template = mustache.template.Template;
 const Element = mustache.template.Element;
@@ -48,8 +49,8 @@ root: *Level,
 current_level: *Level,
 last_error: ?LastError = null,
 
-pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, delimiters: Delimiters) Allocator.Error!Self {
-    var root = try Level.init(arena, delimiters);
+pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, options: TemplateOptions) Allocator.Error!Self {
+    var root = try Level.init(arena, options.delimiters);
     const reader = try text.fromString(arena, template_text);
 
     return Self{
@@ -62,9 +63,9 @@ pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, delimit
     };
 }
 
-pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8, delimiters: Delimiters) Errors!Self {
-    var root = try Level.init(arena, delimiters);
-    const reader = try text.fromFile(arena, absolute_path);
+pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8, options: TemplateOptions) Errors!Self {
+    var root = try Level.init(arena, options.delimiters);
+    const reader = try text.fromFile(arena, absolute_path, options.read_buffer_size);
 
     return Self{
         .gpa = gpa,
@@ -392,6 +393,14 @@ fn setLastError(self: *Self, err: ParseErrors, text_block: ?*const TextBlock, de
         .col = if (text_block) |p| p.col else 0,
         .detail = detail,
     };
+
+    std.log.err(
+        \\
+        \\=================================
+        \\Line {} col {}
+        \\Err {}
+        \\=================================
+        , .{ self.last_error.?.row, self.last_error.?.col, self.last_error.?.error_code });
 
     return err;
 }
