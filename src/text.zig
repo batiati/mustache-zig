@@ -26,130 +26,62 @@ pub const StringBuilder = struct {
         next: ?*Chunk,
     };
 
-    const Content = enum {
-        Empty,
-        Single,
-        Multiple,
-    };
-
     const Iterator = struct {
+        current: ?*Chunk,
 
-        content: union(Content) {
-            Empty,
-            Single: *[]const u8,
-            Multiple: *Chunk,
-        },        
-
-        pub fn init(builder: *Self) Iterator {
-            
-            return switch (builder.content) {
-                .Empty => .{ .content = .Empty },
-                .Single => |*value| .{ .content = .{ .Single = value } },
-                .Multiple => |content| .{ .content = .{ .Multiple = content.root } },
-            };
+        pub fn init(builder: *const Self) Iterator {
+            return .{ .current = builder.root };
         }
 
-        pub fn next(self: *Iterator) ?*[]const u8 {
-
-            return switch (self.content) {
-                .Empty => null,
-                .Single => |value| blk: {
-                    self.content = .Empty; 
-                    break :blk value;
-                },
-                .Multiple => |*chunk| blk: {
-                    const current = &chunk.*.value;
-                    
-                    if (chunk.*.next) |next_chunk| {
-                        chunk.* = next_chunk;
-                    } else {
-                        self.content = .Empty; 
-                    }
-                    
-                    break :blk current;
-                },
-            };
+        pub fn next(self: *Iterator) ?*Chunk {
+            if (self.current) |current| {
+                self.current = current.next;
+                return current;
+            } else {
+                return null;
+            }
         }
     };
 
-    content: union(Content) {
-        Empty,
-        Single: []const u8,
-        Multiple: struct {
-            root: *Chunk,
-            current: *Chunk,
-        }
-    } = .Empty,
+    root: ?*Chunk = null,
+    current: ?*Chunk = null,
 
-    pub fn init(value: []const u8) StringBuilder {
-    
-        return StringBuilder{
-            .content = .{ .Single = value },
+    pub fn init(arena: Allocator, value: []const u8) Allocator.Error!StringBuilder {
+        var self = StringBuilder{};
+        try self.append(arena, value);
+        return self;
+    }
+
+    pub fn append(self: *Self, arena: Allocator, value: []const u8) Allocator.Error!void {
+        var current = try arena.create(Chunk);
+        errdefer arena.destroy(current);
+        current.* = .{
+            .next = null,
+            .value = value,
         };
-    }
 
-    fn iterator(self: *Self) Iterator {
-        return Iterator.init(self);
-    }
-
-    pub fn append(self: *Self, allocator: Allocator, value: []const u8) Allocator.Error!void {
-        
-        switch (self.content) {
-
-            .Empty => {
-                self.content = .{ .Single = value };
-            },
-            .Single => |current_value| {
-
-                var current = try allocator.create(Chunk);
-                errdefer allocator.destroy(current);
-                current.* = .{
-                    .next = null,
-                    .value = value,
-                };
-
-                var root = try allocator.create(Chunk);
-                errdefer allocator.destroy(root);
-                root.* = .{
-                    .next = current,
-                    .value = current_value,
-                };
-
-                self.content = .{
-                    .Multiple = .{
-                        .root = root,
-                        .current = current,
-                    },
-                };
-            },
-            .Multiple => |*content| {
-
-                var current = try allocator.create(Chunk);
-                errdefer allocator.destroy(current);
-                current.* = .{
-                    .next = null,
-                    .value = value,
-                };
-
-                content.current.next = current;
-                content.current = current;
-            },
+        if (self.current) |old| {
+            old.next = current;
+            self.current = current;
+        } else {
+            self.root = current;
+            self.current = current;
         }
     }
 
     pub fn trimLeft(self: *Self, index: usize) void {
-        var iter = self.iterator();
+        var iter = Iterator.init(self);
         var pos: usize = 0;
-        while (iter.next()) |slice| {
-            const slice_len = slice.len;
+        while (iter.next()) |chunk| {
+            const slice_len = chunk.value.len;
 
             if (index >= pos) {
                 if (index <= pos + slice_len) {
                     const relative_index = index - pos;
-                    slice.* = slice.*[relative_index..];
+                    chunk.value = chunk.value[relative_index..];
                     return;
                 } else {
-                    slice.* = slice.*[0..0];
+                    chunk.value = chunk.value[0..0];
                 }
             }
 
@@ -160,17 +92,17 @@ pub const StringBuilder = struct {
     }
 
     pub fn trimRight(self: *Self, index: usize) void {
-        var iter = self.iterator();
+        var iter = Iterator.init(self);
         var pos: usize = 0;
-        while (iter.next()) |slice| {
-            const slice_len = slice.len;
+        while (iter.next()) |chunk| {
+            const slice_len = chunk.value.len;
 
-            if (index < slice.len + pos) {
+            if (index < slice_len + pos) {
                 if (index >= pos) {
                     const relative_index = index - pos;
-                    slice.* = slice.*[0..relative_index];
+                    chunk.value = chunk.value[0..relative_index];
                 } else {
-                    slice.* = slice.*[0..0];
+                    chunk.value = chunk.value[0..0];
                 }
             }
 
@@ -181,14 +113,14 @@ pub const StringBuilder = struct {
     }
 
     pub fn charAt(self: *const Self, index: usize) ?u8 {
-        var iter = self.iterator();
+        var iter = Iterator.init(self);
         var pos: usize = 0;
-        while (iter.next()) |slice| {
-            const slice_len = slice.len;
+        while (iter.next()) |chunk| {
+            const slice_len = chunk.value.len;
 
             if (index >= pos and index <= pos + slice_len) {
                 const relative_index = index - pos;
-                return slice[relative_index];
+                return chunk.value[relative_index];
             }
 
             pos += slice_len;
@@ -198,24 +130,24 @@ pub const StringBuilder = struct {
     }
 
     pub inline fn empty(self: *const Self) bool {
-        return self.content == .Empty;
+        return self.root == null;
     }
 
     pub inline fn firstChar(self: *const Self) u8 {
-        var iter = self.iterator();
+        var iter = Iterator.init(self);
         if (iter.next()) |first| {
-            return first[0];
+            return first.value[0];
         } else {
             return '\x00';
         }
     }
 
     pub fn len(self: *Self) usize {
-        var iter = self.iterator();
+        var iter = Iterator.init(self);
         var tota_len: usize = 0;
 
-        while (iter.next()) |item| {
-            tota_len += item.len;
+        while (iter.next()) |chunk| {
+            tota_len += chunk.value.len;
         }
 
         return tota_len;
@@ -225,10 +157,10 @@ pub const StringBuilder = struct {
         const total_len = self.len();
         var list = try std.ArrayListUnmanaged(u8).initCapacity(allocator, total_len);
 
-        var iter = self.iterator();
+        var iter = Iterator.init(self);
 
-        while (iter.next()) |slice| {
-            list.appendSliceAssumeCapacity(slice.*);
+        while (iter.next()) |chunk| {
+            list.appendSliceAssumeCapacity(chunk.value);
         }
 
         return list.toOwnedSlice(allocator);
@@ -240,7 +172,7 @@ pub const StringBuilder = struct {
         const allocator = arena.allocator();
 
         var expected: []const u8 = "0123456789ABCDE";
-        var text = Self.init(expected);
+        var text = try Self.init(allocator, expected);
         try testing.expectEqualStrings(expected, try text.toOwnedSlice(allocator));
 
         text.trimRight(8);
@@ -260,7 +192,7 @@ pub const StringBuilder = struct {
         const allocator = arena.allocator();
 
         var expected: []const u8 = "0123456789ABCDE";
-        var text = Self.init("01234");
+        var text = try Self.init(allocator, "01234");
         try text.append(allocator, "56789");
         try text.append(allocator, "ABCDE");
 
