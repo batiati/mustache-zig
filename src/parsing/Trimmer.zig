@@ -103,13 +103,25 @@ pub fn getRightTrimmingIndex(self: Self) TrimmingIndex {
     };
 }
 
+const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
+const text = @import("../text.zig");
+
+fn toTS(allocator: Allocator, content: []const u8) TextScanner {
+    var reader = text.fromString(allocator, content) catch unreachable;
+    return TextScanner.init(reader);
+}
+
 test "Line breaks" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                     2      7
     //                                     ↓      ↓
-    var text_scanner = TextScanner.init("  \nABC\n  ");
+    var text_scanner = toTS(allocator, "  \nABC\n  ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \nABC\n  ", block.?.tail.?);
@@ -124,12 +136,14 @@ test "Line breaks" {
 }
 
 test "Line breaks \\r\\n" {
-
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     //                                       3        9
     //                                       ↓        ↓
-    var text_scanner = TextScanner.init("  \r\nABC\r\n  ");
+    var text_scanner = toTS(allocator, "  \r\nABC\r\n  ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \r\nABC\r\n  ", block.?.tail.?);
@@ -144,12 +158,15 @@ test "Line breaks \\r\\n" {
 }
 
 test "Multiple line breaks" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                     2           11
     //                                     ↓           ↓
-    var text_scanner = TextScanner.init("  \nABC\nABC\n  ");
+    var text_scanner = toTS(allocator, "  \nABC\nABC\n  ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \nABC\nABC\n  ", block.?.tail.?);
@@ -172,12 +189,15 @@ test "Multiple line breaks" {
 }
 
 test "Multiple line breaks \\r\\n" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                       3               14
     //                                       ↓               ↓
-    var text_scanner = TextScanner.init("  \r\nABC\r\nABC\r\n  ");
+    var text_scanner = toTS(allocator, "  \r\nABC\r\nABC\r\n  ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \r\nABC\r\nABC\r\n  ", block.?.tail.?);
@@ -200,12 +220,14 @@ test "Multiple line breaks \\r\\n" {
 }
 
 test "Whitespace text trimming" {
-
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     //                                     2 3
     //                                     ↓ ↓
-    var text_scanner = TextScanner.init("  \n  ");
+    var text_scanner = toTS(allocator, "  \n  ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \n  ", block.?.tail.?);
@@ -228,12 +250,15 @@ test "Whitespace text trimming" {
 }
 
 test "Whitespace text trimming \\r\\n" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                       3 4
     //                                       ↓ ↓
-    var text_scanner = TextScanner.init("  \r\n  ");
+    var text_scanner = toTS(allocator, "  \r\n  ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \r\n  ", block.?.tail.?);
@@ -248,13 +273,16 @@ test "Whitespace text trimming \\r\\n" {
     try testing.expectEqual(true, block.?.right_trimming.AllowTrimming.stand_alone);
 }
 
-test "resolve" { // Tabs text trimming" {
+test "Tabs text trimming" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                     2   3
     //                                     ↓   ↓
-    var text_scanner = TextScanner.init("\t\t\n\t\t");
+    var text_scanner = toTS(allocator, "\t\t\n\t\t");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\t\t\n\t\t", block.?.tail.?);
@@ -270,12 +298,15 @@ test "resolve" { // Tabs text trimming" {
 }
 
 test "Whitespace left trimming" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                     2 EOF
     //                                     ↓ ↓
-    var text_scanner = TextScanner.init("  \n");
+    var text_scanner = toTS(allocator, "  \n");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \n", block.?.tail.?);
@@ -291,12 +322,14 @@ test "Whitespace left trimming" {
 }
 
 test "Whitespace left trimming \\r\\n" {
-
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     //                                       3 EOF
     //                                       ↓ ↓
-    var text_scanner = TextScanner.init("  \r\n");
+    var text_scanner = toTS(allocator, "  \r\n");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \r\n", block.?.tail.?);
@@ -312,12 +345,15 @@ test "Whitespace left trimming \\r\\n" {
 }
 
 test "Tabs left trimming" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                       2 EOF
     //                                       ↓ ↓
-    var text_scanner = TextScanner.init("\t\t\n");
+    var text_scanner = toTS(allocator, "\t\t\n");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\t\t\n", block.?.tail.?);
@@ -333,12 +369,15 @@ test "Tabs left trimming" {
 }
 
 test "Whitespace right trimming" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                   0 1
     //                                   ↓ ↓
-    var text_scanner = TextScanner.init("\n  ");
+    var text_scanner = toTS(allocator, "\n  ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\n  ", block.?.tail.?);
@@ -354,12 +393,15 @@ test "Whitespace right trimming" {
 }
 
 test "Whitespace right trimming \\r\\n" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                     1 2
     //                                     ↓ ↓
-    var text_scanner = TextScanner.init("\r\n  ");
+    var text_scanner = toTS(allocator, "\r\n  ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\r\n  ", block.?.tail.?);
@@ -375,12 +417,15 @@ test "Whitespace right trimming \\r\\n" {
 }
 
 test "Tabs right trimming" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                   0 1
     //                                   ↓ ↓
-    var text_scanner = TextScanner.init("\n\t\t");
+    var text_scanner = toTS(allocator, "\n\t\t");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\n\t\t", block.?.tail.?);
@@ -396,12 +441,15 @@ test "Tabs right trimming" {
 }
 
 test "Single line break" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                   0 EOF
     //                                   ↓ ↓
-    var text_scanner = TextScanner.init("\n");
+    var text_scanner = toTS(allocator, "\n");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\n", block.?.tail.?);
@@ -417,12 +465,15 @@ test "Single line break" {
 }
 
 test "Single line break \\r\\n" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                   0   EOF
     //                                   ↓   ↓
-    var text_scanner = TextScanner.init("\r\n");
+    var text_scanner = toTS(allocator, "\r\n");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\r\n", block.?.tail.?);
@@ -437,12 +488,15 @@ test "Single line break \\r\\n" {
 }
 
 test "No trimming" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //
     //
-    var text_scanner = TextScanner.init("   ABC\nABC   ");
+    var text_scanner = toTS(allocator, "   ABC\nABC   ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ABC\nABC   ", block.?.tail.?);
@@ -453,12 +507,15 @@ test "No trimming" {
 }
 
 test "No trimming, no whitespace" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                      EOF
     //                                      ↓
-    var text_scanner = TextScanner.init("|\n");
+    var text_scanner = toTS(allocator, "|\n");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("|\n", block.?.tail.?);
@@ -473,12 +530,15 @@ test "No trimming, no whitespace" {
 }
 
 test "No trimming, no whitespace \\r\\n" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                        EOF
     //                                        ↓
-    var text_scanner = TextScanner.init("|\r\n");
+    var text_scanner = toTS(allocator, "|\r\n");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("|\r\n", block.?.tail.?);
@@ -493,12 +553,15 @@ test "No trimming, no whitespace \\r\\n" {
 }
 
 test "No trimming \\r\\n" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //
     //
-    var text_scanner = TextScanner.init("   ABC\r\nABC   ");
+    var text_scanner = toTS(allocator, "   ABC\r\nABC   ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ABC\r\nABC   ", block.?.tail.?);
@@ -509,12 +572,15 @@ test "No trimming \\r\\n" {
 }
 
 test "No whitespace" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //
     //
-    var text_scanner = TextScanner.init("ABC");
+    var text_scanner = toTS(allocator, "ABC");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("ABC", block.?.tail.?);
@@ -525,12 +591,15 @@ test "No whitespace" {
 }
 
 test "Trimming left only" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                      3
     //                                      ↓
-    var text_scanner = TextScanner.init("   \nABC   ");
+    var text_scanner = toTS(allocator, "   \nABC   ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   \nABC   ", block.?.tail.?);
@@ -543,12 +612,15 @@ test "Trimming left only" {
 }
 
 test "Trimming left only \\r\\n" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                        4
     //                                        ↓
-    var text_scanner = TextScanner.init("   \r\nABC   ");
+    var text_scanner = toTS(allocator, "   \r\nABC   ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   \r\nABC   ", block.?.tail.?);
@@ -561,12 +633,15 @@ test "Trimming left only \\r\\n" {
 }
 
 test "Trimming right only" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                           7
     //                                           ↓
-    var text_scanner = TextScanner.init("   ABC\n   ");
+    var text_scanner = toTS(allocator, "   ABC\n   ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ABC\n   ", block.?.tail.?);
@@ -580,12 +655,15 @@ test "Trimming right only" {
 }
 
 test "Trimming right only \\r\\n" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                             8
     //                                             ↓
-    var text_scanner = TextScanner.init("   ABC\r\n   ");
+    var text_scanner = toTS(allocator, "   ABC\r\n   ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ABC\r\n   ", block.?.tail.?);
@@ -599,12 +677,15 @@ test "Trimming right only \\r\\n" {
 }
 
 test "Only whitespace" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                   0
     //                                   ↓
-    var text_scanner = TextScanner.init("   ");
+    var text_scanner = toTS(allocator, "   ");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ", block.?.tail.?);
@@ -619,12 +700,15 @@ test "Only whitespace" {
 }
 
 test "Only tabs" {
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     //                                   0
     //                                   ↓
-    var text_scanner = TextScanner.init("\t\t\t");
+    var text_scanner = toTS(allocator, "\t\t\t");
 
-    var block = text_scanner.next();
+    var block = try text_scanner.next();
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\t\t\t", block.?.tail.?);

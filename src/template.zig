@@ -249,6 +249,14 @@ pub const Template = struct {
         return try parser.parse();
     }
 
+    pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, delimiters: Delimiters) !Template {
+        var arena = ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        var parser = try Parser.initFromFile(allocator, arena.allocator(), absolute_path, delimiters);
+        return try parser.parse();
+    }
+
     pub fn deinit(self: *Self) void {
         switch (self.result) {
             .Elements => |elements| Element.freeMany(self.allocator, elements),
@@ -1954,6 +1962,7 @@ const tests = struct {
         try testing.expect(template.result == .Elements);
         const elements = template.result.Elements;
 
+        std.log.err("{?}", .{ elements });
         try testing.expectEqual(@as(usize, 3), elements.len);
 
         try testing.expectEqual(Element.StaticText, elements[0]);
@@ -2003,4 +2012,86 @@ const tests = struct {
         try testing.expectEqual(Element.StaticText, elements[2]);
         try testing.expectEqualStrings("World", elements[2].StaticText);
     }
+
+    test "Basic DOM File test" {
+        const template_text =
+            \\{{! Comments block }}
+            \\  Hello
+            \\  {{#section}}
+            \\Name: {{name}}
+            \\Comments: {{&comments}}
+            \\{{^inverted}}Inverted text{{/inverted}}
+            \\{{/section}}
+            \\World
+        ;
+
+        const allocator = testing.allocator;
+
+        const path = try std.fs.selfExeDirPathAlloc(allocator);
+        defer allocator.free(path);
+
+        const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "temp.mustache" });
+        defer allocator.free(absolute_file_path);
+
+        var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
+        try file.writeAll(template_text);
+        file.close();
+        //defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
+
+        var template = try Template.initFromFile(allocator, absolute_file_path, .{});
+        defer template.deinit();
+
+        try testing.expect(template.result == .Elements);
+        const elements = template.result.Elements;
+
+        std.log.err("{?}", .{ elements });
+        try testing.expectEqual(@as(usize, 3), elements.len);
+
+        try testing.expectEqual(Element.StaticText, elements[0]);
+        try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
+
+        try testing.expectEqual(Element.Section, elements[1]);
+        try testing.expectEqualStrings("section", elements[1].Section.key);
+        if (elements[1].Section.content) |section| {
+            try testing.expectEqual(@as(usize, 7), section.len);
+
+            try testing.expectEqual(Element.StaticText, section[0]);
+            try testing.expectEqualStrings("Name: ", section[0].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, section[1]);
+            try testing.expectEqualStrings("name", section[1].Interpolation.key);
+            try testing.expectEqual(true, section[1].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, section[2]);
+            try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
+
+            try testing.expectEqual(Element.Interpolation, section[3]);
+            try testing.expectEqualStrings("comments", section[3].Interpolation.key);
+            try testing.expectEqual(false, section[3].Interpolation.escaped);
+
+            try testing.expectEqual(Element.StaticText, section[4]);
+            try testing.expectEqualStrings("\n", section[4].StaticText);
+
+            try testing.expectEqual(Element.Section, section[5]);
+            try testing.expectEqualStrings("inverted", section[5].Section.key);
+            try testing.expectEqual(true, section[5].Section.inverted);
+
+            if (section[5].Section.content) |inverted_section| {
+                try testing.expectEqual(@as(usize, 1), inverted_section.len);
+
+                try testing.expectEqual(Element.StaticText, inverted_section[0]);
+                try testing.expectEqualStrings("Inverted text", inverted_section[0].StaticText);
+            } else {
+                try testing.expect(false);
+            }
+
+            try testing.expectEqual(Element.StaticText, section[6]);
+            try testing.expectEqualStrings("\n", section[6].StaticText);
+        } else {
+            try testing.expect(false);
+        }
+
+        try testing.expectEqual(Element.StaticText, elements[2]);
+        try testing.expectEqualStrings("World", elements[2].StaticText);
+    }    
 };

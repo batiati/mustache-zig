@@ -15,7 +15,9 @@ const Block = mustache.template.Block;
 const LastError = mustache.template.LastError;
 
 const ParseErrors = mustache.template.ParseErrors;
-const Errors = ParseErrors || Allocator.Error;
+const ReadError = std.fs.File.ReadError;
+const OpenError = std.fs.File.OpenError;
+const Errors = ParseErrors || Allocator.Error || ReadError || OpenError;
 
 const parsing = @import("parsing.zig");
 const TextScanner = parsing.TextScanner;
@@ -25,6 +27,8 @@ const BlockType = parsing.BlockType;
 const Mark = parsing.Mark;
 const Level = parsing.Level;
 const Node = parsing.Node;
+
+const text = @import("../text.zig");
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -38,7 +42,7 @@ const Self = @This();
 
 gpa: Allocator,
 arena: Allocator,
-template_text: []const u8,
+reader: text.TextReader,
 state: State,
 root: *Level,
 current_level: *Level,
@@ -46,11 +50,26 @@ last_error: ?LastError = null,
 
 pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, delimiters: Delimiters) Allocator.Error!Self {
     var root = try Level.init(arena, delimiters);
+    const reader = try text.fromString(arena, template_text);
 
     return Self{
         .gpa = gpa,
         .arena = arena,
-        .template_text = template_text,
+        .reader = reader,
+        .state = .WaitingStaringTag,
+        .root = root,
+        .current_level = root,
+    };
+}
+
+pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8, delimiters: Delimiters) Errors!Self {
+    var root = try Level.init(arena, delimiters);
+    const reader = try text.fromFile(arena, absolute_path);
+
+    return Self{
+        .gpa = gpa,
+        .arena = arena,
+        .reader = reader,
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
@@ -273,8 +292,8 @@ fn parseDelimiters(self: *Self, text_block: *TextBlock) Errors!Delimiters {
 }
 
 fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const u8 {
-    if (text_block.tail) |text| {
-        var tokenizer = std.mem.tokenize(u8, text, " \t");
+    if (text_block.tail) |tail| {
+        var tokenizer = std.mem.tokenize(u8, tail, " \t");
         if (tokenizer.next()) |token| {
             if (tokenizer.next() == null) {
                 return token;
@@ -286,14 +305,14 @@ fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const 
 }
 
 fn parseTree(self: *Self) Errors![]const *Node {
-    var text_scanner = TextScanner.init(self.template_text);
+    var text_scanner = TextScanner.init(self.reader);
     text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
         return self.setLastError(err, null, null);
     };
 
     var static_text_block: ?*Node = null;
 
-    while (text_scanner.next()) |*text_block| {
+    while (try text_scanner.next()) |*text_block| {
         var block_type = (try self.matchBlockType(text_block)) orelse continue;
 
         // Befone adding,

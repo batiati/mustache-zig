@@ -6,17 +6,47 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 const testing = std.testing;
 
-pub fn fromString(content: []const u8) StringTextRope {
-    return StringTextRope{ .content = content };
+const OpenError = std.fs.File.OpenError;
+const ReadError = std.fs.File.ReadError;
+const FileError = OpenError || ReadError;
+const Errors = Allocator.Error || FileError;
+
+pub fn fromString(arena: Allocator, content: []const u8) Allocator.Error!TextReader {
+    var ctx = try StringReader.init(arena, content);
+    return ctx.textReader();
 }
 
-pub fn fromFile(allocator: Allocator, absolute_path: []const u8) anyerror!FileTextRope {
+pub fn fromFile(arena: Allocator, absolute_path: []const u8) Errors!TextReader {
     var file = try std.fs.openFileAbsolute(absolute_path, .{});
-    return FileTextRope{
-        .allocator = allocator,
-        .file = file,
-    };
+    var stream = try StreamReader(std.fs.File).init(arena, file);
+    return stream.textReader();
 }
+
+pub const TextReader = struct {
+    const ReadFn = fn (ctx: *anyopaque, ref_slice: *[]const u8, block_index: usize) Errors!ReaderResult;
+    const CloseFn = fn (ctx: *anyopaque) void;
+    const VTable = struct {
+        read: ReadFn,
+        close: CloseFn,
+    };
+
+    pub const ReaderResult = enum {
+        Eof,
+        LastPart,
+        Continue,
+    };
+
+    ctx: *anyopaque,
+    vtable: *const VTable,
+
+    pub fn read(self: TextReader, ref_slice: *[]const u8, block_index: usize) Errors!ReaderResult {
+        return self.vtable.read(self.ctx, ref_slice, block_index);
+    }
+
+    pub fn close(self: TextReader) void {
+        self.vtable.close(self.ctx);
+    }
+};
 
 pub const StringBuilder = struct {
     const Self = @This();
@@ -325,52 +355,106 @@ pub const StringBuilder = struct {
     }
 };
 
-pub const StringTextRope = struct {
-    const Self = @This();
-
+const StringReader = struct {
     content: ?[]const u8,
+    const vtable = TextReader.VTable{
+        .read = read_fn,
+        .close = close_fn,
+    };
 
-    pub fn next(self: *Self) anyerror!?[]const u8 {
+    pub fn init(arena: Allocator, content: []const u8) Allocator.Error!*StringReader {
+        var self = try arena.create(StringReader);
+        self.* = .{ .content = content };
+
+        return self;
+    }
+
+    pub fn textReader(self: *StringReader) TextReader {
+        return .{
+            .ctx = self,
+            .vtable = &vtable,
+        };
+    }
+
+    fn read_fn(ctx: *anyopaque, ref_slice: *[]const u8, block_index: usize) Errors!TextReader.ReaderResult {
+        const alignment = @alignOf(*StringReader);
+        var self = @ptrCast(*StringReader, @alignCast(alignment, ctx));
+        _ = block_index;
+
         if (self.content) |content| {
             self.content = null;
-            return content;
+            ref_slice.* = content;
+            return .LastPart;
         } else {
-            return null;
+            return .Eof;
         }
     }
 
-    pub fn deinit(self: *Self) void {
-        _ = self;
+    fn close_fn(ctx: *anyopaque) void {
+        _ = ctx;
     }
 };
 
-pub const FileTextRope = struct {
-    const BUFFER_SIZE = 4096;
-    const Self = @This();
+fn StreamReader(comptime TStream: type) type {
+    return struct {
+        const BUFFER_SIZE = 4096;
+        const Self = @This();
+        const vtable = TextReader.VTable{
+            .read = read_fn,
+            .close = close_fn,
+        };
 
-    allocator: Allocator,
-    file: std.fs.File,
+        arena: Allocator,
+        stream: TStream,
 
-    fn next(self: *Self) anyerror!?[]const u8 {
-        var buffer = try self.allocator.alloc(u8, BUFFER_SIZE);
-        errdefer self.allocator.free(buffer);
+        pub fn init(arena: Allocator, stream: TStream) Allocator.Error!*Self {
+            var self = try arena.create(Self);
+            self.* = .{
+                .arena = arena,
+                .stream = stream,
+            };
 
-        var size = try self.file.read(buffer);
-        if (size == 0) {
-            self.allocator.free(buffer);
-            return null;
-        } else if (size < buffer.len) {
-            self.allocator.free(buffer[size..]);
-            return buffer[0..size];
-        } else {
-            return buffer;
+            return self;
         }
-    }
 
-    pub fn deinit(self: *Self) void {
-        self.file.close();
-    }
-};
+        pub fn textReader(self: *Self) TextReader {
+            return .{
+                .ctx = self,
+                .vtable = &vtable,
+            };
+        }
+
+        fn read_fn(ctx: *anyopaque, ref_slice: *[]const u8, block_index: usize) Errors!TextReader.ReaderResult {
+            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
+
+            const start_index = ref_slice.*.len - block_index + 1;
+            var buffer = try self.arena.alloc(u8, BUFFER_SIZE + start_index);
+            if (start_index > 0) {
+                std.mem.copy(u8, buffer, ref_slice.*[block_index..]);
+            }
+
+            var size = try self.stream.read(buffer[start_index..]);
+            if (size == 0) {
+                self.arena.free(buffer[start_index..]);
+                return .Eof;
+            } else if (size < BUFFER_SIZE) {
+                self.arena.free(buffer[start_index + size ..]);
+                ref_slice.* = buffer[0..start_index + size];
+                return .LastPart;
+            } else {
+                ref_slice.* = buffer;
+                return .Continue;
+            }
+        }
+
+        //ABC01234
+
+        fn close_fn(ctx: *anyopaque) void {
+            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
+            self.stream.close();
+        }
+    };
+}
 
 test {
     testing.refAllDecls(@This());
