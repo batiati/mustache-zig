@@ -252,7 +252,8 @@ pub const Template = struct {
         defer arena.deinit();
 
         var parser = try Parser.init(allocator, arena.allocator(), template_text, options);
-        return try parser.parse();
+
+        return parse(allocator, &parser);
     }
 
     pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, options: TemplateOptions) !Template {
@@ -260,7 +261,40 @@ pub const Template = struct {
         defer arena.deinit();
 
         var parser = try Parser.initFromFile(allocator, arena.allocator(), absolute_path, options);
-        return try parser.parse();
+        return parse(allocator, &parser);
+    }
+
+    fn parse(allocator: Allocator, parser: *Parser) !Template {
+
+        var list = std.ArrayListUnmanaged(Element){};
+
+        while (true) {
+            var parse_result = try parser.parse();
+            switch (parse_result) {
+                .Error => |err| {
+                    list.deinit(allocator);
+                    return Template{
+                        .allocator = allocator,
+                        .result = .{
+                            .Error = err,
+                        },
+                    };
+                },
+                .Elements => |elements| {
+                    list.appendSlice(allocator, elements);
+                    arena.deinit();
+                },
+                .Done => break,
+            }
+        }
+
+        return Template{
+            .allocator = allocator,
+            .result = .{
+                .Elements = try list.toOwnedSlice(allocator),
+            },
+        };
+
     }
 
     pub fn deinit(self: *Self) void {

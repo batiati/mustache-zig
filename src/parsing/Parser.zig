@@ -39,11 +39,17 @@ const State = enum {
     WaitingEndingTag,
 };
 
+pub const ParseResult = union(enum) {
+    Error: LastError,
+    Elements: []Element,
+    Done,
+};
+
 const Self = @This();
 
 gpa: Allocator,
 arena: Allocator,
-reader: text.TextReader,
+text_scanner: TextScanner,
 state: State,
 root: *Level,
 current_level: *Level,
@@ -57,7 +63,7 @@ pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, options
     return Self{
         .gpa = gpa,
         .arena = arena,
-        .reader = reader,
+        .text_scanner = TextScanner.init(reader),
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
@@ -72,7 +78,7 @@ pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8,
     return Self{
         .gpa = gpa,
         .arena = arena,
-        .reader = reader,
+        .text_scanner = TextScanner.init(reader),
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
@@ -80,27 +86,21 @@ pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8,
     };
 }
 
-pub fn parse(self: *Self) Allocator.Error!Template {
-    std.log.err("Before parse tree", .{});
-    const nodes = self.parseTree() catch |err| return self.fromError(err);
-    std.log.err("After parse tree", .{});
-    const elements = self.createElements(null, nodes) catch |err| return self.fromError(err);
-    std.log.err("After createElements", .{});
-
-    return Template{
-        .allocator = self.gpa,
-        .result = .{ .Elements = elements },
-    };
+pub fn parse(self: *Self) Allocator.Error!ParseResult {
+    if (self.parseTree() catch |err| return self.fromError(err)) |nodes| {
+        if (self.createElements(null, nodes) catch |err| return self.fromError(err)) |elements| {
+            return ParseResult{ .Elements = elements };
+        } else {
+            return .Done;
+        }
+    }
 }
 
-fn fromError(self: *Self, err: Errors) Allocator.Error!Template {
+fn fromError(self: *Self, err: Errors) Allocator.Error!ParseResult {
     switch (err) {
         Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
-        else => |parse_err| return Template{
-            .allocator = self.gpa,
-            .result = .{
-                .Error = self.last_error orelse .{ .error_code = parse_err },
-            },
+        else => |parse_err| return ParseResult{
+            .Error = self.last_error orelse .{ .error_code = parse_err },
         },
     }
 }
@@ -320,15 +320,14 @@ fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const 
     return self.setLastError(ParseErrors.InvalidIdentifier, text_block, null);
 }
 
-fn parseTree(self: *Self) Errors![]const *Node {
-    var text_scanner = TextScanner.init(self.reader);
-    text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
+fn parseTree(self: *Self) Errors!?[]const *Node {
+    self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
         return self.setLastError(err, null, null);
     };
 
     var static_text_block: ?*Node = null;
 
-    while (try text_scanner.next()) |*text_block| {
+    while (try self.text_scanner.next()) |*text_block| {
         var block_type = (try self.matchBlockType(text_block)) orelse continue;
 
         // Befone adding,
@@ -343,7 +342,7 @@ fn parseTree(self: *Self) Errors![]const *Node {
                 //Apply the new delimiters to the reader immediately
                 const new_delimiters = try self.parseDelimiters(text_block);
 
-                text_scanner.setDelimiters(new_delimiters) catch |err| {
+                self.text_scanner.setDelimiters(new_delimiters) catch |err| {
                     return self.setLastError(err, text_block, null);
                 };
 
@@ -379,12 +378,17 @@ fn parseTree(self: *Self) Errors![]const *Node {
                 };
 
                 // Restore parent delimiters
-                text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
+                self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
                     return self.setLastError(err, text_block, null);
                 };
             },
 
             else => {},
+        }
+
+        if (self.current_level == self.root) {
+            // return all produces tags until now;
+            break;
         }
     }
 
@@ -398,8 +402,11 @@ fn parseTree(self: *Self) Errors![]const *Node {
         }
     }
 
-    std.log.err("TO OWNED SLICE {}", .{self.root.list.items.len});
-    return self.root.list.toOwnedSlice(self.arena);
+    if (self.root.list.items.len == 0) {
+        return null;
+    } else {
+        return self.root.list.toOwnedSlice(self.arena);
+    }
 }
 
 fn setLastError(self: *Self, err: ParseErrors, text_block: ?*const TextBlock, detail: ?[]const u8) ParseErrors {
