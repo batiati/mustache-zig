@@ -128,14 +128,10 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
 
 fn requestContent(self: *Self) !void {
     if (!self.reader.finished()) {
-
         const prepend = self.content[self.block_index..];
         self.content = try self.reader.read(prepend);
         self.index -= self.block_index;
         self.block_index = 0;
-
-        std.log.warn("BUFFER > {} to {} "
-            , .{ prepend.len, self.content.len });        
     }
 }
 

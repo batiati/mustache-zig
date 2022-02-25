@@ -81,7 +81,6 @@ pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8,
 }
 
 pub fn parse(self: *Self) Allocator.Error!Template {
-
     std.log.err("Before parse tree", .{});
     const nodes = self.parseTree() catch |err| return self.fromError(err);
     std.log.err("After parse tree", .{});
@@ -107,7 +106,7 @@ fn fromError(self: *Self, err: Errors) Allocator.Error!Template {
 }
 
 inline fn dupe(self: *const Self, mem: []const u8) Allocator.Error![]const u8 {
-    if (self.options.copy_strings) {
+    if (self.options.own_strings) {
         return try self.gpa.dupe(u8, mem);
     } else {
         return mem;
@@ -115,10 +114,9 @@ inline fn dupe(self: *const Self, mem: []const u8) Allocator.Error![]const u8 {
 }
 
 fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Errors![]const Element {
-
-    std.log.warn("Create elements > {s}", .{ if (parent_key) |p| p else "NULL" }); 
+    std.log.warn("Create elements > {s}", .{if (parent_key) |p| p else "NULL"});
     var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
-    errdefer Element.freeMany(self.gpa, list.toOwnedSlice(self.gpa));
+    errdefer Element.freeMany(self.gpa, self.options.own_strings, list.toOwnedSlice(self.gpa));
 
     for (nodes) |node| {
         const element = blk: {
@@ -158,13 +156,13 @@ fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Er
 
                 else => |block_type| {
                     const key = try self.dupe(try self.parseIdentificator(&node.text_block));
-                    errdefer if (self.options.copy_strings) self.gpa.free(key);
+                    errdefer if (self.options.own_strings) self.gpa.free(key);
 
                     const content = if (node.children) |children| try self.createElements(key, children) else null;
-                    errdefer if (content) |content_value| Element.freeMany(self.gpa, content_value);
+                    errdefer if (content) |content_value| Element.freeMany(self.gpa, self.options.own_strings, content_value);
 
                     const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node_indentation) else null;
-                    errdefer if (self.options.copy_strings) if (indentation) |indentation_value| self.gpa.free(indentation_value);
+                    errdefer if (self.options.own_strings) if (indentation) |indentation_value| self.gpa.free(indentation_value);
 
                     break :blk switch (block_type) {
                         .Interpolation,
@@ -400,7 +398,7 @@ fn parseTree(self: *Self) Errors![]const *Node {
         }
     }
 
-    std.log.err("TO OWNED SLICE {}", .{ self.root.list.items.len });
+    std.log.err("TO OWNED SLICE {}", .{self.root.list.items.len});
     return self.root.list.toOwnedSlice(self.arena);
 }
 

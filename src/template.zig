@@ -196,36 +196,36 @@ pub const Element = union(enum) {
     /// This content is the argument passed to the Parent template.
     Block: Block,
 
-    pub fn free(self: Element, allocator: Allocator) void {
+    pub fn free(self: Element, allocator: Allocator, own_strings: bool) void {
         switch (self) {
             .StaticText => |content| allocator.free(content),
             .Interpolation => |interpolation| allocator.free(interpolation.key),
             .Section => |section| {
-                allocator.free(section.key);
-                freeMany(allocator, section.content);
+                if (own_strings) allocator.free(section.key);
+                freeMany(allocator, own_strings, section.content);
             },
 
             .Partial => |partial| {
-                allocator.free(partial.key);
+                if (own_strings) allocator.free(partial.key);
                 if (partial.indentation) |indentation| allocator.free(indentation);
             },
 
             .Parent => |inheritance| {
-                allocator.free(inheritance.key);
-                freeMany(allocator, inheritance.content);
+                if (own_strings) allocator.free(inheritance.key);
+                freeMany(allocator, own_strings, inheritance.content);
             },
 
             .Block => |block| {
-                allocator.free(block.key);
-                freeMany(allocator, block.content);
+                if (own_strings) allocator.free(block.key);
+                freeMany(allocator, own_strings, block.content);
             },
         }
     }
 
-    pub fn freeMany(allocator: Allocator, many: ?[]const Element) void {
+    pub fn freeMany(allocator: Allocator, own_strings: bool, many: ?[]const Element) void {
         if (many) |items| {
             for (items) |item| {
-                item.free(allocator);
+                item.free(allocator, own_strings);
             }
             allocator.free(items);
         }
@@ -234,8 +234,8 @@ pub const Element = union(enum) {
 
 pub const TemplateOptions = struct {
     delimiters: Delimiters = .{},
-    read_buffer_size: u32 = 1 * 1024 * 1024,
-    copy_strings: bool = true,
+    read_buffer_size: u32 = 4 * 1024,
+    own_strings: bool = true,
 };
 
 pub const Template = struct {
@@ -265,7 +265,7 @@ pub const Template = struct {
 
     pub fn deinit(self: *Self) void {
         switch (self.result) {
-            .Elements => |elements| Element.freeMany(self.allocator, elements),
+            .Elements => |elements| Element.freeMany(self.allocator, true, elements),
             .Error => {},
         }
     }
@@ -2141,7 +2141,7 @@ const tests = struct {
 
         //var fba = std.heap.FixedBufferAllocator.init(plenty_of_memory);
 
-        var template = try Template.initFromFile(allocator, absolute_file_path, .{ });
+        var template = try Template.initFromFile(allocator, absolute_file_path, .{});
         defer template.deinit();
 
         try testing.expect(template.result == .Elements);
