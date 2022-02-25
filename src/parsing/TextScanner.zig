@@ -128,38 +128,34 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
 
 fn requestContent(self: *Self) !void {
     if (!self.reader.finished()) {
+
         const prepend = self.content[self.block_index..];
         self.content = try self.reader.read(prepend);
         self.index -= self.block_index;
         self.block_index = 0;
-    }        
+
+        std.log.warn("BUFFER > {} to {} "
+            , .{ prepend.len, self.content.len });        
+    }
 }
 
 ///
 /// Reads until the next delimiter mark or EOF
 pub fn next(self: *Self) !?TextBlock {
-    
-    if (self.content.len == 0) {
-        try self.requestContent();
-    }
-    else if  (self.index == self.content.len - 1) {
-        return null;
-    }
-
     self.block_index = self.index;
     var trimmer = Trimmer{ .text_scanner = self };
 
-    while (true) { //self.index < self.content.len) {
-
-        // Request a new slice if next to the end
-        if (self.index + self.delimiter_max_size >= self.content.len - 1) {
+    while (self.index < self.content.len or
+        !self.reader.finished())
+    {
+        // Request a new slice if near to the end
+        if (self.content.len == 0 or
+            self.index + self.delimiter_max_size + 1 >= self.content.len)
+        {
             try self.requestContent();
         }
 
-        if (self.index >= self.content.len) {
-            return null;
-        }
-
+        // Increment the index on defer
         var increment: u32 = 1;
         defer {
             if (self.content[self.index] == '\n') {
@@ -172,8 +168,6 @@ pub fn next(self: *Self) !?TextBlock {
             self.index += increment;
         }
 
-        
-
         if (self.matchTagMark()) |mark| {
             const block = TextBlock{
                 .event = .{ .Mark = mark },
@@ -185,7 +179,6 @@ pub fn next(self: *Self) !?TextBlock {
             };
 
             increment = @intCast(u32, mark.delimiter.len);
-            std.log.err("MATCH {} Finished {}", .{ self.index, self.reader.finished() });
 
             return block;
         }
@@ -193,10 +186,6 @@ pub fn next(self: *Self) !?TextBlock {
         trimmer.move();
 
         if (self.index == self.content.len - 1) {
-
-            std.log.err("EOF HERE: {}", .{ self.reader.finished() });
-            try self.requestContent();
-
             return TextBlock{
                 .event = .Eof,
                 .tail = self.content[self.block_index..],
@@ -208,7 +197,7 @@ pub fn next(self: *Self) !?TextBlock {
         }
     }
 
-    std.log.err("NO MORE {} of {} Finished {}", .{ self.index,  self.reader.finished() });
+    // No more parts
     return null;
 }
 

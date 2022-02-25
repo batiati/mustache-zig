@@ -234,7 +234,8 @@ pub const Element = union(enum) {
 
 pub const TemplateOptions = struct {
     delimiters: Delimiters = .{},
-    read_buffer_size: u32 = 4096,
+    read_buffer_size: u32 = 1 * 1024 * 1024,
+    copy_strings: bool = true,
 };
 
 pub const Template = struct {
@@ -2034,6 +2035,7 @@ const tests = struct {
         const path = try std.fs.selfExeDirPathAlloc(allocator);
         defer allocator.free(path);
 
+        // Creating a temp file
         const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "temp.mustache" });
         defer allocator.free(absolute_file_path);
 
@@ -2042,7 +2044,9 @@ const tests = struct {
         file.close();
         defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
 
-        var template = try Template.initFromFile(allocator, absolute_file_path, .{ .read_buffer_size = 16 });
+        // Read from a file, assuring that this text should read four times from the buffer
+        const read_buffer_size = (template_text.len / 4);
+        var template = try Template.initFromFile(allocator, absolute_file_path, .{ .read_buffer_size = read_buffer_size });
         defer template.deinit();
 
         try testing.expect(template.result == .Elements);
@@ -2096,5 +2100,53 @@ const tests = struct {
 
         try testing.expectEqual(Element.StaticText, elements[2]);
         try testing.expectEqualStrings("World", elements[2].StaticText);
+    }
+
+    test "Large DOM File test" {
+        const template_text =
+            \\{{! Comments block }}
+            \\  Hello
+            \\  {{#section}}
+            \\Name: {{name}}
+            \\Comments: {{&comments}}
+            \\{{^inverted}}Inverted text{{/inverted}}
+            \\{{/section}}
+            \\World
+        ;
+
+        const allocator = testing.allocator;
+
+        const path = try std.fs.selfExeDirPathAlloc(allocator);
+        defer allocator.free(path);
+
+        // Creating a temp file
+        const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "temp_large_file.mustache" });
+        defer allocator.free(absolute_file_path);
+
+        //var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
+
+        // Write 1024 times the same template on a file
+        const MB = 1024 * 1024;
+        //try file.writeAll(template_text ** MB);
+        //file.close();
+        std.log.err("\"{s}\"", .{absolute_file_path});
+        _ = template_text;
+        //defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
+
+        // Read from a large file
+
+        // 8Kb of memory
+        //var plenty_of_memory = try allocator.alloc(u8, 8 * 1024);
+        //defer allocator.free(plenty_of_memory);
+
+        //var fba = std.heap.FixedBufferAllocator.init(plenty_of_memory);
+
+        var template = try Template.initFromFile(allocator, absolute_file_path, .{ });
+        defer template.deinit();
+
+        try testing.expect(template.result == .Elements);
+        const elements = template.result.Elements;
+
+        try testing.expectEqual(@as(usize, 3 * MB), elements.len);
     }
 };

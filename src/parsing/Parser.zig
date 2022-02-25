@@ -47,6 +47,7 @@ reader: text.TextReader,
 state: State,
 root: *Level,
 current_level: *Level,
+options: TemplateOptions,
 last_error: ?LastError = null,
 
 pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, options: TemplateOptions) Allocator.Error!Self {
@@ -60,6 +61,7 @@ pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, options
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
+        .options = options,
     };
 }
 
@@ -74,12 +76,17 @@ pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8,
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
+        .options = options,
     };
 }
 
 pub fn parse(self: *Self) Allocator.Error!Template {
+
+    std.log.err("Before parse tree", .{});
     const nodes = self.parseTree() catch |err| return self.fromError(err);
+    std.log.err("After parse tree", .{});
     const elements = self.createElements(null, nodes) catch |err| return self.fromError(err);
+    std.log.err("After createElements", .{});
 
     return Template{
         .allocator = self.gpa,
@@ -99,8 +106,18 @@ fn fromError(self: *Self, err: Errors) Allocator.Error!Template {
     }
 }
 
+inline fn dupe(self: *const Self, mem: []const u8) Allocator.Error![]const u8 {
+    if (self.options.copy_strings) {
+        return try self.gpa.dupe(u8, mem);
+    } else {
+        return mem;
+    }
+}
+
 fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Errors![]const Element {
-    var list = std.ArrayListUnmanaged(Element){};
+
+    std.log.warn("Create elements > {s}", .{ if (parent_key) |p| p else "NULL" }); 
+    var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
     errdefer Element.freeMany(self.gpa, list.toOwnedSlice(self.gpa));
 
     for (nodes) |node| {
@@ -113,7 +130,7 @@ fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Er
                         assert(content.len > 0);
 
                         break :blk Element{
-                            .StaticText = try self.gpa.dupe(u8, content),
+                            .StaticText = try self.dupe(content),
                         };
                     } else {
                         // Empty tag
@@ -140,14 +157,14 @@ fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Er
                 => break :blk null,
 
                 else => |block_type| {
-                    const key = try self.gpa.dupe(u8, try self.parseIdentificator(&node.text_block));
-                    errdefer self.gpa.free(key);
+                    const key = try self.dupe(try self.parseIdentificator(&node.text_block));
+                    errdefer if (self.options.copy_strings) self.gpa.free(key);
 
                     const content = if (node.children) |children| try self.createElements(key, children) else null;
                     errdefer if (content) |content_value| Element.freeMany(self.gpa, content_value);
 
-                    const indentation = if (node.getIndentation()) |node_indentation| try self.gpa.dupe(u8, node_indentation) else null;
-                    errdefer if (indentation) |indentation_value| self.gpa.free(indentation_value);
+                    const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node_indentation) else null;
+                    errdefer if (self.options.copy_strings) if (indentation) |indentation_value| self.gpa.free(indentation_value);
 
                     break :blk switch (block_type) {
                         .Interpolation,
@@ -383,6 +400,7 @@ fn parseTree(self: *Self) Errors![]const *Node {
         }
     }
 
+    std.log.err("TO OWNED SLICE {}", .{ self.root.list.items.len });
     return self.root.list.toOwnedSlice(self.arena);
 }
 
