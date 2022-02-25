@@ -50,7 +50,6 @@ reader: TextReader,
 content: []const u8 = &.{},
 index: usize = 0,
 block_index: usize = 0,
-finished: bool = false,
 row: u32 = 1,
 col: u32 = 1,
 delimiters: [MAX_DELIMITERS]Delimiter = undefined,
@@ -128,42 +127,39 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
 }
 
 fn requestContent(self: *Self) !void {
-    if (!self.finished and self.index >= self.content.len) {
-
-        std.log.err("current slice {} {} before\"{s}\"", .{ self.block_index, self.index, self.content });
-        var content = self.content;        
-        const read = try self.reader.read(&content, self.block_index);
-        self.content = content;
-
-        self.finished = read != .Continue;
-        if (read != .Eof) {
-
-            if (self.block_index > 0) {
-                self.index -= self.block_index;
-
-                if (self.index >= self.delimiter_max_size) {
-                    self.index -= self.delimiter_max_size;
-                } else {
-                    self.index = 0;
-                }
-
-                self.block_index = 0;
-            }
-            //{{name}}
-        }
-
-        std.log.err("current slice {} {} after {} \"{s}\"", .{ self.block_index, self.index, read, self.content });        
-    }
+    if (!self.reader.finished()) {
+        const prepend = self.content[self.block_index..];
+        self.content = try self.reader.read(prepend);
+        self.index -= self.block_index;
+        self.block_index = 0;
+    }        
 }
 
 ///
 /// Reads until the next delimiter mark or EOF
 pub fn next(self: *Self) !?TextBlock {
-    try self.requestContent();
+    
+    if (self.content.len == 0) {
+        try self.requestContent();
+    }
+    else if  (self.index == self.content.len - 1) {
+        return null;
+    }
+
     self.block_index = self.index;
     var trimmer = Trimmer{ .text_scanner = self };
 
-    while (self.index < self.content.len) {
+    while (true) { //self.index < self.content.len) {
+
+        // Request a new slice if next to the end
+        if (self.index + self.delimiter_max_size >= self.content.len - 1) {
+            try self.requestContent();
+        }
+
+        if (self.index >= self.content.len) {
+            return null;
+        }
+
         var increment: u32 = 1;
         defer {
             if (self.content[self.index] == '\n') {
@@ -176,10 +172,7 @@ pub fn next(self: *Self) !?TextBlock {
             self.index += increment;
         }
 
-        // Request a new slice if next to the end
-        if (self.index + self.delimiter_max_size >= self.content.len - 1) {
-            try self.requestContent();
-        }
+        
 
         if (self.matchTagMark()) |mark| {
             const block = TextBlock{
@@ -192,12 +185,18 @@ pub fn next(self: *Self) !?TextBlock {
             };
 
             increment = @intCast(u32, mark.delimiter.len);
+            std.log.err("MATCH {} Finished {}", .{ self.index, self.reader.finished() });
+
             return block;
         }
 
         trimmer.move();
 
         if (self.index == self.content.len - 1) {
+
+            std.log.err("EOF HERE: {}", .{ self.reader.finished() });
+            try self.requestContent();
+
             return TextBlock{
                 .event = .Eof,
                 .tail = self.content[self.block_index..],
@@ -209,6 +208,7 @@ pub fn next(self: *Self) !?TextBlock {
         }
     }
 
+    std.log.err("NO MORE {} of {} Finished {}", .{ self.index,  self.reader.finished() });
     return null;
 }
 

@@ -400,7 +400,7 @@ fn setLastError(self: *Self, err: ParseErrors, text_block: ?*const TextBlock, de
         \\Line {} col {}
         \\Err {}
         \\=================================
-        , .{ self.last_error.?.row, self.last_error.?.col, self.last_error.?.error_code });
+    , .{ self.last_error.?.row, self.last_error.?.col, self.last_error.?.error_code });
 
     return err;
 }
