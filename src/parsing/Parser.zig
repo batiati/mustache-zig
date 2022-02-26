@@ -16,9 +16,8 @@ const Block = mustache.template.Block;
 const LastError = mustache.template.LastError;
 
 const ParseErrors = mustache.template.ParseErrors;
-const ReadError = std.fs.File.ReadError;
-const OpenError = std.fs.File.OpenError;
-const Errors = ParseErrors || Allocator.Error || ReadError || OpenError;
+const ProcessingErrors = Allocator.Error || std.fs.File.ReadError || std.fs.File.OpenError;
+const Errors = ParseErrors || ProcessingErrors;
 
 const parsing = @import("parsing.zig");
 const TextScanner = parsing.TextScanner;
@@ -30,6 +29,7 @@ const Level = parsing.Level;
 const Node = parsing.Node;
 
 const text = @import("../text.zig");
+const EpochArena = text.EpochArena;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -41,14 +41,15 @@ const State = enum {
 
 pub const ParseResult = union(enum) {
     Error: LastError,
-    Elements: []Element,
+    Nodes: []const *Node,
     Done,
 };
 
 const Self = @This();
 
+
 gpa: Allocator,
-arena: Allocator,
+arena: EpochArena,
 text_scanner: TextScanner,
 state: State,
 root: *Level,
@@ -56,9 +57,16 @@ current_level: *Level,
 options: TemplateOptions,
 last_error: ?LastError = null,
 
-pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, options: TemplateOptions) Allocator.Error!Self {
-    var root = try Level.init(arena, options.delimiters);
-    const reader = try text.fromString(arena, template_text);
+fix_me: usize = 0,
+
+pub fn init(gpa: Allocator, template_text: []const u8, options: TemplateOptions) Allocator.Error!Self {
+    var reader = try text.fromString(gpa, template_text);
+    errdefer reader.deinit(gpa);
+
+    var arena = EpochArena.init(gpa);
+    errdefer arena.deinit();
+
+    var root = try Level.init(arena.allocator(), options.delimiters);
 
     return Self{
         .gpa = gpa,
@@ -71,14 +79,19 @@ pub fn init(gpa: Allocator, arena: Allocator, template_text: []const u8, options
     };
 }
 
-pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8, options: TemplateOptions) Errors!Self {
-    var root = try Level.init(arena, options.delimiters);
-    const reader = try text.fromFile(arena, absolute_path, options.read_buffer_size);
+pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: TemplateOptions) Errors!Self {
+    var reader = try text.fromFile(gpa, absolute_path, options.read_buffer_size);
+    errdefer reader.deinit(gpa);
+
+    var arena = EpochArena.init(gpa);
+    errdefer arena.deinit();
+
+    var root = try Level.init(arena.allocator(), .{});
 
     return Self{
         .gpa = gpa,
         .arena = arena,
-        .text_scanner = TextScanner.init(reader),
+        .text_scanner = TextScanner.init(gpa, reader),
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
@@ -86,22 +99,37 @@ pub fn initFromFile(gpa: Allocator, arena: Allocator, absolute_path: []const u8,
     };
 }
 
-pub fn parse(self: *Self) Allocator.Error!ParseResult {
-    if (self.parseTree() catch |err| return self.fromError(err)) |nodes| {
-        if (self.createElements(null, nodes) catch |err| return self.fromError(err)) |elements| {
-            return ParseResult{ .Elements = elements };
-        } else {
-            return .Done;
-        }
+pub fn deinit(self: *Self) void {
+    self.text_scanner.deinit();
+    self.text_scanner.reader.deinit(self.gpa);
+    self.arena.deinit();
+}
+
+pub fn parse(self: *Self) ProcessingErrors!ParseResult {
+    const ret = self.parseTree() catch |err| {
+        return try self.fromError(err);
+    };
+
+    if (ret) |nodes| {
+        return ParseResult{ .Nodes = nodes };
+    } else {
+        return ParseResult.Done;
     }
 }
 
-fn fromError(self: *Self, err: Errors) Allocator.Error!ParseResult {
+fn fromError(self: *Self, err: Errors) ProcessingErrors!ParseResult {
     switch (err) {
-        Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
-        else => |parse_err| return ParseResult{
+        Errors.StartingDelimiterMismatch,
+        Errors.EndingDelimiterMismatch,
+        Errors.UnexpectedEof,
+        Errors.UnexpectedCloseSection,
+        Errors.InvalidDelimiters,
+        Errors.InvalidIdentifier,
+        Errors.ClosingTagMismatch,
+        => |parse_err| return ParseResult{
             .Error = self.last_error orelse .{ .error_code = parse_err },
         },
+        else => |any| return any,
     }
 }
 
@@ -113,11 +141,7 @@ inline fn dupe(self: *const Self, mem: []const u8) Allocator.Error![]const u8 {
     }
 }
 
-fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Errors![]const Element {
-    std.log.warn("Create elements > {s}", .{if (parent_key) |p| p else "NULL"});
-    var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
-    errdefer Element.freeMany(self.gpa, self.options.own_strings, list.toOwnedSlice(self.gpa));
-
+pub fn createElements(self: *Self, list: *std.ArrayListUnmanaged(Element), parent_key: ?[]const u8, nodes: []const *Node) Errors!void {
     for (nodes) |node| {
         const element = blk: {
             switch (node.block_type) {
@@ -158,7 +182,14 @@ fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Er
                     const key = try self.dupe(try self.parseIdentificator(&node.text_block));
                     errdefer if (self.options.own_strings) self.gpa.free(key);
 
-                    const content = if (node.children) |children| try self.createElements(key, children) else null;
+                    const content = if (node.children) |children| content: {
+                        var children_list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, children.len);
+                        errdefer Element.freeMany(self.gpa, self.options.own_strings, children_list.toOwnedSlice(self.gpa));
+
+                        try self.createElements(&children_list, key, children);
+                        break :content children_list.toOwnedSlice(self.gpa);
+                    } else null;
+
                     errdefer if (content) |content_value| Element.freeMany(self.gpa, self.options.own_strings, content_value);
 
                     const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node_indentation) else null;
@@ -231,8 +262,6 @@ fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []const *Node) Er
             try list.append(self.gpa, valid);
         }
     }
-
-    return list.toOwnedSlice(self.gpa);
 }
 
 fn matchBlockType(self: *Self, text_block: *TextBlock) Errors!?BlockType {
@@ -325,9 +354,13 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
         return self.setLastError(err, null, null);
     };
 
+
+    const arena = self.arena.allocator();
     var static_text_block: ?*Node = null;
 
+    // REF COUNt HERE?
     while (try self.text_scanner.next()) |*text_block| {
+        
         var block_type = (try self.matchBlockType(text_block)) orelse continue;
 
         // Befone adding,
@@ -353,7 +386,7 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
         }
 
         // Adding,
-        try self.current_level.addNode(self.arena, block_type, text_block.*);
+        try self.current_level.addNode(arena, block_type, text_block.*);
 
         // After adding
         switch (block_type) {
@@ -361,7 +394,35 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
                 static_text_block = self.current_level.current_node;
                 assert(static_text_block != null);
 
-                static_text_block.?.trimStandAlone();
+            
+                if (self.current_level == self.root and self.root.list.items.len > 1) {
+                    if (static_text_block.?.text_block.left_trimming != .PreserveWhitespaces) {
+
+                        self.fix_me += 1;
+                        if (self.fix_me > 1000) {
+                            self.fix_me= 0;
+                            std.log.warn("LIN {}", .{ self.text_scanner.row });
+                        }
+                        _ = self.root.list.pop();
+
+                        const nodes = self.root.list.toOwnedSlice(arena);
+
+                        self.arena.nextEpoch();
+                        const new_arena = self.arena.allocator();
+
+                        var root = try Level.init(new_arena, self.root.delimiters);
+                        self.root = root;
+                        self.current_level = root;
+
+                        // Adding,
+                        try self.current_level.addNode(new_arena, block_type, text_block.*);
+                        self.current_level.current_node.?.trimStandAlone();
+
+                        return nodes;
+                    }
+                } else {
+                    static_text_block.?.trimStandAlone();
+                }
             },
 
             .Section,
@@ -369,26 +430,22 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
             .Parent,
             .Block,
             => {
-                self.current_level = try self.current_level.nextLevel(self.arena);
+                self.current_level = try self.current_level.nextLevel(arena);
             },
 
             .CloseSection => {
-                self.current_level = self.current_level.endLevel(self.arena) catch |err| {
+                self.current_level = self.current_level.endLevel(arena) catch |err| {
                     return self.setLastError(err, text_block, null);
                 };
 
                 // Restore parent delimiters
+
                 self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
                     return self.setLastError(err, text_block, null);
                 };
             },
 
             else => {},
-        }
-
-        if (self.current_level == self.root) {
-            // return all produces tags until now;
-            break;
         }
     }
 
@@ -405,7 +462,16 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
     if (self.root.list.items.len == 0) {
         return null;
     } else {
-        return self.root.list.toOwnedSlice(self.arena);
+        const nodes = self.root.list.toOwnedSlice(arena);
+
+        self.arena.nextEpoch();
+        const new_arena = self.arena.allocator();
+
+        var root = try Level.init(new_arena, self.root.delimiters);
+        self.root = root;
+        self.current_level = root;
+
+        return nodes;
     }
 }
 
@@ -440,12 +506,15 @@ test "Basic parse" {
         \\World
     ;
 
-    const allocator = testing.allocator;
-    var arena = ArenaAllocator.init(allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var parser = try Self.init(allocator, arena.allocator(), template_text, .{});
-    var ret = try testParseTree(&parser);
+    const allocator = arena.allocator();
+
+    var parser = try Self.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    var ret = try testParseTree(allocator, &parser);
 
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 4), parts.len);
@@ -496,12 +565,15 @@ test "Scan standAlone tags" {
         \\Hello
     ;
 
-    const allocator = testing.allocator;
-    var arena = ArenaAllocator.init(allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var parser = try Self.init(allocator, arena.allocator(), template_text, .{});
-    var ret = try testParseTree(&parser);
+    const allocator = arena.allocator();
+
+    var parser = try Self.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    var ret = try testParseTree(allocator, &parser);
 
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 3), parts.len);
@@ -524,12 +596,15 @@ test "Scan delimiters Tags" {
         \\[interpolation]
     ;
 
-    const allocator = testing.allocator;
-    var arena = ArenaAllocator.init(allocator);
+    var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    var parser = try Self.init(allocator, arena.allocator(), template_text, .{});
-    var ret = try testParseTree(&parser);
+    const allocator = arena.allocator();
+
+    var parser = try Self.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    var ret = try testParseTree(allocator, &parser);
 
     if (ret) |parts| {
         try testing.expectEqual(@as(usize, 3), parts.len);
@@ -547,15 +622,21 @@ test "Scan delimiters Tags" {
     }
 }
 
-fn testParseTree(parser: *Self) !?[]const *Node {
-    return parser.parseTree() catch |e| {
+fn testParseTree(allocator: Allocator, parser: *Self) !?[]const *Node {
+    var list = std.ArrayList(*Node).init(allocator);
+
+    while (parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
             std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.row, err.col });
             try testing.expect(false);
         }
 
         return e;
-    };
+    }) |nodes| {
+        try list.appendSlice(nodes);
+    }
+
+    return list.toOwnedSlice();
 }
 
 fn testParseTemplate(parser: *Self) !Template {

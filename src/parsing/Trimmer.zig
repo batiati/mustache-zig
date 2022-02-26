@@ -121,7 +121,7 @@ test "Line breaks" {
     //                                     ↓      ↓
     var text_scanner = toTS(allocator, "  \nABC\n  ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \nABC\n  ", block.?.tail.?);
@@ -143,7 +143,7 @@ test "Line breaks \\r\\n" {
     //                                       ↓        ↓
     var text_scanner = toTS(allocator, "  \r\nABC\r\n  ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \r\nABC\r\n  ", block.?.tail.?);
@@ -166,7 +166,7 @@ test "Multiple line breaks" {
     //                                     ↓           ↓
     var text_scanner = toTS(allocator, "  \nABC\nABC\n  ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \nABC\nABC\n  ", block.?.tail.?);
@@ -197,7 +197,7 @@ test "Multiple line breaks \\r\\n" {
     //                                       ↓               ↓
     var text_scanner = toTS(allocator, "  \r\nABC\r\nABC\r\n  ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \r\nABC\r\nABC\r\n  ", block.?.tail.?);
@@ -227,7 +227,7 @@ test "Whitespace text trimming" {
     //                                     ↓ ↓
     var text_scanner = toTS(allocator, "  \n  ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \n  ", block.?.tail.?);
@@ -258,7 +258,7 @@ test "Whitespace text trimming \\r\\n" {
     //                                       ↓ ↓
     var text_scanner = toTS(allocator, "  \r\n  ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \r\n  ", block.?.tail.?);
@@ -282,7 +282,7 @@ test "Tabs text trimming" {
     //                                     ↓   ↓
     var text_scanner = toTS(allocator, "\t\t\n\t\t");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\t\t\n\t\t", block.?.tail.?);
@@ -306,7 +306,7 @@ test "Whitespace left trimming" {
     //                                     ↓ ↓
     var text_scanner = toTS(allocator, "  \n");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \n", block.?.tail.?);
@@ -329,7 +329,7 @@ test "Whitespace left trimming \\r\\n" {
     //                                       ↓ ↓
     var text_scanner = toTS(allocator, "  \r\n");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("  \r\n", block.?.tail.?);
@@ -353,7 +353,7 @@ test "Tabs left trimming" {
     //                                       ↓ ↓
     var text_scanner = toTS(allocator, "\t\t\n");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\t\t\n", block.?.tail.?);
@@ -377,7 +377,7 @@ test "Whitespace right trimming" {
     //                                   ↓ ↓
     var text_scanner = toTS(allocator, "\n  ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\n  ", block.?.tail.?);
@@ -401,7 +401,7 @@ test "Whitespace right trimming \\r\\n" {
     //                                     ↓ ↓
     var text_scanner = toTS(allocator, "\r\n  ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\r\n  ", block.?.tail.?);
@@ -425,7 +425,7 @@ test "Tabs right trimming" {
     //                                   ↓ ↓
     var text_scanner = toTS(allocator, "\n\t\t");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\n\t\t", block.?.tail.?);
@@ -449,7 +449,7 @@ test "Single line break" {
     //                                   ↓ ↓
     var text_scanner = toTS(allocator, "\n");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\n", block.?.tail.?);
@@ -473,7 +473,7 @@ test "Single line break \\r\\n" {
     //                                   ↓   ↓
     var text_scanner = toTS(allocator, "\r\n");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\r\n", block.?.tail.?);
@@ -496,7 +496,7 @@ test "No trimming" {
     //
     var text_scanner = toTS(allocator, "   ABC\nABC   ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ABC\nABC   ", block.?.tail.?);
@@ -515,7 +515,7 @@ test "No trimming, no whitespace" {
     //                                      ↓
     var text_scanner = toTS(allocator, "|\n");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("|\n", block.?.tail.?);
@@ -538,7 +538,7 @@ test "No trimming, no whitespace \\r\\n" {
     //                                        ↓
     var text_scanner = toTS(allocator, "|\r\n");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("|\r\n", block.?.tail.?);
@@ -561,7 +561,7 @@ test "No trimming \\r\\n" {
     //
     var text_scanner = toTS(allocator, "   ABC\r\nABC   ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ABC\r\nABC   ", block.?.tail.?);
@@ -580,7 +580,7 @@ test "No whitespace" {
     //
     var text_scanner = toTS(allocator, "ABC");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("ABC", block.?.tail.?);
@@ -599,7 +599,7 @@ test "Trimming left only" {
     //                                      ↓
     var text_scanner = toTS(allocator, "   \nABC   ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   \nABC   ", block.?.tail.?);
@@ -620,7 +620,7 @@ test "Trimming left only \\r\\n" {
     //                                        ↓
     var text_scanner = toTS(allocator, "   \r\nABC   ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   \r\nABC   ", block.?.tail.?);
@@ -641,7 +641,7 @@ test "Trimming right only" {
     //                                           ↓
     var text_scanner = toTS(allocator, "   ABC\n   ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ABC\n   ", block.?.tail.?);
@@ -663,7 +663,7 @@ test "Trimming right only \\r\\n" {
     //                                             ↓
     var text_scanner = toTS(allocator, "   ABC\r\n   ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ABC\r\n   ", block.?.tail.?);
@@ -685,7 +685,7 @@ test "Only whitespace" {
     //                                   ↓
     var text_scanner = toTS(allocator, "   ");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("   ", block.?.tail.?);
@@ -708,7 +708,7 @@ test "Only tabs" {
     //                                   ↓
     var text_scanner = toTS(allocator, "\t\t\t");
 
-    var block = try text_scanner.next();
+    var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expect(block.?.tail != null);
     try testing.expectEqualStrings("\t\t\t", block.?.tail.?);

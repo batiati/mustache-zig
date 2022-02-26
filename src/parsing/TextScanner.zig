@@ -1,6 +1,8 @@
 /// Text iterator
 /// Scans for the next delimiter mark or EOF.
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
@@ -15,7 +17,9 @@ const Delimiters = parsing.Delimiters;
 const TextBlock = parsing.TextBlock;
 const Trimmer = parsing.Trimmer;
 
-const TextReader = @import("../text.zig").TextReader;
+const text = @import("../text.zig");
+const TextReader = text.TextReader;
+const EpochArena = text.EpochArena;
 
 const Self = @This();
 
@@ -46,6 +50,7 @@ const Delimiter = struct {
     }
 };
 
+arena: EpochArena,
 reader: TextReader,
 content: []const u8 = &.{},
 index: usize = 0,
@@ -56,10 +61,15 @@ delimiters: [MAX_DELIMITERS]Delimiter = undefined,
 delimiters_count: usize = 0,
 delimiter_max_size: u32 = 0,
 
-pub fn init(reader: TextReader) Self {
+pub fn init(gpa: Allocator, reader: TextReader) Self {
     return .{
+        .arena = EpochArena.init(gpa),
         .reader = reader,
     };
+}
+
+pub fn deinit(self: *Self) void {
+    self.arena.deinit();
 }
 
 pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
@@ -128,8 +138,12 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
 
 fn requestContent(self: *Self) !void {
     if (!self.reader.finished()) {
+        
+        self.arena.nextEpoch();
+        const allocator = self.arena.allocator();
+
         const prepend = self.content[self.block_index..];
-        self.content = try self.reader.read(prepend);
+        self.content = try self.reader.read(allocator, prepend);
         self.index -= self.block_index;
         self.block_index = 0;
     }
@@ -165,6 +179,7 @@ pub fn next(self: *Self) !?TextBlock {
         }
 
         if (self.matchTagMark()) |mark| {
+            
             const block = TextBlock{
                 .event = .{ .Mark = mark },
                 .tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null,
@@ -209,8 +224,6 @@ fn matchTagMark(self: *Self) ?Mark {
     return null;
 }
 
-const ArenaAllocator = std.heap.ArenaAllocator;
-const text = @import("../text.zig");
 const testing = std.testing;
 test "basic tests" {
     const content =
@@ -218,11 +231,11 @@ test "basic tests" {
         \\World{{{ tag2 }}}Until eof
     ;
 
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
     var reader = Self.init(try text.fromString(allocator, content));
+    reader.deinit();
+
     try reader.setDelimiters(.{});
 
     var part_1 = try reader.next();
@@ -282,11 +295,14 @@ test "custom tags" {
         \\World[ tag2 ]Until eof
     ;
 
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    var reader = Self.init(try text.fromString(allocator, content));
+    var string = try text.fromString(allocator, content);
+    defer string.deinit(allocator);
+
+    var reader = Self.init(string);
+    reader.deinit();
+
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
     var part_1 = try reader.next();
@@ -343,11 +359,14 @@ test "custom tags" {
 test "EOF" {
     const content = "{{tag1}}";
 
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    var reader = Self.init(try text.fromString(allocator, content));
+    var string = try text.fromString(allocator, content);
+    defer string.deinit(allocator);
+
+    var reader = Self.init(string);
+    reader.deinit();
+
     try reader.setDelimiters(.{});
 
     var part_1 = try reader.next();
@@ -377,11 +396,14 @@ test "EOF" {
 test "EOF custom tags" {
     const content = "[tag1]";
 
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    var reader = Self.init(try text.fromString(allocator, content));
+    var string = try text.fromString(allocator, content);
+    defer string.deinit(allocator);
+
+    var reader = Self.init(string);
+    reader.deinit();
+
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
     var part_1 = try reader.next();

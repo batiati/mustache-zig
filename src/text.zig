@@ -11,47 +11,85 @@ const ReadError = std.fs.File.ReadError;
 const FileError = OpenError || ReadError;
 const Errors = Allocator.Error || FileError;
 
-pub fn fromString(arena: Allocator, content: []const u8) Allocator.Error!TextReader {
-    var ctx = try StringReader.init(arena, content);
+pub fn fromString(gpa: Allocator, content: []const u8) Allocator.Error!TextReader {
+    var ctx = try StringReader.init(gpa, content);
     return ctx.textReader();
 }
 
-pub fn fromFile(arena: Allocator, absolute_path: []const u8, read_buffer_size: u32) Errors!TextReader {
+pub fn fromFile(gpa: Allocator, absolute_path: []const u8, read_buffer_size: u32) Errors!TextReader {
     var file = try std.fs.openFileAbsolute(absolute_path, .{});
-    var stream = try StreamReader(std.fs.File).init(arena, file, read_buffer_size);
+    var stream = try StreamReader(std.fs.File).init(gpa, file, read_buffer_size);
     return stream.textReader();
 }
 
+pub const EpochArena = struct {
+    current_arena: ArenaAllocator,
+    last_epoch_arena: ArenaAllocator.State,
+
+    pub fn init(child_allocator: Allocator) EpochArena {
+        return .{
+            .current_arena = ArenaAllocator.init(child_allocator),
+            .last_epoch_arena = .{},
+        };
+    }
+
+    pub inline fn allocator(self: *EpochArena) Allocator {
+        return self.current_arena.allocator();
+    }
+
+    pub fn nextEpoch(self: *EpochArena) void {
+        const child_allocator = self.current_arena.child_allocator;
+
+        var last_arena = self.last_epoch_arena.promote(child_allocator);
+        last_arena.deinit();
+
+        self.last_epoch_arena = self.current_arena.state;
+        self.current_arena = ArenaAllocator.init(child_allocator);
+    }
+
+    pub fn deinit(self: *EpochArena) void {
+        self.nextEpoch();
+        self.nextEpoch();
+    }
+};
+
+
 pub const TextReader = struct {
     const VTable = struct {
-        read: fn (ctx: *anyopaque, prepend: []const u8) Errors![]const u8,
-        close: fn (ctx: *anyopaque) void,
+        read: fn (ctx: *anyopaque, allocator: Allocator, prepend: []const u8) Errors![]const u8,
+        deinit: fn (ctx: *anyopaque, allocator: Allocator) void,
         finished: fn (ctx: *anyopaque) bool,
     };
 
     ctx: *anyopaque,
     vtable: *const VTable,
 
-    pub fn read(self: TextReader, prepend: []const u8) Errors![]const u8 {
-        return self.vtable.read(self.ctx, prepend);
+    pub inline fn read(self: TextReader, allocator: Allocator, prepend: []const u8) Errors![]const u8 {
+        return self.vtable.read(self.ctx, allocator, prepend);
     }
 
-    pub fn close(self: TextReader) void {
-        self.vtable.close(self.ctx);
+    pub inline fn deinit(self: TextReader, allocator: Allocator) void {
+        self.vtable.deinit(self.ctx, allocator);
     }
 
-    pub fn finished(self: TextReader) bool {
+    pub inline fn finished(self: TextReader) bool {
         return self.vtable.finished(self.ctx);
     }
 };
 
 const StringReader = struct {
     content: ?[]const u8,
-    const vtable = TextReader.VTable{ .read = read, .close = close, .finished = finished };
+    const vtable = TextReader.VTable{
+        .read = read,
+        .deinit = deinit,
+        .finished = finished,
+    };
 
-    pub fn init(arena: Allocator, content: []const u8) Allocator.Error!*StringReader {
-        var self = try arena.create(StringReader);
-        self.* = .{ .content = content };
+    pub fn init(allocator: Allocator, content: []const u8) Allocator.Error!*StringReader {
+        var self = try allocator.create(StringReader);
+        self.* = .{
+            .content = content,
+        };
 
         return self;
     }
@@ -63,8 +101,9 @@ const StringReader = struct {
         };
     }
 
-    fn read(ctx: *anyopaque, prepend: []const u8) Errors![]const u8 {
+    fn read(ctx: *anyopaque, allocator: Allocator, prepend: []const u8) Errors![]const u8 {
         var self = @ptrCast(*StringReader, @alignCast(@alignOf(*StringReader), ctx));
+        _ = allocator;
         _ = prepend;
 
         if (self.content) |content| {
@@ -75,8 +114,9 @@ const StringReader = struct {
         }
     }
 
-    fn close(ctx: *anyopaque) void {
-        _ = ctx;
+    fn deinit(ctx: *anyopaque, allocator: Allocator) void {
+        var self = @ptrCast(*StringReader, @alignCast(@alignOf(*StringReader), ctx));
+        allocator.destroy(self);
     }
 
     fn finished(ctx: *anyopaque) bool {
@@ -90,19 +130,17 @@ fn StreamReader(comptime TStream: type) type {
         const Self = @This();
         const vtable = TextReader.VTable{
             .read = read,
-            .close = close,
+            .deinit = deinit,
             .finished = finished,
         };
 
-        arena: Allocator,
         stream: TStream,
         eof: bool = false,
         read_buffer_size: u32,
 
-        pub fn init(arena: Allocator, stream: TStream, read_buffer_size: u32) Allocator.Error!*Self {
-            var self = try arena.create(Self);
+        pub fn init(allocator: Allocator, stream: TStream, read_buffer_size: u32) Allocator.Error!*Self {
+            var self = try allocator.create(Self);
             self.* = .{
-                .arena = arena,
                 .stream = stream,
                 .read_buffer_size = read_buffer_size,
             };
@@ -117,10 +155,12 @@ fn StreamReader(comptime TStream: type) type {
             };
         }
 
-        fn read(ctx: *anyopaque, prepend: []const u8) Errors![]const u8 {
+        fn read(ctx: *anyopaque, allocator: Allocator, prepend: []const u8) Errors![]const u8 {
             var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
 
-            var buffer = try self.arena.alloc(u8, self.read_buffer_size + prepend.len);
+            var buffer = try allocator.alloc(u8, self.read_buffer_size + prepend.len);
+            errdefer allocator.free(buffer);
+
             if (prepend.len > 0) {
                 std.mem.copy(u8, buffer, prepend);
             }
@@ -128,12 +168,12 @@ fn StreamReader(comptime TStream: type) type {
             var size = try self.stream.read(buffer[prepend.len..]);
 
             if (size == 0) {
-                self.arena.free(buffer);
+                allocator.free(buffer);
                 self.eof = true;
                 return prepend;
             } else if (size < self.read_buffer_size) {
                 const end = prepend.len + size;
-                self.arena.free(buffer[end..]);
+                allocator.free(buffer[end..]);
                 self.eof = true;
                 return buffer[0..end];
             } else {
@@ -142,9 +182,10 @@ fn StreamReader(comptime TStream: type) type {
             }
         }
 
-        fn close(ctx: *anyopaque) void {
+        fn deinit(ctx: *anyopaque, allocator: Allocator) void {
             var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
             self.stream.close();
+            allocator.destroy(self);
         }
 
         fn finished(ctx: *anyopaque) bool {
@@ -502,7 +543,7 @@ test "StreamReader.Slices" {
 
     // First read
     // We got a slice with "read_buffer_len" size to parse
-    slice = try reader.read(slice);
+    slice = try reader.read(allocator, slice);
     try testing.expectEqual(false, reader.finished());
     try testing.expectEqual(read_buffer_len, slice.len);
     try testing.expectEqualStrings("{{nam", slice);
@@ -511,25 +552,25 @@ test "StreamReader.Slices" {
     // The parser produces the first token "{{" and reaches the EOF of this slice
     // We need more data, the previous slice was parsed until the block_index = 2,
     // so we expect the next read to return the remaining bytes plus new 5 bytes read
-    slice = try reader.read(slice[2..]);
+    slice = try reader.read(allocator, slice[2..]);
     try testing.expectEqual(false, reader.finished());
     try testing.expectEqualStrings("name}}Ju", slice);
 
     // Third read,
     // We parsed a next token '}}' at block_index = 6,
     // so we need another slice
-    slice = try reader.read(slice[6..]);
+    slice = try reader.read(allocator, slice[6..]);
     try testing.expectEqual(false, reader.finished());
     try testing.expectEqualStrings("Just st", slice);
 
     // Last read,
     // Nothing was parsed,
-    slice = try reader.read(slice);
+    slice = try reader.read(allocator, slice);
     try testing.expectEqual(true, reader.finished());
     try testing.expectEqualStrings("Just static", slice);
 
     // After that, EOF
-    slice = try reader.read(slice);
+    slice = try reader.read(allocator, slice);
     try testing.expectEqual(true, reader.finished());
     try testing.expectEqualStrings("Just static", slice);
 }

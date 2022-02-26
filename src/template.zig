@@ -7,6 +7,7 @@ const assert = std.debug.assert;
 
 const parsing = @import("parsing/parsing.zig");
 const Parser = parsing.Parser;
+const Node = parsing.Node;
 
 pub const Delimiters = parsing.Delimiters;
 
@@ -198,8 +199,8 @@ pub const Element = union(enum) {
 
     pub fn free(self: Element, allocator: Allocator, own_strings: bool) void {
         switch (self) {
-            .StaticText => |content| allocator.free(content),
-            .Interpolation => |interpolation| allocator.free(interpolation.key),
+            .StaticText => |content| if (own_strings) allocator.free(content),
+            .Interpolation => |interpolation| if (own_strings) allocator.free(interpolation.key),
             .Section => |section| {
                 if (own_strings) allocator.free(section.key);
                 freeMany(allocator, own_strings, section.content);
@@ -242,65 +243,120 @@ pub const Template = struct {
     const Self = @This();
 
     allocator: Allocator,
+    options: TemplateOptions,
     result: union(enum) {
         Elements: []const Element,
         Error: LastError,
-    },
+        Empty,
+    } = .Empty,
 
     pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) !Template {
-        var arena = ArenaAllocator.init(allocator);
-        defer arena.deinit();
+        var self = Self{
+            .allocator = allocator,
+            .options = options,
+        };
 
-        var parser = try Parser.init(allocator, arena.allocator(), template_text, options);
-
-        return parse(allocator, &parser);
+        try self.load(template_text);
+        return self;
     }
 
     pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, options: TemplateOptions) !Template {
-        var arena = ArenaAllocator.init(allocator);
-        defer arena.deinit();
+        var self = Self{
+            .allocator = allocator,
+            .options = options,
+        };
 
-        var parser = try Parser.initFromFile(allocator, arena.allocator(), absolute_path, options);
-        return parse(allocator, &parser);
+        try self.loadFromFile(absolute_path);
+        return self;
     }
 
-    fn parse(allocator: Allocator, parser: *Parser) !Template {
+    fn load(self: *Self, template_text: []const u8) !void {
+        var parser = try Parser.init(self.allocator, template_text, self.options);
+        defer parser.deinit();
 
-        var list = std.ArrayListUnmanaged(Element){};
+        try self.parse(&parser);
+    }
+
+    fn loadFromFile(self: *Self, absolute_path: []const u8) !void {
+        var parser = try Parser.initFromFile(self.allocator, absolute_path, self.options);
+        defer parser.deinit();
+
+        //try self.parse(&parser);
+        try self.render(&parser);
+    }
+
+    fn renderFromFile(self: *Self, absolute_path: []const u8) !void {
+        var parser = try Parser.initFromFile(self.allocator, absolute_path, self.options);
+        defer parser.deinit();
+
+        try self.render(&parser);
+    }    
+
+    fn parse(self: *Self, parser: *Parser) !void {
+
+        const Closure = struct {
+
+            list: std.ArrayListUnmanaged(Element) = .{},
+
+            pub fn action(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
+                try ctx.list.appendSlice(outer.allocator, elements);
+            }
+        };
+
+        var closure = Closure {};
+        defer closure.list.deinit(self.allocator);
+
+        try self.parseStream(parser, &closure, Closure.action);
+
+        self.result = .{
+            .Elements = closure.list.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn render(self: *Self, parser: *Parser) !void {
+
+        const Closure = struct {
+
+            pub fn action(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
+                _ = ctx;
+                
+                Element.freeMany(outer.allocator, false, elements);
+                
+            }
+        };
+
+        var closure = Closure {};
+        try self.parseStream(parser, &closure, Closure.action);
+    }
+
+    fn parseStream(self: *Self, parser: *Parser, context: anytype, action: fn(ctx: @TypeOf(context), self: *Self, elements: []Element) anyerror!void) !void {
 
         while (true) {
             var parse_result = try parser.parse();
             switch (parse_result) {
                 .Error => |err| {
-                    list.deinit(allocator);
-                    return Template{
-                        .allocator = allocator,
-                        .result = .{
-                            .Error = err,
-                        },
+                    self.result = .{
+                        .Error = err,
                     };
+                    return err.error_code;
                 },
-                .Elements => |elements| {
-                    list.appendSlice(allocator, elements);
-                    arena.deinit();
+                .Nodes => |nodes| {
+
+                    var list = std.ArrayListUnmanaged(Element){};
+                    errdefer list.deinit(self.allocator);
+
+                    try parser.createElements(&list, null, nodes);
+                    try action(context, self, list.toOwnedSlice(self.allocator));
                 },
                 .Done => break,
             }
         }
-
-        return Template{
-            .allocator = allocator,
-            .result = .{
-                .Elements = try list.toOwnedSlice(allocator),
-            },
-        };
-
     }
 
     pub fn deinit(self: *Self) void {
         switch (self.result) {
             .Elements => |elements| Element.freeMany(self.allocator, true, elements),
-            .Error => {},
+            .Error, .Empty => {},
         }
     }
 };
@@ -2148,7 +2204,8 @@ const tests = struct {
             \\World
         ;
 
-        const allocator = testing.allocator;
+        var gpa = std.heap.GeneralPurposeAllocator(.{}) {};
+        const allocator = gpa.allocator();
 
         const path = try std.fs.selfExeDirPathAlloc(allocator);
         defer allocator.free(path);
@@ -2175,7 +2232,7 @@ const tests = struct {
 
         //var fba = std.heap.FixedBufferAllocator.init(plenty_of_memory);
 
-        var template = try Template.initFromFile(allocator, absolute_file_path, .{});
+        var template = try Template.initFromFile(allocator, absolute_file_path, .{ .own_strings = false });
         defer template.deinit();
 
         try testing.expect(template.result == .Elements);
