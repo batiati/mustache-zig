@@ -9,9 +9,9 @@ const testing = std.testing;
 const OpenError = std.fs.File.OpenError;
 const ReadError = std.fs.File.ReadError;
 const FileError = OpenError || ReadError;
-const Errors = Allocator.Error || FileError;
+pub const Errors = Allocator.Error || FileError;
 
-const RefCounter = @import("mem.zig").RefCounter;
+const RefCounter = @import("../mem.zig").RefCounter;
 
 pub fn fromString(gpa: Allocator, content: []const u8) Allocator.Error!TextReader {
     var ctx = try StringReader.init(gpa, content);
@@ -25,7 +25,6 @@ pub fn fromFile(gpa: Allocator, absolute_path: []const u8, read_buffer_size: u32
 }
 
 pub const TextReader = struct {
-
     pub const Result = struct {
         content: []const u8,
         ref_counter: RefCounter,
@@ -84,12 +83,12 @@ const StringReader = struct {
 
         if (self.content) |content| {
             self.content = null;
-            return TextReader.Result {
+            return TextReader.Result{
                 .content = content,
                 .ref_counter = .{},
             };
         } else {
-            return TextReader.Result {
+            return TextReader.Result{
                 .content = prepend,
                 .ref_counter = .{},
             };
@@ -137,7 +136,7 @@ fn StreamReader(comptime TStream: type) type {
             };
         }
 
-        fn read(ctx: *anyopaque, allocator: Allocator, prepend: []const u8) Errors!TextReader.Result{
+        fn read(ctx: *anyopaque, allocator: Allocator, prepend: []const u8) Errors!TextReader.Result {
             var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
 
             var buffer = try allocator.alloc(u8, self.read_buffer_size + prepend.len);
@@ -155,13 +154,11 @@ fn StreamReader(comptime TStream: type) type {
                 assert(full_size < buffer.len);
                 buffer = allocator.shrink(buffer, full_size);
                 self.eof = true;
-
             } else {
                 self.eof = false;
             }
 
-
-            return TextReader.Result {
+            return TextReader.Result{
                 .content = buffer,
                 .ref_counter = try RefCounter.init(allocator, buffer),
             };
@@ -492,7 +489,6 @@ test {
 }
 
 test "StreamReader.Slices" {
-
     const allocator = testing.allocator;
 
     // Test the StreamReader slicing mechanism

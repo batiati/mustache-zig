@@ -19,7 +19,7 @@ const Delimiters = parsing.Delimiters;
 const TextBlock = parsing.TextBlock;
 const Trimmer = parsing.Trimmer;
 
-const text = @import("../text.zig");
+const text = @import("text.zig");
 const TextReader = text.TextReader;
 
 const RefCounter = @import("../mem.zig").RefCounter;
@@ -64,14 +64,21 @@ delimiters: [MAX_DELIMITERS]Delimiter = undefined,
 delimiters_count: usize = 0,
 delimiter_max_size: u32 = 0,
 
-pub fn init(reader: TextReader) Self {
-    return .{
-        .reader = reader,
+pub fn init(allocator: Allocator, template_text: []const u8) Allocator.Error!Self {
+    return Self {
+        .reader = try text.fromString(allocator, template_text),
+    };
+}
+
+pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, read_buffer_size: u32) text.Errors!Self {
+    return Self {
+        .reader = try text.fromFile(allocator, absolute_path, read_buffer_size),
     };
 }
 
 pub fn deinit(self: *Self, allocator: Allocator) void {
     self.ref_counter.free(allocator);
+    self.reader.deinit(allocator);
 }
 
 pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
@@ -141,7 +148,7 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
 fn requestContent(self: *Self, allocator: Allocator) !void {
     if (!self.reader.finished()) {
         const prepend = self.content[self.block_index..];
-        
+
         const read = try self.reader.read(allocator, prepend);
         errdefer read.ref_counter.free(allocator);
 
@@ -241,10 +248,7 @@ test "basic tests" {
 
     const allocator = testing.allocator;
 
-    var string = try text.fromString(allocator, content);
-    defer string.deinit(allocator);
-
-    var reader = Self.init(string);
+    var reader = try Self.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
@@ -318,10 +322,7 @@ test "custom tags" {
 
     const allocator = testing.allocator;
 
-    var string = try text.fromString(allocator, content);
-    defer string.deinit(allocator);
-
-    var reader = Self.init(string);
+    var reader = try Self.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
@@ -392,10 +393,7 @@ test "EOF" {
 
     const allocator = testing.allocator;
 
-    var string = try text.fromString(allocator, content);
-    defer string.deinit(allocator);
-
-    var reader = Self.init(string);
+    var reader = try Self.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
@@ -433,10 +431,7 @@ test "EOF custom tags" {
 
     const allocator = testing.allocator;
 
-    var string = try text.fromString(allocator, content);
-    defer string.deinit(allocator);
-
-    var reader = Self.init(string);
+    var reader = try Self.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });

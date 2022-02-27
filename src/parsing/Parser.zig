@@ -28,7 +28,7 @@ const Mark = parsing.Mark;
 const Level = parsing.Level;
 const Node = parsing.Node;
 
-const text = @import("../text.zig");
+const text = @import("text.zig");
 const EpochArena = @import("../mem.zig").EpochArena;
 
 const assert = std.debug.assert;
@@ -59,8 +59,6 @@ last_error: ?LastError = null,
 fix_me: usize = 0,
 
 pub fn init(gpa: Allocator, template_text: []const u8, options: TemplateOptions) Allocator.Error!Self {
-    var reader = try text.fromString(gpa, template_text);
-    errdefer reader.deinit(gpa);
 
     var arena = EpochArena.init(gpa);
     errdefer arena.deinit();
@@ -70,7 +68,7 @@ pub fn init(gpa: Allocator, template_text: []const u8, options: TemplateOptions)
     return Self{
         .gpa = gpa,
         .arena = arena,
-        .text_scanner = TextScanner.init(reader),
+        .text_scanner = try TextScanner.init(gpa, template_text),
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
@@ -79,8 +77,6 @@ pub fn init(gpa: Allocator, template_text: []const u8, options: TemplateOptions)
 }
 
 pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: TemplateOptions) Errors!Self {
-    var reader = try text.fromFile(gpa, absolute_path, options.read_buffer_size);
-    errdefer reader.deinit(gpa);
 
     var arena = EpochArena.init(gpa);
     errdefer arena.deinit();
@@ -90,7 +86,7 @@ pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: Template
     return Self{
         .gpa = gpa,
         .arena = arena,
-        .text_scanner = TextScanner.init(reader),
+        .text_scanner = try TextScanner.initFromFile(gpa, absolute_path, options.read_buffer_size),
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
@@ -99,7 +95,6 @@ pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: Template
 }
 
 pub fn deinit(self: *Self) void {
-    self.text_scanner.reader.deinit(self.gpa);
     self.text_scanner.deinit(self.gpa);
     self.arena.deinit();
 }
@@ -141,13 +136,11 @@ inline fn dupe(self: *const Self, mem: []const u8) Allocator.Error![]const u8 {
 }
 
 pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) Errors![]Element {
-
     var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
     errdefer list.deinit(self.gpa);
     defer Node.deinitMany(self.gpa, nodes);
 
     for (nodes) |node| {
-
         const element = blk: {
             switch (node.block_type) {
                 .StaticText => {
@@ -359,7 +352,6 @@ fn parseTree(self: *Self) Errors!?[]*Node {
 
     // REF COUNt HERE?
     while (try self.text_scanner.next(self.gpa)) |*text_block| {
-
         errdefer text_block.deinit(self.gpa);
 
         var block_type = (try self.matchBlockType(text_block)) orelse {
@@ -371,7 +363,7 @@ fn parseTree(self: *Self) Errors!?[]*Node {
         switch (block_type) {
             .StaticText => {
                 if (self.current_level.current_node) |current_node| {
-                    if (current_node.block_type.ignoreStaticText()) { 
+                    if (current_node.block_type.ignoreStaticText()) {
                         text_block.deinit(self.gpa);
                         continue;
                     }

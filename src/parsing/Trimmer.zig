@@ -6,6 +6,8 @@
 /// const template = "  {{#section}}\nName\n  {{#section}}\n"
 /// Should render only "Name\n"
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 const assert = std.debug.assert;
 const testing = std.testing;
 
@@ -103,23 +105,15 @@ pub fn getRightTrimmingIndex(self: Self) TrimmingIndex {
     };
 }
 
-const Allocator = std.mem.Allocator;
-const ArenaAllocator = std.heap.ArenaAllocator;
-const text = @import("../text.zig");
 
-fn toTS(allocator: Allocator, content: []const u8) TextScanner {
-    var reader = text.fromString(allocator, content) catch unreachable;
-    return TextScanner.init(reader);
-}
 
 test "Line breaks" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                     2      7
-    //                                     ↓      ↓
-    var text_scanner = toTS(allocator, "  \nABC\n  ");
+    //                                                     2      7
+    //                                                     ↓      ↓           
+    var text_scanner = try TextScanner.init(allocator, "  \nABC\n  ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -136,12 +130,12 @@ test "Line breaks" {
 }
 
 test "Line breaks \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    //                                       3        9
-    //                                       ↓        ↓
-    var text_scanner = toTS(allocator, "  \r\nABC\r\n  ");
+    const allocator = testing.allocator;
+
+    //                                                       3        9
+    //                                                       ↓        ↓
+    var text_scanner = try TextScanner.init(allocator, "  \r\nABC\r\n  ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -158,13 +152,12 @@ test "Line breaks \\r\\n" {
 }
 
 test "Multiple line breaks" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                     2           11
-    //                                     ↓           ↓
-    var text_scanner = toTS(allocator, "  \nABC\nABC\n  ");
+    //                                                     2           11
+    //                                                     ↓           ↓
+    var text_scanner = try TextScanner.init(allocator, "  \nABC\nABC\n  ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -189,13 +182,12 @@ test "Multiple line breaks" {
 }
 
 test "Multiple line breaks \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                       3               14
-    //                                       ↓               ↓
-    var text_scanner = toTS(allocator, "  \r\nABC\r\nABC\r\n  ");
+    //                                                       3               14
+    //                                                       ↓               ↓
+    var text_scanner = try TextScanner.init(allocator, "  \r\nABC\r\nABC\r\n  ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -220,12 +212,11 @@ test "Multiple line breaks \\r\\n" {
 }
 
 test "Whitespace text trimming" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    //                                     2 3
-    //                                     ↓ ↓
-    var text_scanner = toTS(allocator, "  \n  ");
+    const allocator = testing.allocator;
+    //                                                     2 3
+    //                                                     ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "  \n  ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -250,13 +241,12 @@ test "Whitespace text trimming" {
 }
 
 test "Whitespace text trimming \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                       3 4
-    //                                       ↓ ↓
-    var text_scanner = toTS(allocator, "  \r\n  ");
+    //                                                       3 4
+    //                                                       ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "  \r\n  ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -274,13 +264,12 @@ test "Whitespace text trimming \\r\\n" {
 }
 
 test "Tabs text trimming" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                     2   3
-    //                                     ↓   ↓
-    var text_scanner = toTS(allocator, "\t\t\n\t\t");
+    //                                                     2   3
+    //                                                     ↓   ↓
+    var text_scanner = try TextScanner.init(allocator, "\t\t\n\t\t");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -298,13 +287,12 @@ test "Tabs text trimming" {
 }
 
 test "Whitespace left trimming" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                     2 EOF
-    //                                     ↓ ↓
-    var text_scanner = toTS(allocator, "  \n");
+    //                                                     2 EOF
+    //                                                     ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "  \n");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -322,12 +310,12 @@ test "Whitespace left trimming" {
 }
 
 test "Whitespace left trimming \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    //                                       3 EOF
-    //                                       ↓ ↓
-    var text_scanner = toTS(allocator, "  \r\n");
+    const allocator = testing.allocator;
+
+    //                                                       3 EOF
+    //                                                       ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "  \r\n");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -345,13 +333,12 @@ test "Whitespace left trimming \\r\\n" {
 }
 
 test "Tabs left trimming" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                       2 EOF
-    //                                       ↓ ↓
-    var text_scanner = toTS(allocator, "\t\t\n");
+    //                                                       2 EOF
+    //                                                       ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "\t\t\n");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -369,13 +356,12 @@ test "Tabs left trimming" {
 }
 
 test "Whitespace right trimming" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                   0 1
-    //                                   ↓ ↓
-    var text_scanner = toTS(allocator, "\n  ");
+    //                                                   0 1
+    //                                                   ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "\n  ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -393,13 +379,12 @@ test "Whitespace right trimming" {
 }
 
 test "Whitespace right trimming \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                     1 2
-    //                                     ↓ ↓
-    var text_scanner = toTS(allocator, "\r\n  ");
+    //                                                     1 2
+    //                                                     ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "\r\n  ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -417,13 +402,12 @@ test "Whitespace right trimming \\r\\n" {
 }
 
 test "Tabs right trimming" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                   0 1
-    //                                   ↓ ↓
-    var text_scanner = toTS(allocator, "\n\t\t");
+    //                                                   0 1
+    //                                                   ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "\n\t\t");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -441,13 +425,12 @@ test "Tabs right trimming" {
 }
 
 test "Single line break" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                   0 EOF
-    //                                   ↓ ↓
-    var text_scanner = toTS(allocator, "\n");
+    //                                                   0 EOF
+    //                                                   ↓ ↓
+    var text_scanner = try TextScanner.init(allocator, "\n");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -465,13 +448,12 @@ test "Single line break" {
 }
 
 test "Single line break \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                   0   EOF
-    //                                   ↓   ↓
-    var text_scanner = toTS(allocator, "\r\n");
+    //                                                   0   EOF
+    //                                                   ↓   ↓
+    var text_scanner = try TextScanner.init(allocator, "\r\n");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -488,13 +470,12 @@ test "Single line break \\r\\n" {
 }
 
 test "No trimming" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //
-    //
-    var text_scanner = toTS(allocator, "   ABC\nABC   ");
+    //                
+    //                
+    var text_scanner = try TextScanner.init(allocator, "   ABC\nABC   ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -507,13 +488,12 @@ test "No trimming" {
 }
 
 test "No trimming, no whitespace" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                      EOF
-    //                                      ↓
-    var text_scanner = toTS(allocator, "|\n");
+    //                                                      EOF
+    //                                                      ↓
+    var text_scanner = try TextScanner.init(allocator, "|\n");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -530,13 +510,12 @@ test "No trimming, no whitespace" {
 }
 
 test "No trimming, no whitespace \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                        EOF
-    //                                        ↓
-    var text_scanner = toTS(allocator, "|\r\n");
+    //                                                        EOF
+    //                                                        ↓
+    var text_scanner = try TextScanner.init(allocator, "|\r\n");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -553,13 +532,12 @@ test "No trimming, no whitespace \\r\\n" {
 }
 
 test "No trimming \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //
-    //
-    var text_scanner = toTS(allocator, "   ABC\r\nABC   ");
+    //                
+    //                
+    var text_scanner = try TextScanner.init(allocator, "   ABC\r\nABC   ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -572,13 +550,12 @@ test "No trimming \\r\\n" {
 }
 
 test "No whitespace" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //
-    //
-    var text_scanner = toTS(allocator, "ABC");
+    //                
+    //                
+    var text_scanner = try TextScanner.init(allocator, "ABC");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -591,13 +568,12 @@ test "No whitespace" {
 }
 
 test "Trimming left only" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                      3
-    //                                      ↓
-    var text_scanner = toTS(allocator, "   \nABC   ");
+    //                                                      3
+    //                                                      ↓
+    var text_scanner = try TextScanner.init(allocator, "   \nABC   ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -612,13 +588,12 @@ test "Trimming left only" {
 }
 
 test "Trimming left only \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                        4
-    //                                        ↓
-    var text_scanner = toTS(allocator, "   \r\nABC   ");
+    //                                                        4
+    //                                                        ↓
+    var text_scanner = try TextScanner.init(allocator, "   \r\nABC   ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -633,13 +608,12 @@ test "Trimming left only \\r\\n" {
 }
 
 test "Trimming right only" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                           7
-    //                                           ↓
-    var text_scanner = toTS(allocator, "   ABC\n   ");
+    //                                                           7
+    //                                                           ↓
+    var text_scanner = try TextScanner.init(allocator, "   ABC\n   ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -655,13 +629,12 @@ test "Trimming right only" {
 }
 
 test "Trimming right only \\r\\n" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                             8
-    //                                             ↓
-    var text_scanner = toTS(allocator, "   ABC\r\n   ");
+    //                                                             8
+    //                                                             ↓
+    var text_scanner = try TextScanner.init(allocator, "   ABC\r\n   ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -677,13 +650,12 @@ test "Trimming right only \\r\\n" {
 }
 
 test "Only whitespace" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                   0
-    //                                   ↓
-    var text_scanner = toTS(allocator, "   ");
+    //                                                   0
+    //                                                   ↓
+    var text_scanner = try TextScanner.init(allocator, "   ");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
@@ -700,13 +672,12 @@ test "Only whitespace" {
 }
 
 test "Only tabs" {
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
-    //                                   0
-    //                                   ↓
-    var text_scanner = toTS(allocator, "\t\t\t");
+    //                                                   0
+    //                                                   ↓
+    var text_scanner = try TextScanner.init(allocator, "\t\t\t");
+    defer text_scanner.deinit(allocator);
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);

@@ -17,11 +17,10 @@ children: ?[]*Self = null,
 
 pub fn deinitMany(allocator: Allocator, nodes: ?[]*Self) void {
     if (nodes) |items| {
-        
         for (items) |item| {
             item.deinit(allocator);
         }
-        
+
         //allocator.free(items);
     }
 }

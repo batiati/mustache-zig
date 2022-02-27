@@ -295,7 +295,7 @@ pub const Template = struct {
         const Closure = struct {
             list: std.ArrayListUnmanaged(Element) = .{},
 
-            pub fn action(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {                
+            pub fn action(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
                 try ctx.list.appendSlice(outer.allocator, elements);
                 outer.allocator.free(elements);
             }
@@ -335,7 +335,6 @@ pub const Template = struct {
                     return err.error_code;
                 },
                 .Nodes => |nodes| {
-
                     const elements = try parser.createElements(null, nodes);
                     try action(context, self, elements);
                 },
