@@ -247,8 +247,8 @@ pub const Template = struct {
     result: union(enum) {
         Elements: []const Element,
         Error: LastError,
-        Empty,
-    } = .Empty,
+        NotLoaded,
+    } = .NotLoaded,
 
     pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) !Template {
         var self = Self{
@@ -281,8 +281,7 @@ pub const Template = struct {
         var parser = try Parser.initFromFile(self.allocator, absolute_path, self.options);
         defer parser.deinit();
 
-        //try self.parse(&parser);
-        try self.render(&parser);
+        try self.parse(&parser);
     }
 
     fn renderFromFile(self: *Self, absolute_path: []const u8) !void {
@@ -296,13 +295,14 @@ pub const Template = struct {
         const Closure = struct {
             list: std.ArrayListUnmanaged(Element) = .{},
 
-            pub fn action(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
+            pub fn action(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {                
                 try ctx.list.appendSlice(outer.allocator, elements);
+                outer.allocator.free(elements);
             }
         };
 
         var closure = Closure{};
-        defer closure.list.deinit(self.allocator);
+        errdefer closure.list.deinit(self.allocator);
 
         try self.parseStream(parser, &closure, Closure.action);
 
@@ -335,11 +335,9 @@ pub const Template = struct {
                     return err.error_code;
                 },
                 .Nodes => |nodes| {
-                    var list = std.ArrayListUnmanaged(Element){};
-                    errdefer list.deinit(self.allocator);
 
-                    try parser.createElements(&list, null, nodes);
-                    try action(context, self, list.toOwnedSlice(self.allocator));
+                    const elements = try parser.createElements(null, nodes);
+                    try action(context, self, elements);
                 },
                 .Done => break,
             }
@@ -349,7 +347,7 @@ pub const Template = struct {
     pub fn deinit(self: *Self) void {
         switch (self.result) {
             .Elements => |elements| Element.freeMany(self.allocator, true, elements),
-            .Error, .Empty => {},
+            .Error, .NotLoaded => {},
         }
     }
 };

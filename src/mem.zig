@@ -38,7 +38,6 @@ pub const RefCounter = struct {
             self.state = null;
             state.counter -= 1;
             if (state.counter == 0) {
-                std.log.warn("FREE refcounter {} > {s:10} ", .{ state.counter, state.buffer });
                 allocator.free(state.buffer);
                 allocator.destroy(state);
             }

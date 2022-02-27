@@ -41,7 +41,7 @@ const State = enum {
 
 pub const ParseResult = union(enum) {
     Error: LastError,
-    Nodes: []const *Node,
+    Nodes: []*Node,
     Done,
 };
 
@@ -105,7 +105,7 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn parse(self: *Self) ProcessingErrors!ParseResult {
-    const ret = self.parseTree() catch |err| {
+    var ret = self.parseTree() catch |err| {
         return try self.fromError(err);
     };
 
@@ -140,8 +140,14 @@ inline fn dupe(self: *const Self, mem: []const u8) Allocator.Error![]const u8 {
     }
 }
 
-pub fn createElements(self: *Self, list: *std.ArrayListUnmanaged(Element), parent_key: ?[]const u8, nodes: []const *Node) Errors!void {
+pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) Errors![]Element {
+
+    var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
+    errdefer list.deinit(self.gpa);
+    defer Node.deinitMany(self.gpa, nodes);
+
     for (nodes) |node| {
+
         const element = blk: {
             switch (node.block_type) {
                 .StaticText => {
@@ -181,14 +187,7 @@ pub fn createElements(self: *Self, list: *std.ArrayListUnmanaged(Element), paren
                     const key = try self.dupe(try self.parseIdentificator(&node.text_block));
                     errdefer if (self.options.own_strings) self.gpa.free(key);
 
-                    const content = if (node.children) |children| content: {
-                        var children_list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, children.len);
-                        errdefer Element.freeMany(self.gpa, self.options.own_strings, children_list.toOwnedSlice(self.gpa));
-
-                        try self.createElements(&children_list, key, children);
-                        break :content children_list.toOwnedSlice(self.gpa);
-                    } else null;
-
+                    const content = if (node.children) |children| try self.createElements(key, children) else null;
                     errdefer if (content) |content_value| Element.freeMany(self.gpa, self.options.own_strings, content_value);
 
                     const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node_indentation) else null;
@@ -261,6 +260,8 @@ pub fn createElements(self: *Self, list: *std.ArrayListUnmanaged(Element), paren
             try list.append(self.gpa, valid);
         }
     }
+
+    return list.toOwnedSlice(self.gpa);
 }
 
 fn matchBlockType(self: *Self, text_block: *TextBlock) Errors!?BlockType {
@@ -348,7 +349,7 @@ fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const 
     return self.setLastError(ParseErrors.InvalidIdentifier, text_block, null);
 }
 
-fn parseTree(self: *Self) Errors!?[]const *Node {
+fn parseTree(self: *Self) Errors!?[]*Node {
     self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
         return self.setLastError(err, null, null);
     };
@@ -358,13 +359,22 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
 
     // REF COUNt HERE?
     while (try self.text_scanner.next(self.gpa)) |*text_block| {
-        var block_type = (try self.matchBlockType(text_block)) orelse continue;
+
+        errdefer text_block.deinit(self.gpa);
+
+        var block_type = (try self.matchBlockType(text_block)) orelse {
+            text_block.deinit(self.gpa);
+            continue;
+        };
 
         // Befone adding,
         switch (block_type) {
             .StaticText => {
                 if (self.current_level.current_node) |current_node| {
-                    if (current_node.block_type.ignoreStaticText()) continue;
+                    if (current_node.block_type.ignoreStaticText()) { 
+                        text_block.deinit(self.gpa);
+                        continue;
+                    }
                 }
             },
             .Delimiters => {
@@ -377,6 +387,7 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
                 };
 
                 self.current_level.delimiters = new_delimiters;
+                text_block.deinit(self.gpa);
             },
 
             else => {},

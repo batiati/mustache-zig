@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const parsing = @import("parsing.zig");
 const TextBlock = parsing.TextBlock;
@@ -12,7 +13,23 @@ const Self = @This();
 block_type: BlockType,
 text_block: TextBlock,
 prev_node: ?*Self = null,
-children: ?[]const *Self = null,
+children: ?[]*Self = null,
+
+pub fn deinitMany(allocator: Allocator, nodes: ?[]*Self) void {
+    if (nodes) |items| {
+        
+        for (items) |item| {
+            item.deinit(allocator);
+        }
+        
+        //allocator.free(items);
+    }
+}
+
+pub fn deinit(self: *Self, allocator: Allocator) void {
+    self.text_block.deinit(allocator);
+    //allocator.destroy(self);
+}
 
 pub fn trimStandAlone(self: *Self) void {
     if (self.block_type == .StaticText) {
