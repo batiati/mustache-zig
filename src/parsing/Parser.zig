@@ -29,7 +29,7 @@ const Level = parsing.Level;
 const Node = parsing.Node;
 
 const text = @import("../text.zig");
-const EpochArena = text.EpochArena;
+const EpochArena = @import("../mem.zig").EpochArena;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -46,7 +46,6 @@ pub const ParseResult = union(enum) {
 };
 
 const Self = @This();
-
 
 gpa: Allocator,
 arena: EpochArena,
@@ -91,7 +90,7 @@ pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: Template
     return Self{
         .gpa = gpa,
         .arena = arena,
-        .text_scanner = TextScanner.init(gpa, reader),
+        .text_scanner = TextScanner.init(reader),
         .state = .WaitingStaringTag,
         .root = root,
         .current_level = root,
@@ -100,8 +99,8 @@ pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: Template
 }
 
 pub fn deinit(self: *Self) void {
-    self.text_scanner.deinit();
     self.text_scanner.reader.deinit(self.gpa);
+    self.text_scanner.deinit(self.gpa);
     self.arena.deinit();
 }
 
@@ -354,13 +353,11 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
         return self.setLastError(err, null, null);
     };
 
-
     const arena = self.arena.allocator();
     var static_text_block: ?*Node = null;
 
     // REF COUNt HERE?
-    while (try self.text_scanner.next()) |*text_block| {
-        
+    while (try self.text_scanner.next(self.gpa)) |*text_block| {
         var block_type = (try self.matchBlockType(text_block)) orelse continue;
 
         // Befone adding,
@@ -394,35 +391,34 @@ fn parseTree(self: *Self) Errors!?[]const *Node {
                 static_text_block = self.current_level.current_node;
                 assert(static_text_block != null);
 
-            
-                if (self.current_level == self.root and self.root.list.items.len > 1) {
-                    if (static_text_block.?.text_block.left_trimming != .PreserveWhitespaces) {
+                static_text_block.?.trimStandAlone();
 
-                        self.fix_me += 1;
-                        if (self.fix_me > 1000) {
-                            self.fix_me= 0;
-                            std.log.warn("LIN {}", .{ self.text_scanner.row });
-                        }
-                        _ = self.root.list.pop();
-
-                        const nodes = self.root.list.toOwnedSlice(arena);
-
-                        self.arena.nextEpoch();
-                        const new_arena = self.arena.allocator();
-
-                        var root = try Level.init(new_arena, self.root.delimiters);
-                        self.root = root;
-                        self.current_level = root;
-
-                        // Adding,
-                        try self.current_level.addNode(new_arena, block_type, text_block.*);
-                        self.current_level.current_node.?.trimStandAlone();
-
-                        return nodes;
-                    }
-                } else {
-                    static_text_block.?.trimStandAlone();
-                }
+                //if (self.current_level == self.root and self.root.list.items.len > 1) {
+                //    if (static_text_block.?.text_block.left_trimming != .PreserveWhitespaces) {
+                //
+                //        self.fix_me += 1;
+                //        if (self.fix_me > 1000) {
+                //            self.fix_me= 0;
+                //            std.log.warn("LIN {}", .{ self.text_scanner.row });
+                //        }
+                //        _ = self.root.list.pop();
+                //
+                //        const nodes = self.root.list.toOwnedSlice(arena);
+                //
+                //        self.arena.nextEpoch();
+                //        const new_arena = self.arena.allocator();
+                //
+                //        var root = try Level.init(new_arena, self.root.delimiters);
+                //        self.root = root;
+                //        self.current_level = root;
+                //
+                //        // Adding,
+                //        try self.current_level.addNode(new_arena, block_type, text_block.*);
+                //        self.current_level.current_node.?.trimStandAlone();
+                //
+                //        return nodes;
+                //    }
+                //}
             },
 
             .Section,

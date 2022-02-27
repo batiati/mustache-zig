@@ -1,7 +1,9 @@
-/// Text iterator
-/// Scans for the next delimiter mark or EOF.
+///
+/// Seeks a string for a events such as '{{', '}}' or a EOF
+/// It is the first stage of the parsing process, the TextScanner produces TextBlocks to be parsed as mustache elements.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 
 const assert = std.debug.assert;
 
@@ -19,7 +21,8 @@ const Trimmer = parsing.Trimmer;
 
 const text = @import("../text.zig");
 const TextReader = text.TextReader;
-const EpochArena = text.EpochArena;
+
+const RefCounter = @import("../mem.zig").RefCounter;
 
 const Self = @This();
 
@@ -50,8 +53,8 @@ const Delimiter = struct {
     }
 };
 
-arena: EpochArena,
 reader: TextReader,
+ref_counter: RefCounter = .{},
 content: []const u8 = &.{},
 index: usize = 0,
 block_index: usize = 0,
@@ -61,15 +64,14 @@ delimiters: [MAX_DELIMITERS]Delimiter = undefined,
 delimiters_count: usize = 0,
 delimiter_max_size: u32 = 0,
 
-pub fn init(gpa: Allocator, reader: TextReader) Self {
+pub fn init(reader: TextReader) Self {
     return .{
-        .arena = EpochArena.init(gpa),
         .reader = reader,
     };
 }
 
-pub fn deinit(self: *Self) void {
-    self.arena.deinit();
+pub fn deinit(self: *Self, allocator: Allocator) void {
+    self.ref_counter.free(allocator);
 }
 
 pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
@@ -136,14 +138,17 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
     std.sort.sort(Delimiter, self.delimiters[0..self.delimiters_count], {}, order.desc);
 }
 
-fn requestContent(self: *Self) !void {
+fn requestContent(self: *Self, allocator: Allocator) !void {
     if (!self.reader.finished()) {
-        
-        self.arena.nextEpoch();
-        const allocator = self.arena.allocator();
-
         const prepend = self.content[self.block_index..];
-        self.content = try self.reader.read(allocator, prepend);
+        
+        const read = try self.reader.read(allocator, prepend);
+        errdefer read.ref_counter.free(allocator);
+
+        self.ref_counter.free(allocator);
+        self.ref_counter = read.ref_counter;
+
+        self.content = read.content;
         self.index -= self.block_index;
         self.block_index = 0;
     }
@@ -151,7 +156,7 @@ fn requestContent(self: *Self) !void {
 
 ///
 /// Reads until the next delimiter mark or EOF
-pub fn next(self: *Self) !?TextBlock {
+pub fn next(self: *Self, allocator: Allocator) !?TextBlock {
     self.block_index = self.index;
     var trimmer = Trimmer{ .text_scanner = self };
 
@@ -162,7 +167,7 @@ pub fn next(self: *Self) !?TextBlock {
         if (self.content.len == 0 or
             self.index + self.delimiter_max_size + 1 >= self.content.len)
         {
-            try self.requestContent();
+            try self.requestContent(allocator);
         }
 
         // Increment the index on defer
@@ -179,10 +184,12 @@ pub fn next(self: *Self) !?TextBlock {
         }
 
         if (self.matchTagMark()) |mark| {
-            
+            const tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null;
+
             const block = TextBlock{
                 .event = .{ .Mark = mark },
-                .tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null,
+                .tail = tail,
+                .ref_counter = if (tail != null) self.ref_counter.ref() else .{},
                 .row = self.row,
                 .col = self.col,
                 .left_trimming = trimmer.getLeftTrimmingIndex(),
@@ -200,6 +207,7 @@ pub fn next(self: *Self) !?TextBlock {
             return TextBlock{
                 .event = .Eof,
                 .tail = self.content[self.block_index..],
+                .ref_counter = self.ref_counter.ref(),
                 .row = self.row,
                 .col = self.col,
                 .left_trimming = trimmer.getLeftTrimmingIndex(),
@@ -233,13 +241,18 @@ test "basic tests" {
 
     const allocator = testing.allocator;
 
-    var reader = Self.init(try text.fromString(allocator, content));
-    reader.deinit();
+    var string = try text.fromString(allocator, content);
+    defer string.deinit(allocator);
+
+    var reader = Self.init(string);
+    defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
 
-    var part_1 = try reader.next();
+    var part_1 = try reader.next(allocator);
     try testing.expect(part_1 != null);
+    defer part_1.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
@@ -248,8 +261,10 @@ test "basic tests" {
     try testing.expectEqual(@as(usize, 1), part_1.?.row);
     try testing.expectEqual(@as(usize, 6), part_1.?.col);
 
-    var part_2 = try reader.next();
+    var part_2 = try reader.next(allocator);
     try testing.expect(part_2 != null);
+    defer part_2.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
@@ -258,8 +273,10 @@ test "basic tests" {
     try testing.expectEqual(@as(usize, 1), part_2.?.row);
     try testing.expectEqual(@as(usize, 12), part_2.?.col);
 
-    var part_3 = try reader.next();
+    var part_3 = try reader.next(allocator);
     try testing.expect(part_3 != null);
+    defer part_3.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_3.?.event);
     try testing.expectEqual(MarkType.Starting, part_3.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.NoScapeDelimiter, part_3.?.event.Mark.delimiter_type);
@@ -268,8 +285,10 @@ test "basic tests" {
     try testing.expectEqual(@as(usize, 2), part_3.?.row);
     try testing.expectEqual(@as(usize, 6), part_3.?.col);
 
-    var part_4 = try reader.next();
+    var part_4 = try reader.next(allocator);
     try testing.expect(part_4 != null);
+    defer part_4.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_4.?.event);
     try testing.expectEqual(MarkType.Ending, part_4.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.NoScapeDelimiter, part_4.?.event.Mark.delimiter_type);
@@ -278,14 +297,16 @@ test "basic tests" {
     try testing.expectEqual(@as(usize, 2), part_4.?.row);
     try testing.expectEqual(@as(usize, 15), part_4.?.col);
 
-    var part_5 = try reader.next();
+    var part_5 = try reader.next(allocator);
     try testing.expect(part_5 != null);
+    defer part_5.?.deinit(allocator);
+
     try testing.expectEqual(Event.Eof, part_5.?.event);
     try testing.expectEqualStrings("Until eof", part_5.?.tail.?);
     try testing.expectEqual(@as(usize, 2), part_5.?.row);
     try testing.expectEqual(@as(usize, 26), part_5.?.col);
 
-    var part_6 = try reader.next();
+    var part_6 = try reader.next(allocator);
     try testing.expect(part_6 == null);
 }
 
@@ -301,12 +322,14 @@ test "custom tags" {
     defer string.deinit(allocator);
 
     var reader = Self.init(string);
-    reader.deinit();
+    defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
-    var part_1 = try reader.next();
+    var part_1 = try reader.next(allocator);
     try testing.expect(part_1 != null);
+    defer part_1.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
@@ -315,8 +338,10 @@ test "custom tags" {
     try testing.expectEqual(@as(usize, 1), part_1.?.row);
     try testing.expectEqual(@as(usize, 6), part_1.?.col);
 
-    var part_2 = try reader.next();
+    var part_2 = try reader.next(allocator);
     try testing.expect(part_2 != null);
+    defer part_2.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
@@ -325,8 +350,10 @@ test "custom tags" {
     try testing.expectEqual(@as(usize, 1), part_2.?.row);
     try testing.expectEqual(@as(usize, 11), part_2.?.col);
 
-    var part_3 = try reader.next();
+    var part_3 = try reader.next(allocator);
     try testing.expect(part_3 != null);
+    defer part_3.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_3.?.event);
     try testing.expectEqual(MarkType.Starting, part_3.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_3.?.event.Mark.delimiter_type);
@@ -335,8 +362,10 @@ test "custom tags" {
     try testing.expectEqual(@as(usize, 2), part_3.?.row);
     try testing.expectEqual(@as(usize, 6), part_3.?.col);
 
-    var part_4 = try reader.next();
+    var part_4 = try reader.next(allocator);
     try testing.expect(part_4 != null);
+    defer part_4.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_4.?.event);
     try testing.expectEqual(MarkType.Ending, part_4.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_4.?.event.Mark.delimiter_type);
@@ -345,14 +374,16 @@ test "custom tags" {
     try testing.expectEqual(@as(usize, 2), part_4.?.row);
     try testing.expectEqual(@as(usize, 13), part_4.?.col);
 
-    var part_5 = try reader.next();
+    var part_5 = try reader.next(allocator);
     try testing.expect(part_5 != null);
+    defer part_5.?.deinit(allocator);
+
     try testing.expectEqual(Event.Eof, part_5.?.event);
     try testing.expectEqualStrings("Until eof", part_5.?.tail.?);
     try testing.expectEqual(@as(usize, 2), part_5.?.row);
     try testing.expectEqual(@as(usize, 22), part_5.?.col);
 
-    var part_6 = try reader.next();
+    var part_6 = try reader.next(allocator);
     try testing.expect(part_6 == null);
 }
 
@@ -365,12 +396,14 @@ test "EOF" {
     defer string.deinit(allocator);
 
     var reader = Self.init(string);
-    reader.deinit();
+    defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
 
-    var part_1 = try reader.next();
+    var part_1 = try reader.next(allocator);
     try testing.expect(part_1 != null);
+    defer part_1.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
@@ -379,8 +412,10 @@ test "EOF" {
     try testing.expectEqual(@as(usize, 1), part_1.?.row);
     try testing.expectEqual(@as(usize, 1), part_1.?.col);
 
-    var part_2 = try reader.next();
+    var part_2 = try reader.next(allocator);
     try testing.expect(part_2 != null);
+    defer part_2.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
@@ -389,7 +424,7 @@ test "EOF" {
     try testing.expectEqual(@as(usize, 1), part_2.?.row);
     try testing.expectEqual(@as(usize, 7), part_2.?.col);
 
-    var part_3 = try reader.next();
+    var part_3 = try reader.next(allocator);
     try testing.expect(part_3 == null);
 }
 
@@ -402,12 +437,14 @@ test "EOF custom tags" {
     defer string.deinit(allocator);
 
     var reader = Self.init(string);
-    reader.deinit();
+    defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
-    var part_1 = try reader.next();
+    var part_1 = try reader.next(allocator);
     try testing.expect(part_1 != null);
+    defer part_1.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
@@ -416,8 +453,10 @@ test "EOF custom tags" {
     try testing.expectEqual(@as(usize, 1), part_1.?.row);
     try testing.expectEqual(@as(usize, 1), part_1.?.col);
 
-    var part_2 = try reader.next();
+    var part_2 = try reader.next(allocator);
     try testing.expect(part_2 != null);
+    defer part_2.?.deinit(allocator);
+
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
@@ -426,6 +465,6 @@ test "EOF custom tags" {
     try testing.expectEqual(@as(usize, 1), part_2.?.row);
     try testing.expectEqual(@as(usize, 6), part_2.?.col);
 
-    var part_3 = try reader.next();
+    var part_3 = try reader.next(allocator);
     try testing.expect(part_3 == null);
 }

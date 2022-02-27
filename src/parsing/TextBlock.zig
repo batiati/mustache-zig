@@ -1,5 +1,9 @@
+///
+/// TextBlock is some slice of string containing information about how it appears on the template source.
+/// Each TextBlock is produced by the TextScanner, it is the first stage of the parsing process, 
 const std = @import("std");
 const testing = std.testing;
+const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
 const parsing = @import("parsing.zig");
@@ -12,16 +16,53 @@ const DelimiterType = parsing.DelimiterType;
 const Delimiters = parsing.Delimiters;
 const TrimmingIndex = parsing.TrimmingIndex;
 
+const RefCounter = @import("../mem.zig").RefCounter;
+
 const Self = @This();
 
+///
+/// The event that generated this TextBlock, 
+/// It can be a text mark such {{ or }}, or a EOF
 event: Event,
+
+///
+/// The tail slice from the last event until now
 tail: ?[]const u8,
+
+///
+/// A ref counter for the buffer that holds this strings
+ref_counter: RefCounter,
+
+///
+/// The line on the template source
+/// Used mostly for error messages
 row: u32,
+
+///
+/// The column on the template source
+/// Used mostly for error messages
 col: u32,
+
+///
+/// Trimming rules for the left side of the slice
 left_trimming: TrimmingIndex = .PreserveWhitespaces,
+
+///
+/// Trimming rules for the right side of the slice
 right_trimming: TrimmingIndex = .PreserveWhitespaces,
+
+///
+/// Indentation presented on this text block
+/// All indentation must be propagated to the child elements
 indentation: ?[]const u8 = null,
 
+pub inline fn deinit(self: *Self, allocator: Allocator) void {
+    self.ref_counter.free(allocator);
+}
+
+///
+/// Matches the BlockType
+/// Can move 1 position ahead on the slice if this block contains a staring symbol as such ! # ^ & $ > < = / 
 pub fn readBlockType(self: *Self) ?BlockType {
     if (self.tail) |tail| {
         const match: ?BlockType = switch (tail[0]) {
@@ -46,6 +87,8 @@ pub fn readBlockType(self: *Self) ?BlockType {
     return null;
 }
 
+///
+/// Processes the trimming rules for the right side of the slice
 pub fn trimRight(self: *Self) void {
     switch (self.right_trimming) {
         .PreserveWhitespaces, .Trimmed => {},
@@ -69,6 +112,8 @@ pub fn trimRight(self: *Self) void {
     }
 }
 
+///
+/// Processes the trimming rules for the left side of the slice
 pub fn trimLeft(self: *Self) void {
     switch (self.left_trimming) {
         .PreserveWhitespaces, .Trimmed => {},
