@@ -59,7 +59,6 @@ last_error: ?LastError = null,
 fix_me: usize = 0,
 
 pub fn init(gpa: Allocator, template_text: []const u8, options: TemplateOptions) Allocator.Error!Self {
-
     var arena = EpochArena.init(gpa);
     errdefer arena.deinit();
 
@@ -77,7 +76,6 @@ pub fn init(gpa: Allocator, template_text: []const u8, options: TemplateOptions)
 }
 
 pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: TemplateOptions) Errors!Self {
-
     var arena = EpochArena.init(gpa);
     errdefer arena.deinit();
 
@@ -396,32 +394,30 @@ fn parseTree(self: *Self) Errors!?[]*Node {
 
                 static_text_block.?.trimStandAlone();
 
-                //if (self.current_level == self.root and self.root.list.items.len > 1) {
-                //    if (static_text_block.?.text_block.left_trimming != .PreserveWhitespaces) {
-                //
-                //        self.fix_me += 1;
-                //        if (self.fix_me > 1000) {
-                //            self.fix_me= 0;
-                //            std.log.warn("LIN {}", .{ self.text_scanner.row });
-                //        }
-                //        _ = self.root.list.pop();
-                //
-                //        const nodes = self.root.list.toOwnedSlice(arena);
-                //
-                //        self.arena.nextEpoch();
-                //        const new_arena = self.arena.allocator();
-                //
-                //        var root = try Level.init(new_arena, self.root.delimiters);
-                //        self.root = root;
-                //        self.current_level = root;
-                //
-                //        // Adding,
-                //        try self.current_level.addNode(new_arena, block_type, text_block.*);
-                //        self.current_level.current_node.?.trimStandAlone();
-                //
-                //        return nodes;
-                //    }
-                //}
+                if (self.current_level == self.root and self.root.list.items.len > 1) {
+                    if (static_text_block.?.text_block.left_trimming != .PreserveWhitespaces) {
+                        self.fix_me += 1;
+                        if (self.fix_me > 1000) {
+                            self.fix_me = 0;
+                            std.log.warn("LIN {}", .{self.text_scanner.row});
+                        }
+                        _ = self.root.list.pop();
+
+                        const nodes = self.root.list.toOwnedSlice(arena);
+
+                        self.arena.nextEpoch();
+                        const new_arena = self.arena.allocator();
+
+                        var root = try Level.init(new_arena, self.root.delimiters);
+                        self.root = root;
+                        self.current_level = root;
+
+                        // Adding,
+                        try self.current_level.addNode(new_arena, block_type, static_text_block.?.text_block);
+
+                        return nodes;
+                    }
+                }
             },
 
             .Section,
@@ -505,29 +501,37 @@ test "Basic parse" {
         \\World
     ;
 
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
     var parser = try Self.init(allocator, template_text, .{});
     defer parser.deinit();
 
-    var ret = try testParseTree(allocator, &parser);
+    var first_block = try testParseTree(&parser);
 
-    if (ret) |parts| {
-        try testing.expectEqual(@as(usize, 4), parts.len);
-        try testing.expectEqual(BlockType.Comment, parts[0].block_type);
+    // The parser produces only the minimun amount of tags that can be render at once
+    if (first_block) |nodes| {
+        defer Node.deinitMany(allocator, nodes);
 
-        try testing.expectEqual(BlockType.StaticText, parts[1].block_type);
-        try testing.expectEqualStrings("  Hello\n", parts[1].text_block.tail.?);
+        try testing.expectEqual(@as(usize, 1), nodes.len);
+        try testing.expectEqual(BlockType.Comment, nodes[0].block_type);
+    } else {
+        try testing.expect(false);
+    }
 
-        try testing.expectEqual(BlockType.Section, parts[2].block_type);
+    var second_block = try testParseTree(&parser);
 
-        try testing.expectEqual(BlockType.StaticText, parts[3].block_type);
-        try testing.expectEqualStrings("World", parts[3].text_block.tail.?);
+    // Nested tags must be produced together
+    if (second_block) |nodes| {
+        defer Node.deinitMany(allocator, nodes);
 
-        if (parts[2].children) |section| {
+        try testing.expectEqual(@as(usize, 2), nodes.len);
+
+        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
+        try testing.expectEqualStrings("  Hello\n", nodes[0].text_block.tail.?);
+
+        try testing.expectEqual(BlockType.Section, nodes[1].block_type);
+
+        if (nodes[1].children) |section| {
             try testing.expectEqual(@as(usize, 8), section.len);
             try testing.expectEqual(BlockType.StaticText, section[0].block_type);
 
@@ -554,6 +558,22 @@ test "Basic parse" {
     } else {
         try testing.expect(false);
     }
+
+    var third_block = try testParseTree(&parser);
+
+    if (third_block) |nodes| {
+        defer Node.deinitMany(allocator, nodes);
+
+        try testing.expectEqual(@as(usize, 1), nodes.len);
+
+        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
+        try testing.expectEqualStrings("World", nodes[0].text_block.tail.?);
+    } else {
+        try testing.expect(false);
+    }
+
+    var no_more = try testParseTree(&parser);
+    try testing.expect(no_more == null);
 }
 
 test "Scan standAlone tags" {
@@ -564,29 +584,41 @@ test "Scan standAlone tags" {
         \\Hello
     ;
 
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
     var parser = try Self.init(allocator, template_text, .{});
     defer parser.deinit();
 
-    var ret = try testParseTree(allocator, &parser);
+    var first_block = try testParseTree(&parser);
 
-    if (ret) |parts| {
-        try testing.expectEqual(@as(usize, 3), parts.len);
+    // The parser produces only the minimun amount of tags that can be render at once
+    if (first_block) |nodes| {
+        defer Node.deinitMany(allocator, nodes);
 
-        try testing.expectEqual(BlockType.StaticText, parts[0].block_type);
-        try testing.expect(parts[0].text_block.tail == null);
+        try testing.expectEqual(@as(usize, 2), nodes.len);
 
-        try testing.expectEqual(BlockType.Comment, parts[1].block_type);
+        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
+        try testing.expect(nodes[0].text_block.tail == null);
 
-        try testing.expectEqual(BlockType.StaticText, parts[2].block_type);
-        try testing.expectEqualStrings("Hello", parts[2].text_block.tail.?);
+        try testing.expectEqual(BlockType.Comment, nodes[1].block_type);
     } else {
         try testing.expect(false);
     }
+
+    var second_block = try testParseTree(&parser);
+    if (second_block) |nodes| {
+        defer Node.deinitMany(allocator, nodes);
+
+        try testing.expectEqual(@as(usize, 1), nodes.len);
+
+        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
+        try testing.expectEqualStrings("Hello", nodes[0].text_block.tail.?);
+    } else {
+        try testing.expect(false);
+    }
+
+    var no_more = try testParseTree(&parser);
+    try testing.expect(no_more == null);
 }
 
 test "Scan delimiters Tags" {
@@ -595,51 +627,46 @@ test "Scan delimiters Tags" {
         \\[interpolation]
     ;
 
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
+    const allocator = testing.allocator;
 
     var parser = try Self.init(allocator, template_text, .{});
     defer parser.deinit();
 
-    var ret = try testParseTree(allocator, &parser);
+    // The parser produces only the minimun amount of tags that can be render at once
 
-    if (ret) |parts| {
-        try testing.expectEqual(@as(usize, 3), parts.len);
+    var first_block = try testParseTree(&parser);
+    if (first_block) |nodes| {
+        defer Node.deinitMany(allocator, nodes);
 
-        try testing.expectEqual(BlockType.Delimiters, parts[0].block_type);
-        try testing.expectEqualStrings("[ ]", parts[0].text_block.tail.?);
+        try testing.expectEqual(@as(usize, 1), nodes.len);
 
-        try testing.expectEqual(BlockType.StaticText, parts[1].block_type);
-        try testing.expect(parts[1].text_block.tail == null);
-
-        try testing.expectEqual(BlockType.Interpolation, parts[2].block_type);
-        try testing.expectEqualStrings("interpolation", parts[2].text_block.tail.?);
+        try testing.expectEqual(BlockType.Delimiters, nodes[0].block_type);
+        try testing.expectEqualStrings("[ ]", nodes[0].text_block.tail.?);
     } else {
         try testing.expect(false);
     }
-}
 
-fn testParseTree(allocator: Allocator, parser: *Self) !?[]const *Node {
-    var list = std.ArrayList(*Node).init(allocator);
+    var second_block = try testParseTree(&parser);
+    if (second_block) |nodes| {
+        defer Node.deinitMany(allocator, nodes);
 
-    while (parser.parseTree() catch |e| {
-        if (parser.last_error) |err| {
-            std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.row, err.col });
-            try testing.expect(false);
-        }
+        try testing.expectEqual(@as(usize, 2), nodes.len);
 
-        return e;
-    }) |nodes| {
-        try list.appendSlice(nodes);
+        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
+        try testing.expect(nodes[0].text_block.tail == null);
+
+        try testing.expectEqual(BlockType.Interpolation, nodes[1].block_type);
+        try testing.expectEqualStrings("interpolation", nodes[1].text_block.tail.?);
+    } else {
+        try testing.expect(false);
     }
 
-    return list.toOwnedSlice();
+    var no_more = try testParseTree(&parser);
+    try testing.expect(no_more == null);
 }
 
-fn testParseTemplate(parser: *Self) !Template {
-    return parser.parse() catch |e| {
+fn testParseTree(parser: *Self) !?[]*Node {
+    return parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
             std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.row, err.col });
             try testing.expect(false);

@@ -105,13 +105,11 @@ pub fn getRightTrimmingIndex(self: Self) TrimmingIndex {
     };
 }
 
-
-
 test "Line breaks" {
     const allocator = testing.allocator;
 
     //                                                     2      7
-    //                                                     ↓      ↓           
+    //                                                     ↓      ↓
     var text_scanner = try TextScanner.init(allocator, "  \nABC\n  ");
     defer text_scanner.deinit(allocator);
 
@@ -472,8 +470,8 @@ test "Single line break \\r\\n" {
 test "No trimming" {
     const allocator = testing.allocator;
 
-    //                
-    //                
+    //
+    //
     var text_scanner = try TextScanner.init(allocator, "   ABC\nABC   ");
     defer text_scanner.deinit(allocator);
 
@@ -534,8 +532,8 @@ test "No trimming, no whitespace \\r\\n" {
 test "No trimming \\r\\n" {
     const allocator = testing.allocator;
 
-    //                
-    //                
+    //
+    //
     var text_scanner = try TextScanner.init(allocator, "   ABC\r\nABC   ");
     defer text_scanner.deinit(allocator);
 
@@ -552,8 +550,8 @@ test "No trimming \\r\\n" {
 test "No whitespace" {
     const allocator = testing.allocator;
 
-    //                
-    //                
+    //
+    //
     var text_scanner = try TextScanner.init(allocator, "ABC");
     defer text_scanner.deinit(allocator);
 

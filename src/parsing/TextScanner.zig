@@ -65,13 +65,13 @@ delimiters_count: usize = 0,
 delimiter_max_size: u32 = 0,
 
 pub fn init(allocator: Allocator, template_text: []const u8) Allocator.Error!Self {
-    return Self {
+    return Self{
         .reader = try text.fromString(allocator, template_text),
     };
 }
 
 pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, read_buffer_size: u32) text.Errors!Self {
-    return Self {
+    return Self{
         .reader = try text.fromFile(allocator, absolute_path, read_buffer_size),
     };
 }
