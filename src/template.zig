@@ -313,6 +313,11 @@ pub const Template = struct {
     fn parseStream(self: *Self, parser: *Parser, context: anytype, action: fn (ctx: @TypeOf(context), self: *Self, elements: []Element) anyerror!void) !void {
         while (true) {
             var parse_result = try parser.parse();
+
+            // When "options.own_strings = false", all read buffer must be freed after producing the nodes
+            // This option should be used only when the template source is a static string, or when rendering direct to a stream.
+            defer if (!self.options.own_strings) parser.ref_counter_holder.freeAll(self.allocator);
+
             switch (parse_result) {
                 .Error => |err| {
                     self.result = .{
@@ -2205,15 +2210,21 @@ const tests = struct {
         // Must be at least 10MB big
         try testing.expect(size > 10 * 1024 * 1024);
 
-        // 16KB is a lot of memory for this job
-        var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){ .requested_memory_limit = 1024 * 1024 };
+        // 16KB should be enough memory for this job
+        var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){
+            .requested_memory_limit = 16 * 1024,
+        };
         defer _ = plenty_of_memory.deinit();
 
-        // Create a template to parse this huge file, with only 16KB of memory
+        // Strings are not ownned by the template,
+        // Use this option when creating templates from a static string or when rendering direct to a stream
+        const OWN_STRINGS = false;
+
+        // Create a template to parse and render this 10MB file, with only 16KB of memory
         var template = Template{
             .allocator = plenty_of_memory.allocator(),
             .options = .{
-                .own_strings = false,
+                .own_strings = OWN_STRINGS,
             },
         };
 
@@ -2225,7 +2236,45 @@ const tests = struct {
 
             pub fn action(self: *@This(), _template: *Template, elements: []Element) anyerror!void {
                 self.count += elements.len;
+
+                checkStrings(elements);
                 Element.freeMany(_template.allocator, _template.options.own_strings, elements);
+            }
+
+            // Check if all strings are valid
+            // As long we are running with own_string = false,
+            // Those strings must be valid during the render process
+            fn checkStrings(elements: ?[]const Element) void {
+                if (elements) |any| {
+                    for (any) |element| {
+                        switch (element) {
+                            .StaticText => |item| scan(item),
+                            .Interpolation => |item| scan(item.key),
+                            .Partial => |item| scan(item.key),
+                            .Section => |item| {
+                                scan(item.key);
+                                checkStrings(item.content);
+                            },
+                            .Parent => |item| {
+                                scan(item.key);
+                                checkStrings(item.content);
+                            },
+                            .Block => |item| {
+                                scan(item.key);
+                                checkStrings(item.content);
+                            },
+                        }
+                    }
+                }
+            }
+
+            // Just scans the whole slice, hopping for no segfault
+            fn scan(string: []const u8) void {
+                var prev_char: u8 = 0;
+                for (string) |char| {
+                    prev_char = prev_char +% char;
+                }
+                _ = prev_char;
             }
         };
 

@@ -24,7 +24,7 @@ pub const RefCounter = struct {
         return RefCounter{ .state = state };
     }
 
-    pub fn ref(self: *RefCounter) RefCounter {
+    pub fn ref(self: RefCounter) RefCounter {
         if (self.state) |state| {
             state.counter += 1;
             return .{ .state = state };
@@ -41,6 +41,41 @@ pub const RefCounter = struct {
                 allocator.free(state.buffer);
                 allocator.destroy(state);
             }
+        }
+    }
+};
+
+pub const RefCounterHolder = struct {
+    group: std.AutoHashMapUnmanaged(usize, void) = .{},
+
+    pub fn add(self: *RefCounterHolder, allocator: Allocator, ref_counter: RefCounter) Allocator.Error!void {
+        if (ref_counter.state) |state| {
+            var prev = try self.group.fetchPut(allocator, @ptrToInt(state), {});
+            if (prev == null) {
+                _ = ref_counter.ref();
+            }
+        }
+    }
+
+    pub fn remove(self: *RefCounterHolder, allocator: Allocator, ref_counter: *RefCounter) void {
+        if (ref_counter.state) |state| {
+            if (self.group.remove(@ptrToInt(state))) {
+                ref_counter.free(allocator);
+            }
+        }
+    }
+
+    pub fn freeAll(self: *RefCounterHolder, allocator: Allocator) void {
+        defer {
+            self.group.deinit(allocator);
+            self.group = .{};
+        }
+
+        var it = self.group.keyIterator();
+        while (it.next()) |item| {
+            var state = @intToPtr(*RefCounter.State, item.*);
+            var ref_counter = RefCounter{ .state = state };
+            ref_counter.free(allocator);
         }
     }
 };

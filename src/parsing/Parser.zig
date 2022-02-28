@@ -29,7 +29,11 @@ const Level = parsing.Level;
 const Node = parsing.Node;
 
 const text = @import("text.zig");
-const EpochArena = @import("../mem.zig").EpochArena;
+
+const mem = @import("../mem.zig");
+const EpochArena = mem.EpochArena;
+const RefCounter = mem.RefCounter;
+const RefCounterHolder = mem.RefCounterHolder;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -47,16 +51,34 @@ pub const ParseResult = union(enum) {
 
 const Self = @This();
 
+/// General purpose allocator
 gpa: Allocator,
+
+/// This combines two arenas, allowing to free memory each time the parser produces
+/// When the "nextEpoch" function is called, the current arena is reserved and a new one is initialized for use.
 arena: EpochArena,
-text_scanner: TextScanner,
-state: State,
-root: *Level,
-current_level: *Level,
+
+/// General options
 options: TemplateOptions,
+
+/// Text scanner instance, shoud not be accessed directly
+text_scanner: TextScanner,
+
+/// Parser state, shoud not be accessed directly
+state: State,
+
+/// Root level, holding all nested nodes produced, should not be accessed direcly
+root: *Level,
+
+/// Current level, holding the current tag being processed
+current_level: *Level,
+
+/// Stores the last error ocurred parsing the content
 last_error: ?LastError = null,
 
-fix_me: usize = 0,
+/// Used when the field "options.own_strings = false"
+/// Holds a ref_counter to the read buffer for all produced elements
+ref_counter_holder: RefCounterHolder = .{},
 
 pub fn init(gpa: Allocator, template_text: []const u8, options: TemplateOptions) Allocator.Error!Self {
     var arena = EpochArena.init(gpa);
@@ -95,6 +117,7 @@ pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: Template
 pub fn deinit(self: *Self) void {
     self.text_scanner.deinit(self.gpa);
     self.arena.deinit();
+    self.ref_counter_holder.freeAll(self.gpa);
 }
 
 pub fn parse(self: *Self) ProcessingErrors!ParseResult {
@@ -125,11 +148,12 @@ fn fromError(self: *Self, err: Errors) ProcessingErrors!ParseResult {
     }
 }
 
-inline fn dupe(self: *const Self, mem: []const u8) Allocator.Error![]const u8 {
+inline fn dupe(self: *Self, ref_counter: RefCounter, slice: []const u8) Allocator.Error![]const u8 {
     if (self.options.own_strings) {
-        return try self.gpa.dupe(u8, mem);
+        return try self.gpa.dupe(u8, slice);
     } else {
-        return mem;
+        try self.ref_counter_holder.add(self.gpa, ref_counter);
+        return slice;
     }
 }
 
@@ -148,7 +172,7 @@ pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) Erro
                         assert(content.len > 0);
 
                         break :blk Element{
-                            .StaticText = try self.dupe(content),
+                            .StaticText = try self.dupe(node.text_block.ref_counter, content),
                         };
                     } else {
                         // Empty tag
@@ -175,13 +199,13 @@ pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) Erro
                 => break :blk null,
 
                 else => |block_type| {
-                    const key = try self.dupe(try self.parseIdentificator(&node.text_block));
+                    const key = try self.dupe(node.text_block.ref_counter, try self.parseIdentificator(&node.text_block));
                     errdefer if (self.options.own_strings) self.gpa.free(key);
 
                     const content = if (node.children) |children| try self.createElements(key, children) else null;
                     errdefer if (content) |content_value| Element.freeMany(self.gpa, self.options.own_strings, content_value);
 
-                    const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node_indentation) else null;
+                    const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
                     errdefer if (self.options.own_strings) if (indentation) |indentation_value| self.gpa.free(indentation_value);
 
                     break :blk switch (block_type) {
