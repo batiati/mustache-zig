@@ -279,7 +279,7 @@ pub fn Template(comptime options: TemplateOptions) type {
             var parser = try Parser.init(self.allocator, template_text);
             defer parser.deinit();
 
-            try self.parse(&parser);
+            try self.collectElements(&parser);
         }
 
         fn loadFromFile(self: *Self, absolute_path: []const u8) !void {
@@ -293,7 +293,25 @@ pub fn Template(comptime options: TemplateOptions) type {
             var parser = try Parser.init(self.allocator, absolute_path);
             defer parser.deinit();
 
-            try self.parse(&parser);
+            try self.collectElements(&parser);
+        }
+
+        fn collectElements(self: *Self, parser: anytype) !void {
+            const Collector = struct {
+                elements: []Element = undefined,
+
+                pub fn collect(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
+                    _ = outer;
+                    ctx.elements = elements;
+                }
+            };
+
+            var collector = Collector{};
+            try self.produceElements(parser, &collector, Collector.collect);
+
+            self.result = .{
+                .Elements = collector.elements,
+            };
         }
 
         fn renderFromFile(self: *Self, absolute_path: []const u8, render: anytype, action: fn (ctx: @TypeOf(render), template: *Self, elements: []Element) anyerror!void) !void {
@@ -306,28 +324,10 @@ pub fn Template(comptime options: TemplateOptions) type {
 
             var parser = try Parser.init(self.allocator, absolute_path);
             defer parser.deinit();
-            try self.collectElements(&parser, render, action);
+            try self.produceElements(&parser, render, action);
         }
 
-        fn parse(self: *Self, parser: anytype) !void {
-            const Closure = struct {
-                elements: []Element = undefined,
-
-                pub fn collect(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
-                    _ = outer;
-                    ctx.elements = elements;
-                }
-            };
-
-            var closure = Closure{};
-            try self.collectElements(parser, &closure, Closure.collect);
-
-            self.result = .{
-                .Elements = closure.elements,
-            };
-        }
-
-        fn collectElements(self: *Self, parser: anytype, context: anytype, action: fn (ctx: @TypeOf(context), self: *Self, elements: []Element) anyerror!void) !void {
+        fn produceElements(self: *Self, parser: anytype, context: anytype, action: fn (ctx: @TypeOf(context), self: *Self, elements: []Element) anyerror!void) !void {
             while (true) {
                 var parse_result = try parser.parse();
 

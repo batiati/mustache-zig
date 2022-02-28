@@ -153,9 +153,9 @@ pub fn Parser(comptime options: ParserOptions) type {
         /// General purpose allocator
         gpa: Allocator,
 
-        /// This combines two arenas, allowing to free memory each time the parser produces
+        /// When in streamed mode, this combines two arenas, allowing to free memory each time the parser produces
         /// When the "nextEpoch" function is called, the current arena is reserved and a new one is initialized for use.
-        arena: EpochArena,
+        arena: if (options.streamed) EpochArena else ArenaAllocator,
 
         /// Text scanner instance, shoud not be accessed directly
         text_scanner: TextScanner(options.source),
@@ -177,7 +177,8 @@ pub fn Parser(comptime options: ParserOptions) type {
         ref_counter_holder: if (options.owns_string) void else RefCounterHolder = if (options.owns_string) {} else RefCounterHolder{},
 
         pub fn init(gpa: Allocator, template: []const u8) if (options.source == .String) Allocator.Error!Self else FileReader.Errors!Self {
-            var arena = EpochArena.init(gpa);
+            const Arena = if (options.streamed) EpochArena else ArenaAllocator;
+            var arena = Arena.init(gpa);
             errdefer arena.deinit();
 
             var root = try Level.init(arena.allocator(), options.delimiters);
@@ -563,9 +564,11 @@ pub fn Parser(comptime options: ParserOptions) type {
             } else {
                 const nodes = self.root.list.toOwnedSlice(arena);
 
-                self.arena.nextEpoch();
-                const new_arena = self.arena.allocator();
+                if (options.streamed) {
+                    self.arena.nextEpoch();
+                }
 
+                const new_arena = self.arena.allocator();
                 var root = try Level.init(new_arena, self.root.delimiters);
                 self.root = root;
                 self.current_level = root;
