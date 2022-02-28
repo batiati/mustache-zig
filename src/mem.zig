@@ -1,4 +1,3 @@
-/// String and text manipulation helpers
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -201,7 +200,7 @@ pub const EpochArena = struct {
         var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
         var epoch_arena = EpochArena.init(gpa.allocator());
 
-        // First epoch, 
+        // First epoch,
         const arena = epoch_arena.allocator();
         var chunk = try arena.alloc(u8, 1024);
         const total_mem_1 = gpa.total_requested_bytes;

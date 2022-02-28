@@ -6,9 +6,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const parsing = @import("parsing/parsing.zig");
-const Parser = parsing.Parser;
 const Node = parsing.Node;
-
 pub const Delimiters = parsing.Delimiters;
 
 pub const ParseErrors = error{
@@ -197,36 +195,36 @@ pub const Element = union(enum) {
     /// This content is the argument passed to the Parent template.
     Block: Block,
 
-    pub fn free(self: Element, allocator: Allocator, own_strings: bool) void {
+    pub fn free(self: Element, allocator: Allocator, owns_string: bool) void {
         switch (self) {
-            .StaticText => |content| if (own_strings) allocator.free(content),
-            .Interpolation => |interpolation| if (own_strings) allocator.free(interpolation.key),
+            .StaticText => |content| if (owns_string) allocator.free(content),
+            .Interpolation => |interpolation| if (owns_string) allocator.free(interpolation.key),
             .Section => |section| {
-                if (own_strings) allocator.free(section.key);
-                freeMany(allocator, own_strings, section.content);
+                if (owns_string) allocator.free(section.key);
+                freeMany(allocator, owns_string, section.content);
             },
 
             .Partial => |partial| {
-                if (own_strings) allocator.free(partial.key);
+                if (owns_string) allocator.free(partial.key);
                 if (partial.indentation) |indentation| allocator.free(indentation);
             },
 
             .Parent => |inheritance| {
-                if (own_strings) allocator.free(inheritance.key);
-                freeMany(allocator, own_strings, inheritance.content);
+                if (owns_string) allocator.free(inheritance.key);
+                freeMany(allocator, owns_string, inheritance.content);
             },
 
             .Block => |block| {
-                if (own_strings) allocator.free(block.key);
-                freeMany(allocator, own_strings, block.content);
+                if (owns_string) allocator.free(block.key);
+                freeMany(allocator, owns_string, block.content);
             },
         }
     }
 
-    pub fn freeMany(allocator: Allocator, own_strings: bool, many: ?[]const Element) void {
+    pub fn freeMany(allocator: Allocator, owns_string: bool, many: ?[]const Element) void {
         if (many) |items| {
             for (items) |item| {
-                item.free(allocator, own_strings);
+                item.free(allocator, owns_string);
             }
             allocator.free(items);
         }
@@ -236,111 +234,131 @@ pub const Element = union(enum) {
 pub const TemplateOptions = struct {
     delimiters: Delimiters = .{},
     read_buffer_size: usize = 4 * 1024,
-    own_strings: bool = true,
+    owns_string: bool = true,
 };
 
-pub const Template = struct {
-    const Self = @This();
+pub fn Template(comptime options: TemplateOptions) type {
+    return struct {
+        const Self = @This();
 
-    allocator: Allocator,
-    options: TemplateOptions,
-    result: union(enum) {
-        Elements: []const Element,
-        Error: LastError,
-        NotLoaded,
-    } = .NotLoaded,
+        const template_options = options;
 
-    pub fn init(allocator: Allocator, template_text: []const u8, options: TemplateOptions) !Template {
-        var self = Self{
-            .allocator = allocator,
-            .options = options,
-        };
+        allocator: Allocator,
+        result: union(enum) {
+            Elements: []const Element,
+            Error: LastError,
+            NotLoaded,
+        } = .NotLoaded,
 
-        try self.load(template_text);
-        return self;
-    }
+        pub fn init(allocator: Allocator, template_text: []const u8) !Self {
+            var self = Self{
+                .allocator = allocator,
+            };
 
-    pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, options: TemplateOptions) !Template {
-        var self = Self{
-            .allocator = allocator,
-            .options = options,
-        };
+            try self.load(template_text);
+            return self;
+        }
 
-        try self.loadFromFile(absolute_path);
-        return self;
-    }
+        pub fn initFromFile(allocator: Allocator, absolute_path: []const u8) !Self {
+            var self = Self{
+                .allocator = allocator,
+            };
 
-    fn load(self: *Self, template_text: []const u8) !void {
-        var parser = try Parser.init(self.allocator, template_text, self.options);
-        defer parser.deinit();
+            try self.loadFromFile(absolute_path);
+            return self;
+        }
 
-        try self.parse(&parser);
-    }
+        fn load(self: *Self, template_text: []const u8) !void {
+            const Parser = parsing.Parser(.{
+                .delimiters = options.delimiters,
+                .source = .String,
+                .owns_string = options.owns_string,
+                .streamed = false,
+            });
 
-    fn loadFromFile(self: *Self, absolute_path: []const u8) !void {
-        var parser = try Parser.initFromFile(self.allocator, absolute_path, self.options);
-        defer parser.deinit();
+            var parser = try Parser.init(self.allocator, template_text);
+            defer parser.deinit();
 
-        try self.parse(&parser);
-    }
+            try self.parse(&parser);
+        }
 
-    fn renderFromFile(self: *Self, absolute_path: []const u8, render: anytype, action: fn (ctx: @TypeOf(render), template: *Self, elements: []Element) anyerror!void) !void {
-        var parser = try Parser.initFromFile(self.allocator, absolute_path, self.options);
-        defer parser.deinit();
-        try self.parseStream(&parser, render, action);
-    }
+        fn loadFromFile(self: *Self, absolute_path: []const u8) !void {
+            const Parser = parsing.Parser(.{
+                .delimiters = options.delimiters,
+                .source = .File,
+                .owns_string = options.owns_string,
+                .streamed = false,
+            });
 
-    fn parse(self: *Self, parser: *Parser) !void {
-        const Closure = struct {
-            list: std.ArrayListUnmanaged(Element) = .{},
+            var parser = try Parser.init(self.allocator, absolute_path);
+            defer parser.deinit();
 
-            pub fn action(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
-                try ctx.list.appendSlice(outer.allocator, elements);
-                outer.allocator.free(elements);
-            }
-        };
+            try self.parse(&parser);
+        }
 
-        var closure = Closure{};
-        errdefer closure.list.deinit(self.allocator);
+        fn renderFromFile(self: *Self, absolute_path: []const u8, render: anytype, action: fn (ctx: @TypeOf(render), template: *Self, elements: []Element) anyerror!void) !void {
+            const Parser = parsing.Parser(.{
+                .delimiters = options.delimiters,
+                .source = .File,
+                .owns_string = options.owns_string,
+                .streamed = true,
+            });
 
-        try self.parseStream(parser, &closure, Closure.action);
+            var parser = try Parser.init(self.allocator, absolute_path);
+            defer parser.deinit();
+            try self.collectElements(&parser, render, action);
+        }
 
-        self.result = .{
-            .Elements = closure.list.toOwnedSlice(self.allocator),
-        };
-    }
+        fn parse(self: *Self, parser: anytype) !void {
+            const Closure = struct {
+                elements: []Element = undefined,
 
-    fn parseStream(self: *Self, parser: *Parser, context: anytype, action: fn (ctx: @TypeOf(context), self: *Self, elements: []Element) anyerror!void) !void {
-        while (true) {
-            var parse_result = try parser.parse();
+                pub fn collect(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
+                    _ = outer;
+                    ctx.elements = elements;
+                }
+            };
 
-            // When "options.own_strings = false", all read buffer must be freed after producing the nodes
-            // This option should be used only when the template source is a static string, or when rendering direct to a stream.
-            defer if (!self.options.own_strings) parser.ref_counter_holder.free(self.allocator);
+            var closure = Closure{};
+            try self.collectElements(parser, &closure, Closure.collect);
 
-            switch (parse_result) {
-                .Error => |err| {
-                    self.result = .{
-                        .Error = err,
-                    };
-                    return err.error_code;
-                },
-                .Nodes => |nodes| {
-                    const elements = try parser.createElements(null, nodes);
-                    try action(context, self, elements);
-                },
-                .Done => break,
+            self.result = .{
+                .Elements = closure.elements,
+            };
+        }
+
+        fn collectElements(self: *Self, parser: anytype, context: anytype, action: fn (ctx: @TypeOf(context), self: *Self, elements: []Element) anyerror!void) !void {
+            while (true) {
+                var parse_result = try parser.parse();
+
+                // When "options.owns_string = false", all read buffer must be freed after producing the nodes
+                // This option should be used only when the template source is a static string, or when rendering direct to a stream.
+                defer if (!options.owns_string) parser.ref_counter_holder.free(self.allocator);
+
+                switch (parse_result) {
+                    .Error => |err| {
+                        self.result = .{
+                            .Error = err,
+                        };
+                        return err.error_code;
+                    },
+                    .Nodes => |nodes| {
+                        const elements = try parser.createElements(null, nodes);
+                        try action(context, self, elements);
+                    },
+                    .Done => break,
+                }
             }
         }
-    }
 
-    pub fn deinit(self: *Self) void {
-        switch (self.result) {
-            .Elements => |elements| Element.freeMany(self.allocator, true, elements),
-            .Error, .NotLoaded => {},
+        pub fn deinit(self: *Self) void {
+            switch (self.result) {
+                .Elements => |elements| Element.freeMany(self.allocator, true, elements),
+                .Error, .NotLoaded => {},
+            }
         }
-    }
-};
+    };
+}
 
 test {
     std.testing.refAllDecls(@This());
@@ -356,10 +374,10 @@ const tests = struct {
         _ = partials;
     }
 
-    pub fn getTemplate(template_text: []const u8) !Template {
+    pub fn getTemplate(template_text: []const u8) !Template(.{}) {
         const allocator = testing.allocator;
 
-        var template = try Template.init(allocator, template_text, .{});
+        var template = try Template(.{}).init(allocator, template_text);
         errdefer template.deinit();
 
         if (template.result == .Error) {
@@ -2033,7 +2051,7 @@ const tests = struct {
 
         const allocator = testing.allocator;
 
-        var template = try Template.init(allocator, template_text, .{});
+        var template = try Template(.{}).init(allocator, template_text);
         defer template.deinit();
 
         try testing.expect(template.result == .Elements);
@@ -2117,7 +2135,7 @@ const tests = struct {
 
         // Read from a file, assuring that this text should read four times from the buffer
         const read_buffer_size = (template_text.len / 4);
-        var template = try Template.initFromFile(allocator, absolute_file_path, .{ .read_buffer_size = read_buffer_size });
+        var template = try Template(.{ .read_buffer_size = read_buffer_size }).initFromFile(allocator, absolute_file_path);
         defer template.deinit();
 
         try testing.expect(template.result == .Elements);
@@ -2218,14 +2236,13 @@ const tests = struct {
 
         // Strings are not ownned by the template,
         // Use this option when creating templates from a static string or when rendering direct to a stream
-        const OWN_STRINGS = false;
+        const RefStringsTemplate = Template(.{
+            .owns_string = false,
+        });
 
         // Create a template to parse and render this 10MB file, with only 16KB of memory
-        var template = Template{
+        var template = RefStringsTemplate{
             .allocator = plenty_of_memory.allocator(),
-            .options = .{
-                .own_strings = OWN_STRINGS,
-            },
         };
 
         defer template.deinit();
@@ -2234,11 +2251,11 @@ const tests = struct {
         const DummyRender = struct {
             count: usize = 0,
 
-            pub fn action(self: *@This(), _template: *Template, elements: []Element) anyerror!void {
+            pub fn action(self: *@This(), _template: *RefStringsTemplate, elements: []Element) anyerror!void {
                 self.count += elements.len;
 
                 checkStrings(elements);
-                Element.freeMany(_template.allocator, _template.options.own_strings, elements);
+                Element.freeMany(_template.allocator, RefStringsTemplate.template_options.owns_string, elements);
             }
 
             // Check if all strings are valid
