@@ -316,7 +316,7 @@ pub const Template = struct {
 
             // When "options.own_strings = false", all read buffer must be freed after producing the nodes
             // This option should be used only when the template source is a static string, or when rendering direct to a stream.
-            defer if (!self.options.own_strings) parser.ref_counter_holder.freeAll(self.allocator);
+            defer if (!self.options.own_strings) parser.ref_counter_holder.free(self.allocator);
 
             switch (parse_result) {
                 .Error => |err| {

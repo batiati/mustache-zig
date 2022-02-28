@@ -117,7 +117,7 @@ pub fn initFromFile(gpa: Allocator, absolute_path: []const u8, options: Template
 pub fn deinit(self: *Self) void {
     self.text_scanner.deinit(self.gpa);
     self.arena.deinit();
-    self.ref_counter_holder.freeAll(self.gpa);
+    self.ref_counter_holder.free(self.gpa);
 }
 
 pub fn parse(self: *Self) ProcessingErrors!ParseResult {
