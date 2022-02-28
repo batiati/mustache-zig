@@ -18,7 +18,7 @@ pub fn fromString(gpa: Allocator, content: []const u8) Allocator.Error!TextReade
     return ctx.textReader();
 }
 
-pub fn fromFile(gpa: Allocator, absolute_path: []const u8, read_buffer_size: u32) Errors!TextReader {
+pub fn fromFile(gpa: Allocator, absolute_path: []const u8, read_buffer_size: usize) Errors!TextReader {
     var file = try std.fs.openFileAbsolute(absolute_path, .{});
     var stream = try StreamReader(std.fs.File).init(gpa, file, read_buffer_size);
     return stream.textReader();
@@ -47,7 +47,7 @@ pub const TextReader = struct {
         self.vtable.deinit(self.ctx, allocator);
     }
 
-    pub inline fn finished(self: TextReader) bool {
+    pub fn finished(self: TextReader) bool {
         return self.vtable.finished(self.ctx);
     }
 };
@@ -117,9 +117,9 @@ fn StreamReader(comptime TStream: type) type {
 
         stream: TStream,
         eof: bool = false,
-        read_buffer_size: u32,
+        read_buffer_size: usize,
 
-        pub fn init(allocator: Allocator, stream: TStream, read_buffer_size: u32) Allocator.Error!*Self {
+        pub fn init(allocator: Allocator, stream: TStream, read_buffer_size: usize) Allocator.Error!*Self {
             var self = try allocator.create(Self);
             self.* = .{
                 .stream = stream,
@@ -137,7 +137,7 @@ fn StreamReader(comptime TStream: type) type {
         }
 
         fn read(ctx: *anyopaque, allocator: Allocator, prepend: []const u8) Errors!TextReader.Result {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
+            var self = @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
 
             var buffer = try allocator.alloc(u8, self.read_buffer_size + prepend.len);
             errdefer allocator.free(buffer);
@@ -165,13 +165,13 @@ fn StreamReader(comptime TStream: type) type {
         }
 
         fn deinit(ctx: *anyopaque, allocator: Allocator) void {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
+            var self = @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
             self.stream.close();
             allocator.destroy(self);
         }
 
         fn finished(ctx: *anyopaque) bool {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), ctx));
+            var self = @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
             return self.eof;
         }
     };

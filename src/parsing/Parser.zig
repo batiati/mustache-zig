@@ -341,14 +341,15 @@ fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const 
 }
 
 fn parseTree(self: *Self) Errors!?[]*Node {
-    self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
-        return self.setLastError(err, null, null);
-    };
+    if (self.text_scanner.delimiters_count == 0) {
+        self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
+            return self.setLastError(err, null, null);
+        };
+    }
 
     const arena = self.arena.allocator();
     var static_text_block: ?*Node = null;
 
-    // REF COUNt HERE?
     while (try self.text_scanner.next(self.gpa)) |*text_block| {
         errdefer text_block.deinit(self.gpa);
 
@@ -396,11 +397,9 @@ fn parseTree(self: *Self) Errors!?[]*Node {
 
                 if (self.current_level == self.root and self.root.list.items.len > 1) {
                     if (static_text_block.?.text_block.left_trimming != .PreserveWhitespaces) {
-                        self.fix_me += 1;
-                        if (self.fix_me > 1000) {
-                            self.fix_me = 0;
-                            std.log.warn("LIN {}", .{self.text_scanner.row});
-                        }
+
+                        // This text_block is independent from the rest and can be yelded later
+                        // Let's produce the elements parsed until now
                         _ = self.root.list.pop();
 
                         const nodes = self.root.list.toOwnedSlice(arena);
@@ -412,9 +411,8 @@ fn parseTree(self: *Self) Errors!?[]*Node {
                         self.root = root;
                         self.current_level = root;
 
-                        // Adding,
+                        // Adding it again for the next iteration,
                         try self.current_level.addNode(new_arena, block_type, static_text_block.?.text_block);
-
                         return nodes;
                     }
                 }

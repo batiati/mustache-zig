@@ -40,7 +40,7 @@ const Delimiter = struct {
     mark_type: MarkType,
     delimiter_type: DelimiterType,
 
-    pub fn match(self: Delimiter, slice: []const u8) ?Mark {
+    pub inline fn match(self: Delimiter, slice: []const u8) ?Mark {
         if (std.mem.startsWith(u8, slice, self.delimiter)) {
             return Mark{
                 .mark_type = self.mark_type,
@@ -61,7 +61,7 @@ block_index: usize = 0,
 row: u32 = 1,
 col: u32 = 1,
 delimiters: [MAX_DELIMITERS]Delimiter = undefined,
-delimiters_count: usize = 0,
+delimiters_count: u4 = 0,
 delimiter_max_size: u32 = 0,
 
 pub fn init(allocator: Allocator, template_text: []const u8) Allocator.Error!Self {
@@ -70,7 +70,7 @@ pub fn init(allocator: Allocator, template_text: []const u8) Allocator.Error!Sel
     };
 }
 
-pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, read_buffer_size: u32) text.Errors!Self {
+pub fn initFromFile(allocator: Allocator, absolute_path: []const u8, read_buffer_size: usize) text.Errors!Self {
     return Self{
         .reader = try text.fromFile(allocator, absolute_path, read_buffer_size),
     };
@@ -85,7 +85,7 @@ pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
     if (delimiters.starting_delimiter.len == 0) return ParseErrors.InvalidDelimiters;
     if (delimiters.ending_delimiter.len == 0) return ParseErrors.InvalidDelimiters;
 
-    var index: usize = 0;
+    var index: u4 = 0;
     var delimiter_max_size = std.math.max(Delimiters.NoScapeStartingDelimiter.len, Delimiters.NoScapeEndingDelimiter.len);
 
     if (!std.mem.eql(u8, delimiters.starting_delimiter, Delimiters.NoScapeStartingDelimiter)) {
@@ -230,10 +230,20 @@ pub fn next(self: *Self, allocator: Allocator) !?TextBlock {
 fn matchTagMark(self: *Self) ?Mark {
     const slice = self.content[self.index..];
 
-    for (self.delimiters[0..self.delimiters_count]) |delimiter| {
-        if (delimiter.match(slice)) |mark| {
-            return mark;
-        }
+    if (self.delimiters_count >= 1) {
+        if (self.delimiters[0].match(slice)) |mark| return mark;
+    }
+
+    if (self.delimiters_count >= 2) {
+        if (self.delimiters[1].match(slice)) |mark| return mark;
+    }
+
+    if (self.delimiters_count >= 3) {
+        if (self.delimiters[2].match(slice)) |mark| return mark;
+    }
+
+    if (self.delimiters_count == 4) {
+        if (self.delimiters[3].match(slice)) |mark| return mark;
     }
 
     return null;

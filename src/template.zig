@@ -235,7 +235,7 @@ pub const Element = union(enum) {
 
 pub const TemplateOptions = struct {
     delimiters: Delimiters = .{},
-    read_buffer_size: u32 = 4 * 1024,
+    read_buffer_size: usize = 4 * 1024,
     own_strings: bool = true,
 };
 
@@ -284,11 +284,10 @@ pub const Template = struct {
         try self.parse(&parser);
     }
 
-    fn renderFromFile(self: *Self, absolute_path: []const u8) !void {
+    fn renderFromFile(self: *Self, absolute_path: []const u8, render: anytype, action: fn (ctx: @TypeOf(render), template: *Self, elements: []Element) anyerror!void) !void {
         var parser = try Parser.initFromFile(self.allocator, absolute_path, self.options);
         defer parser.deinit();
-
-        try self.render(&parser);
+        try self.parseStream(&parser, render, action);
     }
 
     fn parse(self: *Self, parser: *Parser) !void {
@@ -309,19 +308,6 @@ pub const Template = struct {
         self.result = .{
             .Elements = closure.list.toOwnedSlice(self.allocator),
         };
-    }
-
-    fn render(self: *Self, parser: *Parser) !void {
-        const Closure = struct {
-            pub fn action(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
-                _ = ctx;
-
-                Element.freeMany(outer.allocator, false, elements);
-            }
-        };
-
-        var closure = Closure{};
-        try self.parseStream(parser, &closure, Closure.action);
     }
 
     fn parseStream(self: *Self, parser: *Parser, context: anytype, action: fn (ctx: @TypeOf(context), self: *Self, elements: []Element) anyerror!void) !void {
@@ -2183,8 +2169,6 @@ const tests = struct {
     }
 
     test "Large DOM File test" {
-        if (true) return;
-
         const template_text =
             \\{{! Comments block }}
             \\  Hello
@@ -2196,40 +2180,58 @@ const tests = struct {
             \\World
         ;
 
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        const allocator = gpa.allocator();
+        const allocator = testing.allocator;
 
         const path = try std.fs.selfExeDirPathAlloc(allocator);
         defer allocator.free(path);
 
         // Creating a temp file
-        const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "temp_large_file.mustache" });
-        defer allocator.free(absolute_file_path);
+        const test_10MB_file = try std.fs.path.join(allocator, &.{ path, "10MB_file.mustache" });
+        defer allocator.free(test_10MB_file);
 
-        //var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
+        var file = try std.fs.createFileAbsolute(test_10MB_file, .{ .truncate = true });
+        defer std.fs.deleteFileAbsolute(test_10MB_file) catch {};
 
-        // Write 1024 times the same template on a file
-        const MB = 1024 * 1024;
-        //try file.writeAll(template_text ** MB);
-        //file.close();
-        std.log.err("\"{s}\"", .{absolute_file_path});
-        _ = template_text;
-        //defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
+        // Writes the same template many times on a file
+        const REPEAT = 100_000;
+        var step: usize = 0;
+        while (step < REPEAT) : (step += 1) {
+            try file.writeAll(template_text);
+        }
 
-        // Read from a large file
+        const size = try file.getEndPos();
+        file.close();
 
-        // 8Kb of memory
-        //var plenty_of_memory = try allocator.alloc(u8, 8 * 1024);
-        //defer allocator.free(plenty_of_memory);
+        // Must be at least 10MB big
+        try testing.expect(size > 10 * 1024 * 1024);
 
-        //var fba = std.heap.FixedBufferAllocator.init(plenty_of_memory);
+        // 16KB is a lot of memory for this job
+        var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){ .requested_memory_limit = 1024 * 1024 };
+        defer _ = plenty_of_memory.deinit();
 
-        var template = try Template.initFromFile(allocator, absolute_file_path, .{ .own_strings = false });
+        // Create a template to parse this huge file, with only 16KB of memory
+        var template = Template{
+            .allocator = plenty_of_memory.allocator(),
+            .options = .{
+                .own_strings = false,
+            },
+        };
+
         defer template.deinit();
 
-        try testing.expect(template.result == .Elements);
-        const elements = template.result.Elements;
+        // A dummy render, just count the produced elements
+        const DummyRender = struct {
+            count: usize = 0,
 
-        try testing.expectEqual(@as(usize, 3 * MB), elements.len);
+            pub fn action(self: *@This(), _template: *Template, elements: []Element) anyerror!void {
+                self.count += elements.len;
+                Element.freeMany(_template.allocator, _template.options.own_strings, elements);
+            }
+        };
+
+        var dummy_render = DummyRender{};
+        try template.renderFromFile(test_10MB_file, &dummy_render, DummyRender.action);
+
+        try testing.expectEqual(@as(usize, 3 * REPEAT), dummy_render.count);
     }
 };
