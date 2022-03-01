@@ -4,7 +4,8 @@ const TypeInfo = std.builtin.TypeInfo;
 pub fn write(out_writer: anytype, data: anytype, path: []const u8) anyerror!void {
     const Binder = DataBinder(@TypeOf(data));
 
-    var path_iterator = std.mem.tokenize(u8, path, ".");
+    const PATH_SEPARATOR = ".";
+    var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
     try Binder.write(out_writer, data, &path_iterator);
 }
 
@@ -27,7 +28,15 @@ fn DataBinder(comptime T: type) type {
                 .Struct => try writeField(TValue, out_writer, data, path, path_iterator),
                 .Pointer => |info| switch (info.size) {
                     TypeInfo.Pointer.Size.One => try recursiveWrite(info.child, out_writer, data, path, path_iterator),
-                    TypeInfo.Pointer.Size.Slice => {},
+                    TypeInfo.Pointer.Size.Slice => {
+
+                        //Slice supports the "len" field,
+                        if (std.mem.eql(u8, "len", path)) {
+                            const Binder = DataBinder(@TypeOf(data.len));
+                            try Binder.write(out_writer, data.len, path_iterator);
+                        }
+                    },
+
                     TypeInfo.Pointer.Size.Many => @compileError("[*] pointers not supported"),
                     TypeInfo.Pointer.Size.C => @compileError("[*c] pointers not supported"),
                 },
@@ -35,7 +44,6 @@ fn DataBinder(comptime T: type) type {
                     if (data) |value| {
                         try recursiveWrite(info.child, out_writer, value, path, path_iterator);
                     } else {
-
                         //EMPTY
                         return;
                     }
@@ -282,6 +290,18 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
+        // Direct Len access
+        try write(writer, person_2, "name.len");
+        try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        // Direct Ref Len access
+        try write(writer, &person_2, "name.len");
+        try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
         // Nested access
         try write(writer, person_2, "address.street");
         try testing.expectEqualStrings("nearby", list.items);
@@ -363,7 +383,7 @@ const struct_tests = struct {
         // Nested Ref pointer access
         try write(writer, &person_2, "indication.active");
         try testing.expectEqualStrings("false", list.items);
-    }    
+    }
 
     test "Nullable" {
         const allocator = testing.allocator;
@@ -388,13 +408,13 @@ const struct_tests = struct {
         try write(writer, person_1, "additional_information");
         try testing.expectEqualStrings("", list.items);
 
-        list.clearAndFree();        
+        list.clearAndFree();
 
         // Null Ref Accress
         try write(writer, &person_1, "additional_information");
         try testing.expectEqualStrings("", list.items);
 
-        list.clearAndFree();                
+        list.clearAndFree();
 
         // Nested pointer access
         try write(writer, person_2, "indication.additional_information");
@@ -405,7 +425,7 @@ const struct_tests = struct {
         // Nested Ref pointer access
         try write(writer, &person_2, "indication.additional_information");
         try testing.expectEqualStrings("", list.items);
-    }  
+    }
 
     test "Not found" {
         const allocator = testing.allocator;
