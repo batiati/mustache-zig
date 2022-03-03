@@ -252,6 +252,7 @@ const Functions = struct {
         const typeInfo = @typeInfo(@TypeOf(value));
 
         switch (typeInfo) {
+            .Void, .Null => {},
             .Struct, .Opaque => try std.fmt.format(out_writer, "{?}", .{value}),
 
             // primitives has no field access
@@ -273,7 +274,11 @@ const Functions = struct {
                 TypeInfo.Pointer.Size.Many => @compileError("[*] pointers not supported"),
                 TypeInfo.Pointer.Size.C => @compileError("[*c] pointers not supported"),
             },
-            .Array => {},
+            .Array => |info| {
+                if (info.child == u8 and std.unicode.utf8ValidateSlice(&value)) {
+                    try out_writer.writeAll(&value);
+                }
+            },
             .Optional => {
                 if (value) |not_null| {
                     try stringify(allocator, out_writer, not_null);

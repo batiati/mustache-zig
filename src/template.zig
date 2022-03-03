@@ -300,8 +300,7 @@ pub fn Template(comptime options: TemplateOptions) type {
             const Collector = struct {
                 elements: []Element = undefined,
 
-                pub fn collect(ctx: *@This(), outer: *Self, elements: []Element) anyerror!void {
-                    _ = outer;
+                pub fn collect(ctx: *@This(), elements: []Element) anyerror!void {
                     ctx.elements = elements;
                 }
             };
@@ -314,7 +313,7 @@ pub fn Template(comptime options: TemplateOptions) type {
             };
         }
 
-        fn renderFromFile(self: *Self, absolute_path: []const u8, render: anytype, action: fn (ctx: @TypeOf(render), template: *Self, elements: []Element) anyerror!void) !void {
+        fn renderFromFile(self: *Self, absolute_path: []const u8, render: anytype, action: fn (ctx: @TypeOf(render), elements: []Element) anyerror!void) !void {
             const Parser = parsing.Parser(.{
                 .delimiters = options.delimiters,
                 .source = .File,
@@ -327,7 +326,7 @@ pub fn Template(comptime options: TemplateOptions) type {
             try self.produceElements(&parser, render, action);
         }
 
-        fn produceElements(self: *Self, parser: anytype, context: anytype, action: fn (ctx: @TypeOf(context), self: *Self, elements: []Element) anyerror!void) !void {
+        fn produceElements(self: *Self, parser: anytype, context: anytype, action: fn (ctx: @TypeOf(context), elements: []Element) anyerror!void) !void {
             while (true) {
                 var parse_result = try parser.parse();
 
@@ -344,7 +343,7 @@ pub fn Template(comptime options: TemplateOptions) type {
                     },
                     .Nodes => |nodes| {
                         const elements = try parser.createElements(null, nodes);
-                        try action(context, self, elements);
+                        try action(context, elements);
                     },
                     .Done => break,
                 }
@@ -2250,12 +2249,13 @@ const tests = struct {
         // A dummy render, just count the produced elements
         const DummyRender = struct {
             count: usize = 0,
+            allocator: Allocator,
 
-            pub fn action(self: *@This(), _template: *RefStringsTemplate, elements: []Element) anyerror!void {
+            pub fn action(self: *@This(), elements: []Element) anyerror!void {
                 self.count += elements.len;
 
                 checkStrings(elements);
-                Element.freeMany(_template.allocator, RefStringsTemplate.template_options.owns_string, elements);
+                Element.freeMany(self.allocator, RefStringsTemplate.template_options.owns_string, elements);
             }
 
             // Check if all strings are valid
@@ -2295,7 +2295,7 @@ const tests = struct {
             }
         };
 
-        var dummy_render = DummyRender{};
+        var dummy_render = DummyRender{ .allocator = template.allocator };
         try template.renderFromFile(test_10MB_file, &dummy_render, DummyRender.action);
 
         try testing.expectEqual(@as(usize, 3 * REPEAT), dummy_render.count);
