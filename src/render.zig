@@ -39,7 +39,6 @@ fn Render(comptime Writer: type, comptime Data: type) type {
         pub fn render(self: *Self, allocator: Allocator, elements: []const Element) anyerror!void {
             var ctx = try context.getContext(allocator, self.writer, self.data);
             defer ctx.deinit(allocator);
-
             try self.renderLevel(allocator, &ctx, elements);
         }
 
@@ -64,7 +63,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                                 }
                             }
                         },
-                        //TODO
+                        //TODO Partial, Parent, Block
                         else => {},
                     }
                 }
@@ -154,7 +153,7 @@ test "Basic Decimal Interpolation" {
             power: f32,
         };
 
-        var data = Data {
+        var data = Data{
             .power = 1.210,
         };
 
@@ -162,7 +161,7 @@ test "Basic Decimal Interpolation" {
         defer allocator.free(result);
 
         try testing.expectEqualStrings("1.21 jiggawatts!", result);
-    } 
+    }
 
     {
         // f64
@@ -171,7 +170,7 @@ test "Basic Decimal Interpolation" {
             power: f64,
         };
 
-        var data = Data {
+        var data = Data{
             .power = 1.210,
         };
 
@@ -179,7 +178,7 @@ test "Basic Decimal Interpolation" {
         defer allocator.free(result);
 
         try testing.expectEqualStrings("1.21 jiggawatts!", result);
-    }     
+    }
 
     {
         // Comptime float
@@ -203,7 +202,7 @@ test "Basic Decimal Interpolation" {
         defer allocator.free(result);
 
         try testing.expectEqualStrings("-1.21 jiggawatts!", result);
-    }    
+    }
 }
 
 // Nulls should interpolate as the empty string.
@@ -225,7 +224,7 @@ test "Basic Null Interpolation" {
             cannot: ?[]const u8,
         };
 
-        var data = Data {
+        var data = Data{
             .cannot = null,
         };
 
@@ -237,7 +236,7 @@ test "Basic Null Interpolation" {
 
     {
         // Comptime null
-        
+
         var data = .{
             .cannot = null,
         };
@@ -246,7 +245,7 @@ test "Basic Null Interpolation" {
         defer allocator.free(result);
 
         try testing.expectEqualStrings("I () be seen!", result);
-    }    
+    }
 }
 
 // Nulls should interpolate as the empty string.
@@ -268,7 +267,7 @@ test "Triple Mustache Null Interpolation" {
             cannot: ?[]const u8,
         };
 
-        var data = Data {
+        var data = Data{
             .cannot = null,
         };
 
@@ -280,7 +279,7 @@ test "Triple Mustache Null Interpolation" {
 
     {
         // Comptime null
-        
+
         var data = .{
             .cannot = null,
         };
@@ -289,7 +288,7 @@ test "Triple Mustache Null Interpolation" {
         defer allocator.free(result);
 
         try testing.expectEqualStrings("I () be seen!", result);
-    }    
+    }
 }
 
 // Dotted names should be functional to any level of nesting.
@@ -312,4 +311,27 @@ test "Dotted Names - Arbitrary Depth" {
     defer allocator.free(result);
 
     try testing.expectEqualStrings("'Phil' == 'Phil'", result);
+}
+
+// Basic interpolation should be HTML escaped..
+test "Implicit Iterators - HTML Escaping" {
+    const template_text = 
+        \\|
+        \\These characters should be HTML escaped: {{.}}
+    ;
+
+    const allocator = testing.allocator;
+
+    var template = try Template(.{}).init(allocator, template_text);
+    defer template.deinit();
+
+    try testing.expect(template.result == .Elements);
+    const elements = template.result.Elements;
+
+    var data = "& \" < >";
+
+    var result = try renderAlloc(allocator, data, elements);
+    defer allocator.free(result);
+
+    try testing.expectEqualStrings("|\nThese characters should be HTML escaped: &amp; &quot; &lt; &gt;", result);
 }

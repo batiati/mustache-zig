@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const TypeInfo = std.builtin.TypeInfo;
+const trait = std.meta.trait;
 
 pub const Context = struct {
     ptr: *anyopaque,
@@ -114,7 +115,7 @@ const Comptime = struct {
         path_iterator: *std.mem.TokenIterator(u8),
         index: ?usize,
     ) anyerror!?Context {
-        
+
         // TODO: Should we set a new branch quota here??
         // Let's wait for some real use case
         //@setEvalBranchQuota(std.math.maxInt(u32));
@@ -128,10 +129,10 @@ const Comptime = struct {
         path_iterator: *std.mem.TokenIterator(u8),
         escape: Context.Escape,
     ) anyerror!?void {
-        
+
         // TODO: Should we set a new branch quota here??
         // Let's wait for some real use case
-        //@setEvalBranchQuota(std.math.maxInt(u32));        
+        //@setEvalBranchQuota(std.math.maxInt(u32));
 
         return try seek(void, stringify, escape, out_writer, data, path_iterator, null);
     }
@@ -148,7 +149,6 @@ const Comptime = struct {
         if (path_iterator.next()) |token| {
             return try recursiveSeek(TReturn, @TypeOf(data), action, param, out_writer, data, token, path_iterator, index);
         } else {
-
             const Data = @TypeOf(data);
             if (Data == comptime_int) {
                 const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
@@ -168,7 +168,7 @@ const Comptime = struct {
                     }
                 } else {
                     return try action(param, out_writer, data);
-                }                
+                }
             }
         }
     }
@@ -256,7 +256,7 @@ const Comptime = struct {
         return null;
     }
 
-   inline  fn seekField(
+    inline fn seekField(
         comptime TReturn: type,
         comptime TValue: type,
         action: anytype,
@@ -278,35 +278,32 @@ const Comptime = struct {
     }
 
     inline fn stringify(escape: Context.Escape, out_writer: anytype, value: anytype) anyerror!void {
-        
         const typeInfo = @typeInfo(@TypeOf(value));
 
         switch (typeInfo) {
             .Void, .Null => {},
-            .Struct, .Opaque => try std.fmt.format(out_writer, "{?}", .{value}),
 
-            // primitives has no field access
-            .Bool => try out_writer.writeAll(if (value) "true" else "false"),
+            // what should we print?
+            .Struct, .Opaque => {},
 
+            .Bool => try escape_write(out_writer, if (value) "true" else "false", escape),
             .Int, .ComptimeInt => try std.fmt.formatInt(value, 10, .lower, .{}, out_writer),
-
             .Float, .ComptimeFloat => try std.fmt.formatFloatDecimal(value, .{}, out_writer),
-
-            .Enum => try out_writer.writeAll(@tagName(value)),
+            .Enum => try escape_write(out_writer, @tagName(value), escape),
 
             .Pointer => |info| switch (info.size) {
                 TypeInfo.Pointer.Size.One => try stringify(escape, out_writer, value.*),
                 TypeInfo.Pointer.Size.Slice => {
-                    if (info.child == u8 and std.unicode.utf8ValidateSlice(value)) {
-                        try out_writer.writeAll(value);
+                    if (info.child == u8) {
+                        try escape_write(out_writer, value, escape);
                     }
                 },
                 TypeInfo.Pointer.Size.Many => @compileError("[*] pointers not supported"),
                 TypeInfo.Pointer.Size.C => @compileError("[*c] pointers not supported"),
             },
             .Array => |info| {
-                if (info.child == u8 and std.unicode.utf8ValidateSlice(&value)) {
-                    try out_writer.writeAll(&value);
+                if (info.child == u8) {
+                    try escape_write(out_writer, &value, escape);
                 }
             },
             .Optional => {
@@ -315,6 +312,54 @@ const Comptime = struct {
                 }
             },
             else => @compileError("Not supported"),
+        }
+    }
+
+    fn escape_write(out_writer: anytype, value: []const u8, escape: Context.Escape) anyerror!void {
+        switch (escape) {
+            .Unescaped => {
+                try out_writer.writeAll(value);
+            },
+
+            .Escaped => {
+                const html_quot: []const u8 = "&quot;";
+                const quot = '"';
+
+                const html_apos: []const u8 = "&#39;";
+                const apos = '\'';
+
+                const html_amp: []const u8 = "&amp;";
+                const amp = '&';
+
+                const html_lt: []const u8 = "&lt;";
+                const lt = '<';
+
+                const html_gt: []const u8 = "&gt;";
+                const gt = '>';
+
+                const html_null: []const u8 = "\u{fffd}";
+                const @"null" = '\x00';
+
+                if (std.mem.indexOfAny(u8, value, &[_]u8{ quot, apos, amp, lt, gt, @"null" })) |index| {
+                    if (index > 0) {
+                        try out_writer.writeAll(value[0..index]);
+                    }
+
+                    for (value[index..]) |char| {
+                        try switch (char) {
+                            @"null" => out_writer.writeAll(html_null),
+                            quot => out_writer.writeAll(html_quot),
+                            apos => out_writer.writeAll(html_apos),
+                            amp => out_writer.writeAll(html_amp),
+                            lt => out_writer.writeAll(html_lt),
+                            gt => out_writer.writeAll(html_gt),
+                            else => out_writer.writeByte(char),
+                        };
+                    }
+                } else {
+                    try out_writer.writeAll(value);
+                }
+            },
         }
     }
 };
