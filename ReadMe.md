@@ -36,7 +36,7 @@ So, it's important to be able to deal with multi-megabyte inputs without eating 
     };
     defer _ = plenty_of_memory.deinit();
 
-    try mustache.render(plenty_of_memory, "10MB_file.mustache", data, out_writer);
+    try mustache.render(plenty_of_memory.allocator(), "10MB_file.mustache", data, out_writer);
 
 ```
 
