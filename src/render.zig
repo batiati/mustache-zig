@@ -48,7 +48,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                 for (elements) |element| {
                     switch (element) {
                         .StaticText => |content| try self.writer.writeAll(content),
-                        .Interpolation => |interpolation| _ = try ctx.write(interpolation.key),
+                        .Interpolation => |interpolation| _ = try ctx.write(interpolation.key, if (interpolation.escaped) .Escaped else .Unescaped),
                         .Section => |section| {
                             var iterator = ctx.iterator(section.key);
                             if (section.inverted) {
@@ -147,12 +147,169 @@ test "Basic Decimal Interpolation" {
     try testing.expect(template.result == .Elements);
     const elements = template.result.Elements;
 
+    {
+        // f32
+
+        const Data = struct {
+            power: f32,
+        };
+
+        var data = Data {
+            .power = 1.210,
+        };
+
+        var result = try renderAlloc(allocator, data, elements);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings("1.21 jiggawatts!", result);
+    } 
+
+    {
+        // f64
+
+        const Data = struct {
+            power: f64,
+        };
+
+        var data = Data {
+            .power = 1.210,
+        };
+
+        var result = try renderAlloc(allocator, data, elements);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings("1.21 jiggawatts!", result);
+    }     
+
+    {
+        // Comptime float
+        var data = .{
+            .power = 1.210,
+        };
+
+        var result = try renderAlloc(allocator, data, elements);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings("1.21 jiggawatts!", result);
+    }
+
+    {
+        // Comptime negative float
+        var data = .{
+            .power = -1.210,
+        };
+
+        var result = try renderAlloc(allocator, data, elements);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings("-1.21 jiggawatts!", result);
+    }    
+}
+
+// Nulls should interpolate as the empty string.
+test "Basic Null Interpolation" {
+    const template_text = "I ({{cannot}}) be seen!";
+
+    const allocator = testing.allocator;
+
+    var template = try Template(.{}).init(allocator, template_text);
+    defer template.deinit();
+
+    try testing.expect(template.result == .Elements);
+    const elements = template.result.Elements;
+
+    {
+        // Optional null
+
+        const Data = struct {
+            cannot: ?[]const u8,
+        };
+
+        var data = Data {
+            .cannot = null,
+        };
+
+        var result = try renderAlloc(allocator, data, elements);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings("I () be seen!", result);
+    }
+
+    {
+        // Comptime null
+        
+        var data = .{
+            .cannot = null,
+        };
+
+        var result = try renderAlloc(allocator, data, elements);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings("I () be seen!", result);
+    }    
+}
+
+// Nulls should interpolate as the empty string.
+test "Triple Mustache Null Interpolation" {
+    const template_text = "I ({{{cannot}}}) be seen!";
+
+    const allocator = testing.allocator;
+
+    var template = try Template(.{}).init(allocator, template_text);
+    defer template.deinit();
+
+    try testing.expect(template.result == .Elements);
+    const elements = template.result.Elements;
+
+    {
+        // Optional null
+
+        const Data = struct {
+            cannot: ?[]const u8,
+        };
+
+        var data = Data {
+            .cannot = null,
+        };
+
+        var result = try renderAlloc(allocator, data, elements);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings("I () be seen!", result);
+    }
+
+    {
+        // Comptime null
+        
+        var data = .{
+            .cannot = null,
+        };
+
+        var result = try renderAlloc(allocator, data, elements);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings("I () be seen!", result);
+    }    
+}
+
+// Dotted names should be functional to any level of nesting.
+test "Dotted Names - Arbitrary Depth" {
+    const template_text = "'{{a.b.c.d.e.name}}' == 'Phil'";
+
+    const allocator = testing.allocator;
+
+    var template = try Template(.{}).init(allocator, template_text);
+    defer template.deinit();
+
+    try testing.expect(template.result == .Elements);
+    const elements = template.result.Elements;
+
     var data = .{
-        .power = 1.210,
+        .a = .{ .b = .{ .c = .{ .d = .{ .e = .{ .name = "Phil" } } } } },
     };
 
     var result = try renderAlloc(allocator, data, elements);
     defer allocator.free(result);
 
-    try testing.expectEqualStrings("1.21 jiggawatts!", result);
+    try testing.expectEqualStrings("'Phil' == 'Phil'", result);
 }

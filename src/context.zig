@@ -6,9 +6,14 @@ pub const Context = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
 
+    pub const Escape = enum {
+        Escaped,
+        Unescaped,
+    };
+
     pub const VTable = struct {
         get: fn (ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) anyerror!?Context,
-        write: fn (ctx: *anyopaque, path: []const u8) anyerror!bool,
+        write: fn (ctx: *anyopaque, path: []const u8, escape: Escape) anyerror!bool,
         deinit: fn (ctx: *anyopaque, allocator: Allocator) void,
     };
 
@@ -35,8 +40,8 @@ pub const Context = struct {
         };
     }
 
-    pub inline fn write(self: Context, path: []const u8) anyerror!bool {
-        return try self.vtable.write(self.ptr, path);
+    pub inline fn write(self: Context, path: []const u8, escape: Escape) anyerror!bool {
+        return try self.vtable.write(self.ptr, path, escape);
     }
 
     pub inline fn deinit(self: Context, allocator: Allocator) void {
@@ -83,11 +88,11 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             return try Comptime.get(allocator, self.writer, self.data, &path_iterator, index);
         }
 
-        fn write(ctx: *anyopaque, path: []const u8) anyerror!bool {
+        fn write(ctx: *anyopaque, path: []const u8, escape: Context.Escape) anyerror!bool {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return if (try Comptime.write(self.writer, self.data, &path_iterator)) |_| true else false;
+            return if (try Comptime.write(self.writer, self.data, &path_iterator, escape)) |_| true else false;
         }
 
         fn deinit(ctx: *anyopaque, allocator: Allocator) void {
@@ -113,7 +118,7 @@ const Comptime = struct {
         // TODO: Should we set a new branch quota here??
         // Let's wait for some real use case
         //@setEvalBranchQuota(std.math.maxInt(u32));
-        
+
         return try seek(Context, getContext, allocator, out_writer, data, path_iterator, index);
     }
 
@@ -121,44 +126,48 @@ const Comptime = struct {
         out_writer: anytype,
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
+        escape: Context.Escape,
     ) anyerror!?void {
         
         // TODO: Should we set a new branch quota here??
         // Let's wait for some real use case
         //@setEvalBranchQuota(std.math.maxInt(u32));        
 
-        return try seek(void, stringify, {}, out_writer, data, path_iterator, null);
+        return try seek(void, stringify, escape, out_writer, data, path_iterator, null);
     }
 
     inline fn seek(
         comptime TReturn: type,
         action: anytype,
-        allocator: anytype,
+        param: anytype,
         out_writer: anytype,
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
         index: ?usize,
     ) anyerror!?TReturn {
         if (path_iterator.next()) |token| {
-            return try recursiveSeek(TReturn, @TypeOf(data), action, allocator, out_writer, data, token, path_iterator, index);
+            return try recursiveSeek(TReturn, @TypeOf(data), action, param, out_writer, data, token, path_iterator, index);
         } else {
 
-            if (@TypeOf(data) == comptime_int) {
+            const Data = @TypeOf(data);
+            if (Data == comptime_int) {
                 const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
                 var runtime_value: RuntimeInt = data;
-                return try seek(TReturn, action, allocator, out_writer, runtime_value, path_iterator, index);
-            } else if (@TypeOf(data) == comptime_float) {
+                return try seek(TReturn, action, param, out_writer, runtime_value, path_iterator, index);
+            } else if (Data == comptime_float) {
                 var runtime_value: f64 = data;
-                return try seek(TReturn, action, allocator, out_writer, runtime_value, path_iterator, index);
+                return try seek(TReturn, action, param, out_writer, runtime_value, path_iterator, index);
+            } else if (Data == void or Data == @TypeOf(null)) {
+                return null;
             } else {
                 if (index) |current_index| {
                     if (iterateAt(data, current_index)) |data_at| {
-                        return try action(allocator, out_writer, data_at);
+                        return try action(param, out_writer, data_at);
                     } else {
                         return null;
                     }
                 } else {
-                    return try action(allocator, out_writer, data);
+                    return try action(param, out_writer, data);
                 }                
             }
         }
@@ -212,7 +221,7 @@ const Comptime = struct {
         comptime TReturn: type,
         comptime TValue: type,
         action: anytype,
-        allocator: anytype,
+        param: anytype,
         out_writer: anytype,
         data: anytype,
         path: []const u8,
@@ -222,14 +231,14 @@ const Comptime = struct {
         const typeInfo = @typeInfo(TValue);
 
         switch (typeInfo) {
-            .Struct => return try seekField(TReturn, TValue, action, allocator, out_writer, data, path, path_iterator, index),
+            .Struct => return try seekField(TReturn, TValue, action, param, out_writer, data, path, path_iterator, index),
             .Pointer => |info| switch (info.size) {
-                .One => return try recursiveSeek(TReturn, info.child, action, allocator, out_writer, data, path, path_iterator, index),
+                .One => return try recursiveSeek(TReturn, info.child, action, param, out_writer, data, path, path_iterator, index),
                 .Slice => {
 
                     //Slice supports the "len" field,
                     if (std.mem.eql(u8, "len", path)) {
-                        try return seek(TReturn, action, allocator, out_writer, data.len, path_iterator, index);
+                        try return seek(TReturn, action, param, out_writer, data.len, path_iterator, index);
                     }
                 },
 
@@ -238,7 +247,7 @@ const Comptime = struct {
             },
             .Optional => |info| {
                 if (data) |value| {
-                    return try return recursiveSeek(TReturn, info.child, action, allocator, out_writer, value, path, path_iterator, index);
+                    return try return recursiveSeek(TReturn, info.child, action, param, out_writer, value, path, path_iterator, index);
                 }
             },
             else => {},
@@ -251,7 +260,7 @@ const Comptime = struct {
         comptime TReturn: type,
         comptime TValue: type,
         action: anytype,
-        allocator: anytype,
+        param: anytype,
         out_writer: anytype,
         data: anytype,
         path: []const u8,
@@ -261,14 +270,15 @@ const Comptime = struct {
         const fields = std.meta.fields(TValue);
         inline for (fields) |field| {
             if (std.mem.eql(u8, field.name, path)) {
-                return try seek(TReturn, action, allocator, out_writer, @field(data, field.name), path_iterator, index);
+                return try seek(TReturn, action, param, out_writer, @field(data, field.name), path_iterator, index);
             }
         }
 
         return null;
     }
 
-    fn stringify(allocator: void, out_writer: anytype, value: anytype) anyerror!void {
+    inline fn stringify(escape: Context.Escape, out_writer: anytype, value: anytype) anyerror!void {
+        
         const typeInfo = @typeInfo(@TypeOf(value));
 
         switch (typeInfo) {
@@ -285,7 +295,7 @@ const Comptime = struct {
             .Enum => try out_writer.writeAll(@tagName(value)),
 
             .Pointer => |info| switch (info.size) {
-                TypeInfo.Pointer.Size.One => try stringify(allocator, out_writer, value.*),
+                TypeInfo.Pointer.Size.One => try stringify(escape, out_writer, value.*),
                 TypeInfo.Pointer.Size.Slice => {
                     if (info.child == u8 and std.unicode.utf8ValidateSlice(value)) {
                         try out_writer.writeAll(value);
@@ -301,7 +311,7 @@ const Comptime = struct {
             },
             .Optional => {
                 if (value) |not_null| {
-                    try stringify(allocator, out_writer, not_null);
+                    try stringify(escape, out_writer, not_null);
                 }
             },
             else => @compileError("Not supported"),
@@ -403,7 +413,7 @@ const struct_tests = struct {
         var ctx = try getContext(allocator, out_writer, data);
         defer ctx.deinit(allocator);
 
-        _ = try ctx.write(path);
+        _ = try ctx.write(path, .Unescaped);
     }
 
     test "Write Int" {
@@ -696,7 +706,7 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try person_ctx.write("address.street");
+        _ = try person_ctx.write("address.street", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         // Address
@@ -708,7 +718,7 @@ const struct_tests = struct {
         defer address_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try address_ctx.write("street");
+        _ = try address_ctx.write("street", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         // Street
@@ -721,12 +731,12 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try street_ctx.write("");
+        _ = try street_ctx.write("", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         list.clearAndFree();
 
-        _ = try street_ctx.write(".");
+        _ = try street_ctx.write(".", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
     }
 
@@ -744,7 +754,7 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try person_ctx.write("indication.address.street");
+        _ = try person_ctx.write("indication.address.street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Indication
@@ -756,7 +766,7 @@ const struct_tests = struct {
         defer indication_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try indication_ctx.write("address.street");
+        _ = try indication_ctx.write("address.street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Address
@@ -768,7 +778,7 @@ const struct_tests = struct {
         defer address_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try address_ctx.write("street");
+        _ = try address_ctx.write("street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Street
@@ -781,12 +791,12 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try street_ctx.write("");
+        _ = try street_ctx.write("", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         list.clearAndFree();
 
-        _ = try street_ctx.write(".");
+        _ = try street_ctx.write(".", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
     }
 
@@ -849,7 +859,7 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try item_1.write("name");
+        _ = try item_1.write("name", .Unescaped);
         try testing.expectEqualStrings("item 1", list.items);
 
         var item_2 = (try iterator.next(allocator)) orelse {
@@ -860,7 +870,7 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try item_2.write("name");
+        _ = try item_2.write("name", .Unescaped);
         try testing.expectEqualStrings("item 2", list.items);
 
         var no_more = try iterator.next(allocator);
