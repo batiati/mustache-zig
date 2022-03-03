@@ -80,14 +80,14 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return try Functions.get(allocator, self.writer, self.data, &path_iterator, index);
+            return try Comptime.get(allocator, self.writer, self.data, &path_iterator, index);
         }
 
         fn write(ctx: *anyopaque, path: []const u8) anyerror!bool {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return if (try Functions.write(self.writer, self.data, &path_iterator)) |_| true else false;
+            return if (try Comptime.write(self.writer, self.data, &path_iterator)) |_| true else false;
         }
 
         fn deinit(ctx: *anyopaque, allocator: Allocator) void {
@@ -101,26 +101,36 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
     };
 }
 
-const Functions = struct {
-    pub fn get(
+const Comptime = struct {
+    pub inline fn get(
         allocator: Allocator,
         out_writer: anytype,
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
         index: ?usize,
     ) anyerror!?Context {
+        
+        // TODO: Should we set a new branch quota here??
+        // Let's wait for some real use case
+        //@setEvalBranchQuota(std.math.maxInt(u32));
+        
         return try seek(Context, getContext, allocator, out_writer, data, path_iterator, index);
     }
 
-    pub fn write(
+    pub inline fn write(
         out_writer: anytype,
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
     ) anyerror!?void {
+        
+        // TODO: Should we set a new branch quota here??
+        // Let's wait for some real use case
+        //@setEvalBranchQuota(std.math.maxInt(u32));        
+
         return try seek(void, stringify, {}, out_writer, data, path_iterator, null);
     }
 
-    fn seek(
+    inline fn seek(
         comptime TReturn: type,
         action: anytype,
         allocator: anytype,
@@ -132,19 +142,29 @@ const Functions = struct {
         if (path_iterator.next()) |token| {
             return try recursiveSeek(TReturn, @TypeOf(data), action, allocator, out_writer, data, token, path_iterator, index);
         } else {
-            if (index) |current_index| {
-                if (iterateAt(data, current_index)) |data_at| {
-                    return try action(allocator, out_writer, data_at);
-                } else {
-                    return null;
-                }
+
+            if (@TypeOf(data) == comptime_int) {
+                const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
+                var runtime_value: RuntimeInt = data;
+                return try seek(TReturn, action, allocator, out_writer, runtime_value, path_iterator, index);
+            } else if (@TypeOf(data) == comptime_float) {
+                var runtime_value: f64 = data;
+                return try seek(TReturn, action, allocator, out_writer, runtime_value, path_iterator, index);
             } else {
-                return try action(allocator, out_writer, data);
+                if (index) |current_index| {
+                    if (iterateAt(data, current_index)) |data_at| {
+                        return try action(allocator, out_writer, data_at);
+                    } else {
+                        return null;
+                    }
+                } else {
+                    return try action(allocator, out_writer, data);
+                }                
             }
         }
     }
 
-    fn iterateAt(data: anytype, index: usize) ?IteratorType(@TypeOf(data)) {
+    inline fn iterateAt(data: anytype, index: usize) ?IteratorType(@TypeOf(data)) {
         switch (@typeInfo(@TypeOf(data))) {
 
             // Booleans are evaluated on the iterator
@@ -188,7 +208,7 @@ const Functions = struct {
         return T;
     }
 
-    fn recursiveSeek(
+    inline fn recursiveSeek(
         comptime TReturn: type,
         comptime TValue: type,
         action: anytype,
@@ -227,7 +247,7 @@ const Functions = struct {
         return null;
     }
 
-    fn seekField(
+   inline  fn seekField(
         comptime TReturn: type,
         comptime TValue: type,
         action: anytype,
