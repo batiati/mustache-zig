@@ -7,22 +7,50 @@ Mustache-Zig is an implementation of the [{{mustache}} template system](https://
 
 # ! Under development !
 
-## Features 
 
-- Full spec compliant
+## Full spec compliant
 
-- Designed for low memory consumption
+Supports all elements from [mustache spec](https://github.com/mustache/spec) with all tests passing ✔️.
 
-- Comptime bindings
+    delimiters
+    interpolation
+    unescaped interpolation
+    sections
+    inverted sections
+    comments
+    partials
+    parent
+    blocks
 
-- Zero-copy, stream-based rendering engine
+## Designed for low memory consumption.
 
-- Efficient both for cached and dynamic template loading.
+Mustache templates are well known for HTML templating, but it's useful to render any kind of dynamic document, and potentially load templates from untrusted or user-defined sources.
 
+So, it's important to be able to deal with multi-megabyte inputs without eating all your RAM.
+
+```Zig
+
+    // 16KB should be enough memory for this job
+    var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){
+        .requested_memory_limit = 16 * 1024,
+    };
+    defer _ = plenty_of_memory.deinit();
+
+    try mustache.render(plenty_of_memory, "10MB_file.mustache", data, out_writer);
+
+```
+
+## Comptime bindings, runtime templates.
+
+//TODO:
+
+## Cached or dynamic template loading.
+
+//TODO:
 
 ## Licensing
 
-- 
+- MIT
 
 - Mustache is Copyright (C) 2009 Chris Wanstrath
 Original CTemplate by Google
