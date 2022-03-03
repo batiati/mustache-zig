@@ -7,13 +7,32 @@ pub const Context = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        get: fn (ctx: *anyopaque, allocator: Allocator, path: []const u8) anyerror!?Context,
+        get: fn (ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) anyerror!?Context,
         write: fn (ctx: *anyopaque, path: []const u8) anyerror!bool,
         deinit: fn (ctx: *anyopaque, allocator: Allocator) void,
     };
 
+    pub const Iterator = struct {
+        context: *Context,
+        path: []const u8,
+        current: usize,
+
+        pub fn next(self: *Iterator, allocator: Allocator) anyerror!?Context {
+            defer self.current += 1;
+            return try self.context.vtable.get(self.context.ptr, allocator, self.path, self.current);
+        }
+    };
+
     pub inline fn get(self: Context, allocator: Allocator, path: []const u8) anyerror!?Context {
-        return try self.vtable.get(self.ptr, allocator, path);
+        return try self.vtable.get(self.ptr, allocator, path, null);
+    }
+
+    pub fn iterator(self: *Context, path: []const u8) Iterator {
+        return .{
+            .context = self,
+            .path = path,
+            .current = 0,
+        };
     }
 
     pub inline fn write(self: Context, path: []const u8) anyerror!bool {
@@ -57,35 +76,48 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             };
         }
 
-        fn get(ctx: *anyopaque, allocator: Allocator, path: []const u8) anyerror!?Context {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
+        fn get(ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) anyerror!?Context {
+            var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            try return Functions.get(allocator, self.writer, self.data, &path_iterator);
+            return try Functions.get(allocator, self.writer, self.data, &path_iterator, index);
         }
 
         fn write(ctx: *anyopaque, path: []const u8) anyerror!bool {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
+            var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            try Functions.write(self.writer, self.data, &path_iterator);
-            return true;
+            return if (try Functions.write(self.writer, self.data, &path_iterator)) |_| true else false;
         }
 
         fn deinit(ctx: *anyopaque, allocator: Allocator) void {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
+            var self = getSelf(ctx);
             allocator.destroy(self);
+        }
+
+        inline fn getSelf(ctx: *anyopaque) *Self {
+            return @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
         }
     };
 }
 
 const Functions = struct {
-    pub fn get(allocator: Allocator, out_writer: anytype, data: anytype, path_iterator: *std.mem.TokenIterator(u8)) anyerror!?Context {
-        return try seek(Context, getContext, allocator, out_writer, data, path_iterator);
+    pub fn get(
+        allocator: Allocator,
+        out_writer: anytype,
+        data: anytype,
+        path_iterator: *std.mem.TokenIterator(u8),
+        index: ?usize,
+    ) anyerror!?Context {
+        return try seek(Context, getContext, allocator, out_writer, data, path_iterator, index);
     }
 
-    pub fn write(out_writer: anytype, data: anytype, path_iterator: *std.mem.TokenIterator(u8)) anyerror!void {
-        _ = try seek(void, stringify, {}, out_writer, data, path_iterator);
+    pub fn write(
+        out_writer: anytype,
+        data: anytype,
+        path_iterator: *std.mem.TokenIterator(u8),
+    ) anyerror!?void {
+        return try seek(void, stringify, {}, out_writer, data, path_iterator, null);
     }
 
     fn seek(
@@ -95,12 +127,65 @@ const Functions = struct {
         out_writer: anytype,
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
+        index: ?usize,
     ) anyerror!?TReturn {
         if (path_iterator.next()) |token| {
-            return try recursiveSeek(TReturn, @TypeOf(data), action, allocator, out_writer, data, token, path_iterator);
+            return try recursiveSeek(TReturn, @TypeOf(data), action, allocator, out_writer, data, token, path_iterator, index);
         } else {
-            return try action(allocator, out_writer, data);
+            if (index) |current_index| {
+                if (iterateAt(data, current_index)) |data_at| {
+                    return try action(allocator, out_writer, data_at);
+                } else {
+                    return null;
+                }
+            } else {
+                return try action(allocator, out_writer, data);
+            }
         }
+    }
+
+    fn iterateAt(data: anytype, index: usize) ?IteratorType(@TypeOf(data)) {
+        switch (@typeInfo(@TypeOf(data))) {
+
+            // Booleans are evaluated on the iterator
+            .Bool => return if (data == true and index == 0) data else null,
+
+            .Pointer => |info| switch (info.size) {
+                .Slice => {
+
+                    //Slice of u8 is always string
+                    if (info.child != u8) {
+                        return if (index < data.len) data[index] else null;
+                    }
+                },
+                else => {},
+            },
+
+            .Optional => return if (data) |value| iterateAt(value, index) else null,
+
+            else => {},
+        }
+
+        return if (index == 0) data else null;
+    }
+
+    fn IteratorType(comptime T: type) type {
+        switch (@typeInfo(T)) {
+            .Pointer => |info| switch (info.size) {
+                .Slice => {
+
+                    //Slice of u8 is always string
+                    if (info.child != u8) {
+                        return info.child;
+                    }
+                },
+                else => {},
+            },
+            .Optional => |info| return IteratorType(info.child),
+            else => {},
+        }
+
+        return T;
     }
 
     fn recursiveSeek(
@@ -112,27 +197,28 @@ const Functions = struct {
         data: anytype,
         path: []const u8,
         path_iterator: *std.mem.TokenIterator(u8),
+        index: ?usize,
     ) anyerror!?TReturn {
         const typeInfo = @typeInfo(TValue);
 
         switch (typeInfo) {
-            .Struct => return try seekField(TReturn, TValue, action, allocator, out_writer, data, path, path_iterator),
+            .Struct => return try seekField(TReturn, TValue, action, allocator, out_writer, data, path, path_iterator, index),
             .Pointer => |info| switch (info.size) {
-                TypeInfo.Pointer.Size.One => return try recursiveSeek(TReturn, info.child, action, allocator, out_writer, data, path, path_iterator),
-                TypeInfo.Pointer.Size.Slice => {
+                .One => return try recursiveSeek(TReturn, info.child, action, allocator, out_writer, data, path, path_iterator, index),
+                .Slice => {
 
                     //Slice supports the "len" field,
                     if (std.mem.eql(u8, "len", path)) {
-                        try return seek(TReturn, action, allocator, out_writer, data.len, path_iterator);
+                        try return seek(TReturn, action, allocator, out_writer, data.len, path_iterator, index);
                     }
                 },
 
-                TypeInfo.Pointer.Size.Many => @compileError("[*] pointers not supported"),
-                TypeInfo.Pointer.Size.C => @compileError("[*c] pointers not supported"),
+                .Many => @compileError("[*] pointers not supported"),
+                .C => @compileError("[*c] pointers not supported"),
             },
             .Optional => |info| {
                 if (data) |value| {
-                    return try return recursiveSeek(TReturn, info.child, action, allocator, out_writer, value, path, path_iterator);
+                    return try return recursiveSeek(TReturn, info.child, action, allocator, out_writer, value, path, path_iterator, index);
                 }
             },
             else => {},
@@ -150,11 +236,12 @@ const Functions = struct {
         data: anytype,
         path: []const u8,
         path_iterator: *std.mem.TokenIterator(u8),
+        index: ?usize,
     ) anyerror!?TReturn {
         const fields = std.meta.fields(TValue);
         inline for (fields) |field| {
             if (std.mem.eql(u8, field.name, path)) {
-                return try seek(TReturn, action, allocator, out_writer, @field(data, field.name), path_iterator);
+                return try seek(TReturn, action, allocator, out_writer, @field(data, field.name), path_iterator, index);
             }
         }
 
@@ -205,6 +292,12 @@ const testing = std.testing;
 const struct_tests = struct {
 
     // Test model
+
+    const Item = struct {
+        name: []const u8,
+        value: f32,
+    };
+
     const Person = struct {
         id: u32,
         name: []const u8,
@@ -221,6 +314,7 @@ const struct_tests = struct {
                 lat: f64,
             },
         },
+        items: []const Item,
         salary: f32,
         indication: ?*Person,
         active: bool,
@@ -243,6 +337,9 @@ const struct_tests = struct {
                 .lat = 2.17403,
             },
         },
+        .items = &[_]Item{
+            .{ .name = "just one item", .value = 0.01 },
+        },
         .salary = 75.00,
         .indication = null,
         .active = false,
@@ -264,6 +361,10 @@ const struct_tests = struct {
                 .lon = 38.71471,
                 .lat = -9.13872,
             },
+        },
+        .items = &[_]Item{
+            .{ .name = "item 1", .value = 100 },
+            .{ .name = "item 2", .value = 200 },
         },
         .salary = 140.00,
         .indication = &person_1,
@@ -700,5 +801,104 @@ const struct_tests = struct {
 
         var wrong_len = try street_ctx.get(allocator, "wrong_len");
         try testing.expect(wrong_len == null);
+    }
+
+    test "Iterator over slice" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var writer = list.writer();
+
+        // Person
+        var ctx = try getContext(allocator, writer, person_2);
+        defer ctx.deinit(allocator);
+
+        var iterator = ctx.iterator("items");
+
+        var item_1 = (try iterator.next(allocator)) orelse {
+            try testing.expect(false);
+            return;
+        };
+        defer item_1.deinit(allocator);
+
+        list.clearAndFree();
+
+        _ = try item_1.write("name");
+        try testing.expectEqualStrings("item 1", list.items);
+
+        var item_2 = (try iterator.next(allocator)) orelse {
+            try testing.expect(false);
+            return;
+        };
+        defer item_2.deinit(allocator);
+
+        list.clearAndFree();
+
+        _ = try item_2.write("name");
+        try testing.expectEqualStrings("item 2", list.items);
+
+        var no_more = try iterator.next(allocator);
+        try testing.expect(no_more == null);
+    }
+
+    test "Iterator over bool" {
+        const allocator = testing.allocator;
+
+        // Person
+        var ctx = try getContext(allocator, std.io.null_writer, person_2);
+        defer ctx.deinit(allocator);
+
+        {
+            // iterator over true
+            var iterator = ctx.iterator("active");
+
+            var item_1 = (try iterator.next(allocator)) orelse {
+                try testing.expect(false);
+                return;
+            };
+            defer item_1.deinit(allocator);
+
+            var no_more = try iterator.next(allocator);
+            try testing.expect(no_more == null);
+        }
+
+        {
+            // iterator over false
+            var iterator = ctx.iterator("indication.active");
+
+            var no_more = try iterator.next(allocator);
+            try testing.expect(no_more == null);
+        }
+    }
+
+    test "Iterator over null" {
+        const allocator = testing.allocator;
+
+        // Person
+        var ctx = try getContext(allocator, std.io.null_writer, person_2);
+        defer ctx.deinit(allocator);
+
+        {
+            // iterator over true
+            var iterator = ctx.iterator("additional_information");
+
+            var item_1 = (try iterator.next(allocator)) orelse {
+                try testing.expect(false);
+                return;
+            };
+            defer item_1.deinit(allocator);
+
+            var no_more = try iterator.next(allocator);
+            try testing.expect(no_more == null);
+        }
+
+        {
+            // iterator over false
+            var iterator = ctx.iterator("indication.additional_information");
+
+            var no_more = try iterator.next(allocator);
+            try testing.expect(no_more == null);
+        }
     }
 };
