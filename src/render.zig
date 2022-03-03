@@ -6,24 +6,26 @@ const testing = std.testing;
 const mustache = @import("mustache.zig");
 const Element = mustache.template.Element;
 const Template = mustache.template.Template;
+const Interpolation = mustache.template.Interpolation;
 
 const context = @import("context.zig");
 const Context = context.Context;
 
-pub fn renderAlloc(allocator: Allocator, data: anytype, elements: []const Element) anyerror![]const u8 {
+pub fn renderAlloc(allocator: Allocator, data: anytype, elements: []const Element) Allocator.Error![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
     errdefer builder.deinit();
 
     var writer = builder.writer();
 
-    var render = getRender(writer, data);
-    try render.render(allocator, elements);
+    var render = getRender(allocator, writer, data);
+    try render.render(elements);
 
     return builder.toOwnedSlice();
 }
 
-pub fn getRender(out_writer: anytype, data: anytype) Render(@TypeOf(out_writer), @TypeOf(data)) {
+pub fn getRender(allocator: Allocator, out_writer: anytype, data: anytype) Render(@TypeOf(out_writer), @TypeOf(data)) {
     return Render(@TypeOf(out_writer), @TypeOf(data)){
+        .allocator = allocator,
         .writer = out_writer,
         .data = data,
     };
@@ -32,34 +34,50 @@ pub fn getRender(out_writer: anytype, data: anytype) Render(@TypeOf(out_writer),
 fn Render(comptime Writer: type, comptime Data: type) type {
     return struct {
         const Self = @This();
+        const ContextInterface = Context(Writer);
 
+        const Stack = struct {
+            parent: ?*Stack,
+            ctx: Context(Writer),
+        };
+
+        allocator: Allocator,
         writer: Writer,
         data: Data,
 
-        pub fn render(self: *Self, allocator: Allocator, elements: []const Element) anyerror!void {
-            var ctx = try context.getContext(allocator, self.writer, self.data);
-            defer ctx.deinit(allocator);
-            try self.renderLevel(allocator, &ctx, elements);
+        pub fn render(self: *Self, elements: []const Element) (Allocator.Error || Writer.Error)!void {
+            var stack = Stack{
+                .parent = null,
+                .ctx = try context.getContext(self.allocator, self.writer, self.data),
+            };
+            defer stack.ctx.deinit(self.allocator);
+
+            try self.renderLevel(&stack, elements);
         }
 
-        fn renderLevel(self: *Self, allocator: Allocator, ctx: *Context, children: ?[]const Element) anyerror!void {
+        fn renderLevel(self: *Self, stack: *Stack, children: ?[]const Element) (Allocator.Error || Writer.Error)!void {
             if (children) |elements| {
                 for (elements) |element| {
                     switch (element) {
                         .StaticText => |content| try self.writer.writeAll(content),
-                        .Interpolation => |interpolation| _ = try ctx.write(interpolation.key, if (interpolation.escaped) .Escaped else .Unescaped),
+                        .Interpolation => |interpolation| try interpolate(stack, interpolation),
                         .Section => |section| {
-                            var iterator = ctx.iterator(section.key);
+                            var iterator = stack.ctx.iterator(section.key);
                             if (section.inverted) {
-                                if (try iterator.next(allocator)) |some| {
-                                    some.deinit(allocator);
+                                if (try iterator.next(self.allocator)) |some| {
+                                    some.deinit(self.allocator);
                                 } else {
-                                    try self.renderLevel(allocator, ctx, section.content);
+                                    try self.renderLevel(stack, section.content);
                                 }
                             } else {
-                                while (try iterator.next(allocator)) |*item_ctx| {
-                                    defer item_ctx.deinit(allocator);
-                                    try self.renderLevel(allocator, item_ctx, section.content);
+                                while (try iterator.next(self.allocator)) |item_ctx| {
+                                    var next_step = Stack{
+                                        .parent = stack,
+                                        .ctx = item_ctx,
+                                    };
+
+                                    defer next_step.ctx.deinit(self.allocator);
+                                    try self.renderLevel(&next_step, section.content);
                                 }
                             }
                         },
@@ -67,6 +85,14 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                         else => {},
                     }
                 }
+            }
+        }
+
+        fn interpolate(ctx: *Stack, interpolation: Interpolation) Writer.Error!void {
+            var level: ?*Stack = ctx;
+            while (level) |current| : (level = current.parent) {
+                const success = try current.ctx.write(interpolation.key, if (interpolation.escaped) .Escaped else .Unescaped);
+                if (success) break;
             }
         }
     };
@@ -315,7 +341,7 @@ test "Dotted Names - Arbitrary Depth" {
 
 // Basic interpolation should be HTML escaped..
 test "Implicit Iterators - HTML Escaping" {
-    const template_text = 
+    const template_text =
         \\|
         \\These characters should be HTML escaped: {{.}}
     ;

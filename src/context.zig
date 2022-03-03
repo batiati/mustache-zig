@@ -3,61 +3,67 @@ const Allocator = std.mem.Allocator;
 const TypeInfo = std.builtin.TypeInfo;
 const trait = std.meta.trait;
 
-pub const Context = struct {
-    ptr: *anyopaque,
-    vtable: *const VTable,
-
-    pub const Escape = enum {
-        Escaped,
-        Unescaped,
-    };
-
-    pub const VTable = struct {
-        get: fn (ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) anyerror!?Context,
-        write: fn (ctx: *anyopaque, path: []const u8, escape: Escape) anyerror!bool,
-        deinit: fn (ctx: *anyopaque, allocator: Allocator) void,
-    };
-
-    pub const Iterator = struct {
-        context: *Context,
-        path: []const u8,
-        current: usize,
-
-        pub fn next(self: *Iterator, allocator: Allocator) anyerror!?Context {
-            defer self.current += 1;
-            return try self.context.vtable.get(self.context.ptr, allocator, self.path, self.current);
-        }
-    };
-
-    pub inline fn get(self: Context, allocator: Allocator, path: []const u8) anyerror!?Context {
-        return try self.vtable.get(self.ptr, allocator, path, null);
-    }
-
-    pub fn iterator(self: *Context, path: []const u8) Iterator {
-        return .{
-            .context = self,
-            .path = path,
-            .current = 0,
-        };
-    }
-
-    pub inline fn write(self: Context, path: []const u8, escape: Escape) anyerror!bool {
-        return try self.vtable.write(self.ptr, path, escape);
-    }
-
-    pub inline fn deinit(self: Context, allocator: Allocator) void {
-        return self.vtable.deinit(self.ptr, allocator);
-    }
+pub const Escape = enum {
+    Escaped,
+    Unescaped,
 };
 
-pub fn getContext(allocator: Allocator, out_writer: anytype, data: anytype) Allocator.Error!Context {
+pub fn getContext(allocator: Allocator, out_writer: anytype, data: anytype) Allocator.Error!Context(@TypeOf(out_writer)) {
     const Impl = ContextImpl(@TypeOf(out_writer), @TypeOf(data));
     return try Impl.init(allocator, out_writer, data);
 }
 
+pub fn Context(comptime Writer: type) type {
+    return struct {
+        const Self = @This();
+
+        ptr: *anyopaque,
+        vtable: *const VTable,
+
+        pub const VTable = struct {
+            get: fn (ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!?Self,
+            write: fn (ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!bool,
+            deinit: fn (ctx: *anyopaque, allocator: Allocator) void,
+        };
+
+        pub const Iterator = struct {
+            context: *Self,
+            path: []const u8,
+            current: usize,
+
+            pub fn next(self: *Iterator, allocator: Allocator) Allocator.Error!?Self {
+                defer self.current += 1;
+                return try self.context.vtable.get(self.context.ptr, allocator, self.path, self.current);
+            }
+        };
+
+        pub inline fn get(self: Self, allocator: Allocator, path: []const u8) Allocator.Error!?Self {
+            return try self.vtable.get(self.ptr, allocator, path, null);
+        }
+
+        pub fn iterator(self: *Self, path: []const u8) Iterator {
+            return .{
+                .context = self,
+                .path = path,
+                .current = 0,
+            };
+        }
+
+        pub inline fn write(self: Self, path: []const u8, escape: Escape) Writer.Error!bool {
+            return try self.vtable.write(self.ptr, path, escape);
+        }
+
+        pub inline fn deinit(self: Self, allocator: Allocator) void {
+            return self.vtable.deinit(self.ptr, allocator);
+        }
+    };
+}
+
 fn ContextImpl(comptime Writer: type, comptime Data: type) type {
     return struct {
-        const vtable = Context.VTable{
+        const ContextInterface = Context(Writer);
+
+        const vtable = ContextInterface.VTable{
             .get = get,
             .write = write,
             .deinit = deinit,
@@ -69,27 +75,27 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         writer: Writer,
         data: Data,
 
-        pub fn init(allocator: Allocator, writer: Writer, data: Data) Allocator.Error!Context {
+        pub fn init(allocator: Allocator, writer: Writer, data: Data) Allocator.Error!ContextInterface {
             var self = try allocator.create(Self);
             self.* = .{
                 .writer = writer,
                 .data = data,
             };
 
-            return Context{
+            return ContextInterface{
                 .ptr = self,
                 .vtable = &vtable,
             };
         }
 
-        fn get(ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) anyerror!?Context {
+        fn get(ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!?ContextInterface {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Comptime.get(allocator, self.writer, self.data, &path_iterator, index);
         }
 
-        fn write(ctx: *anyopaque, path: []const u8, escape: Context.Escape) anyerror!bool {
+        fn write(ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!bool {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
@@ -114,27 +120,37 @@ const Comptime = struct {
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
         index: ?usize,
-    ) anyerror!?Context {
+    ) Allocator.Error!?Context(@TypeOf(out_writer)) {
 
         // TODO: Should we set a new branch quota here??
         // Let's wait for some real use case
         //@setEvalBranchQuota(std.math.maxInt(u32));
 
-        return try seek(Context, getContext, allocator, out_writer, data, path_iterator, index);
+        const TReturn = Allocator.Error!?Context(@TypeOf(out_writer));
+        return try seek(
+            TReturn,
+            getContext,
+            allocator,
+            out_writer,
+            data,
+            path_iterator,
+            index,
+        );
     }
 
     pub inline fn write(
         out_writer: anytype,
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
-        escape: Context.Escape,
-    ) anyerror!?void {
+        escape: Escape,
+    ) @TypeOf(out_writer).Error!?void {
 
         // TODO: Should we set a new branch quota here??
         // Let's wait for some real use case
         //@setEvalBranchQuota(std.math.maxInt(u32));
 
-        return try seek(void, stringify, escape, out_writer, data, path_iterator, null);
+        const TReturn = @TypeOf(out_writer).Error!?void;
+        return try seek(TReturn, stringify, escape, out_writer, data, path_iterator, null);
     }
 
     inline fn seek(
@@ -145,7 +161,7 @@ const Comptime = struct {
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
         index: ?usize,
-    ) anyerror!?TReturn {
+    ) TReturn {
         if (path_iterator.next()) |token| {
             return try recursiveSeek(TReturn, @TypeOf(data), action, param, out_writer, data, token, path_iterator, index);
         } else {
@@ -173,50 +189,6 @@ const Comptime = struct {
         }
     }
 
-    inline fn iterateAt(data: anytype, index: usize) ?IteratorType(@TypeOf(data)) {
-        switch (@typeInfo(@TypeOf(data))) {
-
-            // Booleans are evaluated on the iterator
-            .Bool => return if (data == true and index == 0) data else null,
-
-            .Pointer => |info| switch (info.size) {
-                .Slice => {
-
-                    //Slice of u8 is always string
-                    if (info.child != u8) {
-                        return if (index < data.len) data[index] else null;
-                    }
-                },
-                else => {},
-            },
-
-            .Optional => return if (data) |value| iterateAt(value, index) else null,
-
-            else => {},
-        }
-
-        return if (index == 0) data else null;
-    }
-
-    fn IteratorType(comptime T: type) type {
-        switch (@typeInfo(T)) {
-            .Pointer => |info| switch (info.size) {
-                .Slice => {
-
-                    //Slice of u8 is always string
-                    if (info.child != u8) {
-                        return info.child;
-                    }
-                },
-                else => {},
-            },
-            .Optional => |info| return IteratorType(info.child),
-            else => {},
-        }
-
-        return T;
-    }
-
     inline fn recursiveSeek(
         comptime TReturn: type,
         comptime TValue: type,
@@ -227,7 +199,7 @@ const Comptime = struct {
         path: []const u8,
         path_iterator: *std.mem.TokenIterator(u8),
         index: ?usize,
-    ) anyerror!?TReturn {
+    ) TReturn {
         const typeInfo = @typeInfo(TValue);
 
         switch (typeInfo) {
@@ -266,7 +238,7 @@ const Comptime = struct {
         path: []const u8,
         path_iterator: *std.mem.TokenIterator(u8),
         index: ?usize,
-    ) anyerror!?TReturn {
+    ) TReturn {
         const fields = std.meta.fields(TValue);
         inline for (fields) |field| {
             if (std.mem.eql(u8, field.name, path)) {
@@ -277,7 +249,11 @@ const Comptime = struct {
         return null;
     }
 
-    inline fn stringify(escape: Context.Escape, out_writer: anytype, value: anytype) anyerror!void {
+    inline fn stringify(
+        escape: Escape,
+        out_writer: anytype,
+        value: anytype,
+    ) @TypeOf(out_writer).Error!void {
         const typeInfo = @typeInfo(@TypeOf(value));
 
         switch (typeInfo) {
@@ -315,7 +291,11 @@ const Comptime = struct {
         }
     }
 
-    fn escape_write(out_writer: anytype, value: []const u8, escape: Context.Escape) anyerror!void {
+    fn escape_write(
+        out_writer: anytype,
+        value: []const u8,
+        escape: Escape,
+    ) @TypeOf(out_writer).Error!void {
         switch (escape) {
             .Unescaped => {
                 try out_writer.writeAll(value);
@@ -361,6 +341,50 @@ const Comptime = struct {
                 }
             },
         }
+    }
+
+    inline fn iterateAt(data: anytype, index: usize) ?IteratorType(@TypeOf(data)) {
+        switch (@typeInfo(@TypeOf(data))) {
+
+            // Booleans are evaluated on the iterator
+            .Bool => return if (data == true and index == 0) data else null,
+
+            .Pointer => |info| switch (info.size) {
+                .Slice => {
+
+                    //Slice of u8 is always string
+                    if (info.child != u8) {
+                        return if (index < data.len) data[index] else null;
+                    }
+                },
+                else => {},
+            },
+
+            .Optional => return if (data) |value| iterateAt(value, index) else null,
+
+            else => {},
+        }
+
+        return if (index == 0) data else null;
+    }
+
+    fn IteratorType(comptime T: type) type {
+        switch (@typeInfo(T)) {
+            .Pointer => |info| switch (info.size) {
+                .Slice => {
+
+                    //Slice of u8 is always string
+                    if (info.child != u8) {
+                        return info.child;
+                    }
+                },
+                else => {},
+            },
+            .Optional => |info| return IteratorType(info.child),
+            else => {},
+        }
+
+        return T;
     }
 };
 
