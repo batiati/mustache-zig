@@ -8,7 +8,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const ParseErrors = mustache.template.ParseErrors;
+const ParseError = mustache.template.ParseError;
 
 const parsing = @import("parsing.zig");
 const Event = parsing.Event;
@@ -70,7 +70,7 @@ pub fn TextScanner(comptime source: TextSource) type {
         ///
         /// Should be the template content if source == .String
         /// or the absolute path if source == .File
-        pub fn init(allocator: Allocator, template: []const u8) if (source == .String) Allocator.Error!Self else FileReader.Errors!Self {
+        pub fn init(allocator: Allocator, template: []const u8) if (source == .String) Allocator.Error!Self else FileReader.Error!Self {
             switch (source) {
                 .String => return Self{
                     .content = template,
@@ -89,9 +89,9 @@ pub fn TextScanner(comptime source: TextSource) type {
             }
         }
 
-        pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseErrors!void {
-            if (delimiters.starting_delimiter.len == 0) return ParseErrors.InvalidDelimiters;
-            if (delimiters.ending_delimiter.len == 0) return ParseErrors.InvalidDelimiters;
+        pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseError!void {
+            if (delimiters.starting_delimiter.len == 0) return ParseError.InvalidDelimiters;
+            if (delimiters.ending_delimiter.len == 0) return ParseError.InvalidDelimiters;
 
             var index: u4 = 0;
             var delimiter_max_size = std.math.max(Delimiters.NoScapeStartingDelimiter.len, Delimiters.NoScapeEndingDelimiter.len);

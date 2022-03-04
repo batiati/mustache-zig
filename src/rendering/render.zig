@@ -7,7 +7,7 @@ const mustache = @import("../mustache.zig");
 const Element = mustache.template.Element;
 const Template = mustache.template.Template;
 const Interpolation = mustache.template.Interpolation;
-const ParserErrors = mustache.template.ParseErrors;
+const ParseError = mustache.template.ParseError;
 
 const context = @import("context.zig");
 const Context = context.Context;
@@ -26,7 +26,7 @@ pub fn renderCached(allocator: Allocator, data: anytype, elements: []const Eleme
     try render.render(elements);
 }
 
-pub fn renderAllocFromString(allocator: Allocator, data: anytype, template_text: []const u8) (Allocator.Error || ParserErrors)![]const u8 {
+pub fn renderAllocFromString(allocator: Allocator, data: anytype, template_text: []const u8) (Allocator.Error || ParseError)![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
     errdefer builder.deinit();
 
@@ -35,7 +35,7 @@ pub fn renderAllocFromString(allocator: Allocator, data: anytype, template_text:
     return builder.toOwnedSlice();
 }
 
-pub fn renderFromString(allocator: Allocator, data: anytype, template_text: []const u8, out_writer: anytype) (Allocator.Error || ParserErrors || @TypeOf(out_writer).Error)!void {
+pub fn renderFromString(allocator: Allocator, data: anytype, template_text: []const u8, out_writer: anytype) (Allocator.Error || ParseError || @TypeOf(out_writer).Error)!void {
     var template = Template(.{ .owns_string = false }){
         .allocator = allocator,
     };

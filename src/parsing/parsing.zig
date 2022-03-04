@@ -14,7 +14,7 @@ const Parent = mustache.template.Parent;
 const Block = mustache.template.Block;
 const LastError = mustache.template.LastError;
 
-const ParseErrors = mustache.template.ParseErrors;
+const ParseError = mustache.template.ParseError;
 
 const mem = @import("../mem.zig");
 const EpochArena = mem.EpochArena;
@@ -126,11 +126,12 @@ pub const TrimmingIndex = union(enum) {
     Trimmed,
 };
 
+pub const ParserOutput = enum { Streamed, Cached };
+
 pub const ParserOptions = struct {
-    delimiters: Delimiters,
     source: TextSource,
     owns_string: bool,
-    streamed: bool,
+    output: ParserOutput,
 };
 
 pub fn Parser(comptime parser_options: ParserOptions) type {
@@ -140,13 +141,13 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             WaitingEndingTag,
         };
 
-        const ProcessingErrors = Allocator.Error || if (options.source == .File) std.fs.File.ReadError || std.fs.File.OpenError else error{};
+        const ProcessingError = Allocator.Error || if (options.source == .File) std.fs.File.ReadError || std.fs.File.OpenError else error{};
 
-        pub const Errors = (ParseErrors || ProcessingErrors);
+        pub const Error = (ParseError || ProcessingError);
 
         pub const options = struct {
             pub const source = parser_options.source;
-            pub const streamed = parser_options.streamed;
+            pub const output = parser_options.output;
             pub const owns_string = parser_options.owns_string;
         };
 
@@ -163,7 +164,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
 
         /// When in streamed mode, this combines two arenas, allowing to free memory each time the parser produces
         /// When the "nextEpoch" function is called, the current arena is reserved and a new one is initialized for use.
-        arena: if (options.streamed) EpochArena else ArenaAllocator,
+        arena: if (options.output == .Streamed) EpochArena else ArenaAllocator,
 
         /// Text scanner instance, shoud not be accessed directly
         text_scanner: TextScanner(options.source),
@@ -184,12 +185,12 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
         /// Holds a ref_counter to the read buffer for all produced elements
         ref_counter_holder: if (options.owns_string) void else RefCounterHolder = if (options.owns_string) {} else RefCounterHolder{},
 
-        pub fn init(gpa: Allocator, template: []const u8) if (options.source == .String) Allocator.Error!Self else FileReader.Errors!Self {
-            const Arena = if (options.streamed) EpochArena else ArenaAllocator;
+        pub fn init(gpa: Allocator, template: []const u8, delimiters: Delimiters) if (options.source == .String) Allocator.Error!Self else FileReader.Error!Self {
+            const Arena = if (options.output == .Streamed) EpochArena else ArenaAllocator;
             var arena = Arena.init(gpa);
             errdefer arena.deinit();
 
-            var root = try Level.init(arena.allocator(), parser_options.delimiters);
+            var root = try Level.init(arena.allocator(), delimiters);
 
             return Self{
                 .gpa = gpa,
@@ -207,7 +208,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             if (!options.owns_string) self.ref_counter_holder.free(self.gpa);
         }
 
-        pub fn parse(self: *Self) ProcessingErrors!ParseResult {
+        pub fn parse(self: *Self) ProcessingError!ParseResult {
             var ret = self.parseTree() catch |err| {
                 return try self.fromError(err);
             };
@@ -219,15 +220,15 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             }
         }
 
-        fn fromError(self: *Self, err: Errors) ProcessingErrors!ParseResult {
+        fn fromError(self: *Self, err: Error) ProcessingError!ParseResult {
             switch (err) {
-                Errors.StartingDelimiterMismatch,
-                Errors.EndingDelimiterMismatch,
-                Errors.UnexpectedEof,
-                Errors.UnexpectedCloseSection,
-                Errors.InvalidDelimiters,
-                Errors.InvalidIdentifier,
-                Errors.ClosingTagMismatch,
+                ParseError.StartingDelimiterMismatch,
+                ParseError.EndingDelimiterMismatch,
+                ParseError.UnexpectedEof,
+                ParseError.UnexpectedCloseSection,
+                ParseError.InvalidDelimiters,
+                ParseError.InvalidIdentifier,
+                ParseError.ClosingTagMismatch,
                 => |parse_err| return ParseResult{
                     .Error = self.last_error orelse .{ .error_code = parse_err },
                 },
@@ -244,7 +245,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             }
         }
 
-        pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) Errors![]Element {
+        pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) Error![]Element {
             var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
             errdefer list.deinit(self.gpa);
             defer Node.deinitMany(self.gpa, nodes);
@@ -269,12 +270,12 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
 
                         .CloseSection => {
                             const parent_key_value = parent_key orelse {
-                                return self.setLastError(ParseErrors.UnexpectedCloseSection, &node.text_block, null);
+                                return self.setLastError(ParseError.UnexpectedCloseSection, &node.text_block, null);
                             };
 
                             const key = try self.parseIdentificator(&node.text_block);
                             if (!std.mem.eql(u8, parent_key_value, key)) {
-                                return self.setLastError(ParseErrors.ClosingTagMismatch, &node.text_block, null);
+                                return self.setLastError(ParseError.ClosingTagMismatch, &node.text_block, null);
                             }
 
                             break :blk null;
@@ -366,7 +367,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             return list.toOwnedSlice(self.gpa);
         }
 
-        fn matchBlockType(self: *Self, text_block: *TextBlock) Errors!?BlockType {
+        fn matchBlockType(self: *Self, text_block: *TextBlock) Error!?BlockType {
             switch (text_block.event) {
                 .Mark => |tag_mark| {
                     switch (self.state) {
@@ -374,7 +375,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                             defer self.state = .WaitingEndingTag;
 
                             if (tag_mark.mark_type == .Ending) {
-                                return self.setLastError(ParseErrors.EndingDelimiterMismatch, text_block, null);
+                                return self.setLastError(ParseError.EndingDelimiterMismatch, text_block, null);
                             }
 
                             // If there is no current action, any content is a static text
@@ -387,7 +388,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                             defer self.state = .WaitingStaringTag;
 
                             if (tag_mark.mark_type == .Starting) {
-                                return self.setLastError(ParseErrors.StartingDelimiterMismatch, text_block, null);
+                                return self.setLastError(ParseError.StartingDelimiterMismatch, text_block, null);
                             }
 
                             const is_triple_mustache = tag_mark.delimiter_type == .NoScapeDelimiter;
@@ -411,7 +412,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             return null;
         }
 
-        fn parseDelimiters(self: *Self, text_block: *TextBlock) Errors!Delimiters {
+        fn parseDelimiters(self: *Self, text_block: *TextBlock) Error!Delimiters {
             var delimiter: ?Delimiters = if (text_block.tail) |content| blk: {
 
                 // Delimiters are the only case of match closing tags {{= and =}}
@@ -434,11 +435,11 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             if (delimiter) |ret| {
                 return ret;
             } else {
-                return self.setLastError(ParseErrors.InvalidDelimiters, text_block, null);
+                return self.setLastError(ParseError.InvalidDelimiters, text_block, null);
             }
         }
 
-        fn parseIdentificator(self: *Self, text_block: *const TextBlock) ParseErrors![]const u8 {
+        fn parseIdentificator(self: *Self, text_block: *const TextBlock) ParseError![]const u8 {
             if (text_block.tail) |tail| {
                 var tokenizer = std.mem.tokenize(u8, tail, " \t");
                 if (tokenizer.next()) |token| {
@@ -448,10 +449,10 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                 }
             }
 
-            return self.setLastError(ParseErrors.InvalidIdentifier, text_block, null);
+            return self.setLastError(ParseError.InvalidIdentifier, text_block, null);
         }
 
-        fn parseTree(self: *Self) Errors!?[]*Node {
+        fn parseTree(self: *Self) Error!?[]*Node {
             if (self.text_scanner.delimiters_count == 0) {
                 self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
                     return self.setLastError(err, null, null);
@@ -508,7 +509,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
 
                         // When running on streamed mode,
                         // A stand-alone line in the root level indicates that the previous produced nodes can be rendered
-                        if (options.streamed) {
+                        if (options.output == .Streamed) {
                             if (self.current_level == self.root and self.root.list.items.len > 1) {
                                 if (static_text_block.?.text_block.left_trimming != .PreserveWhitespaces) {
 
@@ -558,7 +559,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             }
 
             if (self.current_level != self.root) {
-                return self.setLastError(ParseErrors.UnexpectedEof, null, null);
+                return self.setLastError(ParseError.UnexpectedEof, null, null);
             }
 
             if (static_text_block) |static_text| {
@@ -572,7 +573,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             } else {
                 const nodes = self.root.list.toOwnedSlice(arena);
 
-                if (options.streamed) {
+                if (options.output == .Streamed) {
                     self.arena.nextEpoch();
                 }
 
@@ -585,7 +586,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             }
         }
 
-        fn setLastError(self: *Self, err: ParseErrors, text_block: ?*const TextBlock, detail: ?[]const u8) ParseErrors {
+        fn setLastError(self: *Self, err: ParseError, text_block: ?*const TextBlock, detail: ?[]const u8) ParseError {
             self.last_error = LastError{
                 .error_code = err,
                 .row = if (text_block) |p| p.row else 0,
@@ -610,7 +611,7 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-const StreamedParser = Parser(.{ .delimiters = .{}, .source = .String, .owns_string = true, .streamed = true });
+const StreamedParser = Parser(.{ .source = .String, .owns_string = true, .output = .Streamed });
 
 test "Basic parse" {
     const template_text =
@@ -626,7 +627,7 @@ test "Basic parse" {
 
     const allocator = testing.allocator;
 
-    var parser = try StreamedParser.init(allocator, template_text);
+    var parser = try StreamedParser.init(allocator, template_text, .{});
     defer parser.deinit();
 
     var first_block = try testParseTree(&parser);
@@ -709,7 +710,7 @@ test "Scan standAlone tags" {
 
     const allocator = testing.allocator;
 
-    var parser = try StreamedParser.init(allocator, template_text);
+    var parser = try StreamedParser.init(allocator, template_text, .{});
     defer parser.deinit();
 
     var first_block = try testParseTree(&parser);
@@ -752,7 +753,7 @@ test "Scan delimiters Tags" {
 
     const allocator = testing.allocator;
 
-    var parser = try StreamedParser.init(allocator, template_text);
+    var parser = try StreamedParser.init(allocator, template_text, .{});
     defer parser.deinit();
 
     // The parser produces only the minimun amount of tags that can be render at once

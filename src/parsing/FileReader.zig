@@ -8,7 +8,8 @@ const testing = std.testing;
 const OpenError = std.fs.File.OpenError;
 const ReadError = std.fs.File.ReadError;
 const FileError = OpenError || ReadError;
-pub const Errors = Allocator.Error || FileError;
+
+pub const Error = Allocator.Error || FileError;
 
 const RefCounter = @import("../mem.zig").RefCounter;
 const File = std.fs.File;
@@ -24,7 +25,7 @@ file: File,
 eof: bool = false,
 read_buffer_size: usize,
 
-pub fn initFromPath(allocator: Allocator, absolute_path: []const u8, read_buffer_size: usize) Errors!*Self {
+pub fn initFromPath(allocator: Allocator, absolute_path: []const u8, read_buffer_size: usize) Error!*Self {
     var file = try std.fs.openFileAbsolute(absolute_path, .{});
     return Self.init(allocator, file, read_buffer_size);
 }
@@ -39,7 +40,7 @@ pub fn init(allocator: Allocator, file: File, read_buffer_size: usize) Allocator
     return self;
 }
 
-pub fn read(self: *Self, allocator: Allocator, prepend: []const u8) Errors!Result {
+pub fn read(self: *Self, allocator: Allocator, prepend: []const u8) Error!Result {
     var buffer = try allocator.alloc(u8, self.read_buffer_size + prepend.len);
     errdefer allocator.free(buffer);
 

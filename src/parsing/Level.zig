@@ -4,7 +4,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const mustache = @import("../mustache.zig");
 const Delimiters = mustache.template.Delimiters;
-const ParseErrors = mustache.template.ParseErrors;
+const ParseError = mustache.template.ParseError;
 
 const parsing = @import("parsing.zig");
 const BlockType = parsing.BlockType;
@@ -56,9 +56,9 @@ pub fn nextLevel(self: *Self, arena: Allocator) Allocator.Error!*Self {
     return next_level;
 }
 
-pub fn endLevel(self: *Self, arena: Allocator) ParseErrors!*Self {
-    var prev_level = self.parent orelse return ParseErrors.UnexpectedCloseSection;
-    var parent_node = prev_level.current_node orelse return ParseErrors.UnexpectedCloseSection;
+pub fn endLevel(self: *Self, arena: Allocator) ParseError!*Self {
+    var prev_level = self.parent orelse return ParseError.UnexpectedCloseSection;
+    var parent_node = prev_level.current_node orelse return ParseError.UnexpectedCloseSection;
 
     parent_node.children = self.list.toOwnedSlice(arena);
 
