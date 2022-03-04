@@ -15,8 +15,6 @@ const Block = mustache.template.Block;
 const LastError = mustache.template.LastError;
 
 const ParseErrors = mustache.template.ParseErrors;
-const ProcessingErrors = Allocator.Error || std.fs.File.ReadError || std.fs.File.OpenError;
-const Errors = ParseErrors || ProcessingErrors;
 
 const mem = @import("../mem.zig");
 const EpochArena = mem.EpochArena;
@@ -135,11 +133,21 @@ pub const ParserOptions = struct {
     streamed: bool,
 };
 
-pub fn Parser(comptime options: ParserOptions) type {
+pub fn Parser(comptime parser_options: ParserOptions) type {
     return struct {
         const State = enum {
             WaitingStaringTag,
             WaitingEndingTag,
+        };
+
+        const ProcessingErrors = Allocator.Error || if (options.source == .File) std.fs.File.ReadError || std.fs.File.OpenError else error{};
+
+        pub const Errors = (ParseErrors || ProcessingErrors);
+
+        pub const options = struct {
+            pub const source = parser_options.source;
+            pub const streamed = parser_options.streamed;
+            pub const owns_string = parser_options.owns_string;
         };
 
         pub const ParseResult = union(enum) {
@@ -181,7 +189,7 @@ pub fn Parser(comptime options: ParserOptions) type {
             var arena = Arena.init(gpa);
             errdefer arena.deinit();
 
-            var root = try Level.init(arena.allocator(), options.delimiters);
+            var root = try Level.init(arena.allocator(), parser_options.delimiters);
 
             return Self{
                 .gpa = gpa,
@@ -430,7 +438,7 @@ pub fn Parser(comptime options: ParserOptions) type {
             }
         }
 
-        fn parseIdentificator(self: *Self, text_block: *const TextBlock) Errors![]const u8 {
+        fn parseIdentificator(self: *Self, text_block: *const TextBlock) ParseErrors![]const u8 {
             if (text_block.tail) |tail| {
                 var tokenizer = std.mem.tokenize(u8, tail, " \t");
                 if (tokenizer.next()) |token| {

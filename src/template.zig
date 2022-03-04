@@ -20,7 +20,7 @@ pub const ParseErrors = error{
 };
 
 pub const LastError = struct {
-    error_code: anyerror,
+    error_code: ParseErrors,
     row: usize = 0,
     col: usize = 0,
     detail: ?[]const u8 = null,
@@ -238,10 +238,48 @@ pub const TemplateOptions = struct {
 };
 
 pub fn Template(comptime options: TemplateOptions) type {
+    const FileCachedParser = parsing.Parser(.{
+        .delimiters = options.delimiters,
+        .source = .File,
+        .owns_string = options.owns_string,
+        .streamed = false,
+    });
+
+    const StringCachedParser = parsing.Parser(.{
+        .delimiters = options.delimiters,
+        .source = .String,
+        .owns_string = options.owns_string,
+        .streamed = false,
+    });
+
+    const StringStreamedParser = parsing.Parser(.{
+        .delimiters = options.delimiters,
+        .source = .String,
+        .owns_string = options.owns_string,
+        .streamed = true,
+    });
+
+    const FileStreamedParser = parsing.Parser(.{
+        .delimiters = options.delimiters,
+        .source = .File,
+        .owns_string = options.owns_string,
+        .streamed = true,
+    });
+
     return struct {
         const Self = @This();
 
         const template_options = options;
+
+        const Collector = struct {
+            pub const Error = error {};
+
+            elements: []Element = undefined,
+
+            pub fn render(ctx: *@This(), elements: []Element) void {
+                ctx.elements = elements;
+            }
+        };        
 
         allocator: Allocator,
         result: union(enum) {
@@ -268,65 +306,58 @@ pub fn Template(comptime options: TemplateOptions) type {
             return self;
         }
 
-        fn load(self: *Self, template_text: []const u8) !void {
-            const Parser = parsing.Parser(.{
-                .delimiters = options.delimiters,
-                .source = .String,
-                .owns_string = options.owns_string,
-                .streamed = false,
-            });
-
-            var parser = try Parser.init(self.allocator, template_text);
+        fn load(self: *Self, template_text: []const u8) StringCachedParser.Errors!void {
+            var parser = try StringCachedParser.init(self.allocator, template_text);
             defer parser.deinit();
-
-            try self.collectElements(&parser);
-        }
-
-        fn loadFromFile(self: *Self, absolute_path: []const u8) !void {
-            const Parser = parsing.Parser(.{
-                .delimiters = options.delimiters,
-                .source = .File,
-                .owns_string = options.owns_string,
-                .streamed = false,
-            });
-
-            var parser = try Parser.init(self.allocator, absolute_path);
-            defer parser.deinit();
-
-            try self.collectElements(&parser);
-        }
-
-        fn collectElements(self: *Self, parser: anytype) !void {
-            const Collector = struct {
-                elements: []Element = undefined,
-
-                pub fn collect(ctx: *@This(), elements: []Element) anyerror!void {
-                    ctx.elements = elements;
-                }
-            };
 
             var collector = Collector{};
-            try self.produceElements(parser, &collector, Collector.collect);
+            try self.produceElements(parser, &collector);
 
             self.result = .{
                 .Elements = collector.elements,
             };
         }
 
-        fn renderFromFile(self: *Self, absolute_path: []const u8, render: anytype, action: fn (ctx: @TypeOf(render), elements: []Element) anyerror!void) !void {
-            const Parser = parsing.Parser(.{
-                .delimiters = options.delimiters,
-                .source = .File,
-                .owns_string = options.owns_string,
-                .streamed = true,
-            });
-
-            var parser = try Parser.init(self.allocator, absolute_path);
+        fn loadFromFile(self: *Self, absolute_path: []const u8) FileCachedParser.Errors!void {
+            var parser = try FileCachedParser.init(self.allocator, absolute_path);
             defer parser.deinit();
-            try self.produceElements(&parser, render, action);
+
+            var collector = Collector{};
+            try self.produceElements(parser, &collector);
+
+            self.result = .{
+                .Elements = collector.elements,
+            };
         }
 
-        fn produceElements(self: *Self, parser: anytype, context: anytype, action: fn (ctx: @TypeOf(context), elements: []Element) anyerror!void) !void {
+        pub fn render(self: *Self, template_text: []const u8, out_render: anytype) StringStreamedParser.Errors!void {
+            var parser = try StringStreamedParser.init(self.allocator, template_text);
+            defer parser.deinit();
+            try self.produceElements(&parser, out_render);
+        }
+
+        pub fn renderFromFile(self: *Self, absolute_path: []const u8, out_render: anytype) FileStreamedParser.Errors!void {
+            var parser = try FileStreamedParser.init(self.allocator, absolute_path);
+
+            defer parser.deinit();
+            try self.produceElements(&parser, out_render);
+        }
+
+        fn produceElements(
+            self: *Self,
+            parser: anytype,
+            out_render: anytype,
+        ) errors: {
+            const parserInfo = @typeInfo(@TypeOf(parser));
+            const renderInfo = @typeInfo(@TypeOf(out_render));
+
+            if (parserInfo != .Pointer or parserInfo.Pointer.size != .One) @compileError("expected a reference to a render");
+            if (renderInfo != .Pointer or renderInfo.Pointer.size != .One) @compileError("expected a reference to a render");
+
+            break :errors parserInfo.Pointer.child.Errors || renderInfo.Pointer.child.Error;
+        }!void {
+            const TParser = @typeInfo(@TypeOf(parser)).Pointer.child;
+
             while (true) {
                 var parse_result = try parser.parse();
 
@@ -343,7 +374,9 @@ pub fn Template(comptime options: TemplateOptions) type {
                     },
                     .Nodes => |nodes| {
                         const elements = try parser.createElements(null, nodes);
-                        try action(context, elements);
+                        defer if (TParser.options.streamed) Element.freeMany(self.allocator, options.owns_string, elements);
+                        const ret = out_render.render(elements);
+                        if (std.meta.isError(ret)) try ret;
                     },
                     .Done => break,
                 }
@@ -2248,14 +2281,14 @@ const tests = struct {
 
         // A dummy render, just count the produced elements
         const DummyRender = struct {
-            count: usize = 0,
-            allocator: Allocator,
+            pub const Error = error {};
 
-            pub fn action(self: *@This(), elements: []Element) anyerror!void {
+            count: usize = 0,
+
+            pub fn render(self: *@This(), elements: []Element) void {
                 self.count += elements.len;
 
                 checkStrings(elements);
-                Element.freeMany(self.allocator, RefStringsTemplate.template_options.owns_string, elements);
             }
 
             // Check if all strings are valid
@@ -2295,8 +2328,8 @@ const tests = struct {
             }
         };
 
-        var dummy_render = DummyRender{ .allocator = template.allocator };
-        try template.renderFromFile(test_10MB_file, &dummy_render, DummyRender.action);
+        var dummy_render = DummyRender{};
+        try template.renderFromFile(test_10MB_file, &dummy_render);
 
         try testing.expectEqual(@as(usize, 3 * REPEAT), dummy_render.count);
     }

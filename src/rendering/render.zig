@@ -7,20 +7,41 @@ const mustache = @import("../mustache.zig");
 const Element = mustache.template.Element;
 const Template = mustache.template.Template;
 const Interpolation = mustache.template.Interpolation;
+const ParserErrors = mustache.template.ParseErrors;
 
 const context = @import("context.zig");
 const Context = context.Context;
 
-pub fn renderAlloc(allocator: Allocator, data: anytype, elements: []const Element) Allocator.Error![]const u8 {
+pub fn renderAllocCached(allocator: Allocator, data: anytype, elements: []const Element) Allocator.Error![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
     errdefer builder.deinit();
 
-    var writer = builder.writer();
-
-    var render = getRender(allocator, writer, data);
-    try render.render(elements);
+    try renderCached(allocator, data, elements, builder.writer());
 
     return builder.toOwnedSlice();
+}
+
+pub fn renderCached(allocator: Allocator, data: anytype, elements: []const Element, out_writer: anytype) (Allocator.Error || @TypeOf(out_writer).Error)!void {
+    var render = getRender(allocator, out_writer, data);
+    try render.render(elements);
+}
+
+pub fn renderAllocFromString(allocator: Allocator, data: anytype, template_text: []const u8) (Allocator.Error || ParserErrors)![]const u8 {
+    var builder = std.ArrayList(u8).init(allocator);
+    errdefer builder.deinit();
+
+    try renderFromString(allocator, data, template_text, builder.writer());
+
+    return builder.toOwnedSlice();
+}
+
+pub fn renderFromString(allocator: Allocator, data: anytype, template_text: []const u8, out_writer: anytype) (Allocator.Error || ParserErrors || @TypeOf(out_writer).Error)!void {
+    var template = Template(.{ .owns_string = false }){
+        .allocator = allocator,
+    };
+
+    var render = getRender(allocator, out_writer, data);
+    try template.render(template_text, &render);
 }
 
 pub fn getRender(allocator: Allocator, out_writer: anytype, data: anytype) Render(@TypeOf(out_writer), @TypeOf(data)) {
@@ -36,6 +57,8 @@ fn Render(comptime Writer: type, comptime Data: type) type {
         const Self = @This();
         const ContextInterface = Context(Writer);
 
+        pub const Error = Allocator.Error || Writer.Error;
+
         const Stack = struct {
             parent: ?*Stack,
             ctx: Context(Writer),
@@ -45,7 +68,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
         writer: Writer,
         data: Data,
 
-        pub fn render(self: *Self, elements: []const Element) (Allocator.Error || Writer.Error)!void {
+        pub fn render(self: *Self, elements: []const Element) Error!void {
             var stack = Stack{
                 .parent = null,
                 .ctx = try context.getContext(self.allocator, self.writer, self.data),
@@ -55,7 +78,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             try self.renderLevel(&stack, elements);
         }
 
-        fn renderLevel(self: *Self, stack: *Stack, children: ?[]const Element) (Allocator.Error || Writer.Error)!void {
+        fn renderLevel(self: *Self, stack: *Stack, children: ?[]const Element) Error!void {
             if (children) |elements| {
                 for (elements) |element| {
                     switch (element) {
@@ -105,6 +128,33 @@ test {
 const tests = struct {
     test {
         _ = interpolation;
+        _ = sections;
+    }
+
+    fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
+        const allocator = testing.allocator;
+
+        {
+            // Cached template render
+            var cached_template = try Template(.{}).init(allocator, template_text);
+            defer cached_template.deinit();
+
+            try testing.expect(cached_template.result == .Elements);
+            const cached_elements = cached_template.result.Elements;
+
+            var result = try renderAllocCached(allocator, data, cached_elements);
+            defer allocator.free(result);
+
+            try testing.expectEqualStrings(expected, result);
+        }
+
+        {
+            // Streamed template render
+            var result = try renderAllocFromString(allocator, data, template_text);
+            defer allocator.free(result);
+
+            try testing.expectEqualStrings(expected, result);
+        }
     }
 
     /// Those tests are a verbatim copy from
@@ -114,173 +164,85 @@ const tests = struct {
         // Mustache-free templates should render as-is.
         test "No Interpolation" {
             const template_text = "Hello from {Mustache}!";
-
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
-            var result = try renderAlloc(allocator, {}, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("Hello from {Mustache}!", result);
+            var data = .{};
+            try expectRender(template_text, data, "Hello from {Mustache}!");
         }
 
         // Unadorned tags should interpolate content into the template.
         test "Basic Interpolation" {
             const template_text = "Hello, {{subject}}!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .subject = "world",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("Hello, world!", result);
+            try expectRender(template_text, data, "Hello, world!");
         }
 
         // Basic interpolation should be HTML escaped.
         test "HTML Escaping" {
             const template_text = "These characters should be HTML escaped: {{forbidden}}";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .forbidden = "& \" < >",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("These characters should be HTML escaped: &amp; &quot; &lt; &gt;", result);
+            try expectRender(template_text, data, "These characters should be HTML escaped: &amp; &quot; &lt; &gt;");
         }
 
         // Triple mustaches should interpolate without HTML escaping.
         test "Triple Mustache" {
             const template_text = "These characters should not be HTML escaped: {{{forbidden}}}";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .forbidden = "& \" < >",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("These characters should not be HTML escaped: & \" < >", result);
+            try expectRender(template_text, data, "These characters should not be HTML escaped: & \" < >");
         }
 
         // Ampersand should interpolate without HTML escaping.
         test "Ampersand" {
             const template_text = "These characters should not be HTML escaped: {{&forbidden}}";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .forbidden = "& \" < >",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("These characters should not be HTML escaped: & \" < >", result);
+            try expectRender(template_text, data, "These characters should not be HTML escaped: & \" < >");
         }
 
         // Integers should interpolate seamlessly.
         test "Basic Integer Interpolation" {
             const template_text = "{{mph}} miles an hour!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .mph = 85,
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("85 miles an hour!", result);
+            try expectRender(template_text, data, "85 miles an hour!");
         }
 
         // Integers should interpolate seamlessly.
         test "Triple Mustache Integer Interpolation" {
             const template_text = "{{{mph}}} miles an hour!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .mph = 85,
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("85 miles an hour!", result);
+            try expectRender(template_text, data, "85 miles an hour!");
         }
 
         // Integers should interpolate seamlessly.
         test "Ampersand Integer Interpolation" {
             const template_text = "{{&mph}} miles an hour!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .mph = 85,
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("85 miles an hour!", result);
+            try expectRender(template_text, data, "85 miles an hour!");
         }
 
         // Decimals should interpolate seamlessly with proper significance.
@@ -288,14 +250,6 @@ const tests = struct {
             if (true) return error.SkipZigTest;
 
             const template_text = "{{power}} jiggawatts!";
-
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
 
             {
                 // f32
@@ -308,10 +262,7 @@ const tests = struct {
                     .power = 1.210,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("1.21 jiggawatts!", result);
+                try expectRender(template_text, data, "1.21 jiggawatts!");
             }
 
             {
@@ -325,10 +276,7 @@ const tests = struct {
                     .power = 1.210,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("1.21 jiggawatts!", result);
+                try expectRender(template_text, data, "1.21 jiggawatts!");
             }
 
             {
@@ -337,10 +285,7 @@ const tests = struct {
                     .power = 1.210,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("1.21 jiggawatts!", result);
+                try expectRender(template_text, data, "1.21 jiggawatts!");
             }
 
             {
@@ -349,10 +294,7 @@ const tests = struct {
                     .power = -1.210,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("-1.21 jiggawatts!", result);
+                try expectRender(template_text, data, "-1.21 jiggawatts!");
             }
         }
 
@@ -360,24 +302,13 @@ const tests = struct {
         test "Triple Mustache Decimal Interpolation" {
             const template_text = "{{{power}}} jiggawatts!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             {
                 // Comptime float
                 var data = .{
                     .power = 1.210,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("1.21 jiggawatts!", result);
+                try expectRender(template_text, data, "1.21 jiggawatts!");
             }
 
             {
@@ -386,10 +317,7 @@ const tests = struct {
                     .power = -1.210,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("-1.21 jiggawatts!", result);
+                try expectRender(template_text, data, "-1.21 jiggawatts!");
             }
         }
 
@@ -397,24 +325,13 @@ const tests = struct {
         test "Ampersand Decimal Interpolation" {
             const template_text = "{{&power}} jiggawatts!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             {
                 // Comptime float
                 var data = .{
                     .power = 1.210,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("1.21 jiggawatts!", result);
+                try expectRender(template_text, data, "1.21 jiggawatts!");
             }
         }
 
@@ -422,14 +339,6 @@ const tests = struct {
         test "Basic Null Interpolation" {
             const template_text = "I ({{cannot}}) be seen!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             {
                 // Optional null
 
@@ -441,10 +350,7 @@ const tests = struct {
                     .cannot = null,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("I () be seen!", result);
+                try expectRender(template_text, data, "I () be seen!");
             }
 
             {
@@ -454,10 +360,7 @@ const tests = struct {
                     .cannot = null,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("I () be seen!", result);
+                try expectRender(template_text, data, "I () be seen!");
             }
         }
 
@@ -465,14 +368,6 @@ const tests = struct {
         test "Triple Mustache Null Interpolation" {
             const template_text = "I ({{{cannot}}}) be seen!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             {
                 // Optional null
 
@@ -484,10 +379,7 @@ const tests = struct {
                     .cannot = null,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("I () be seen!", result);
+                try expectRender(template_text, data, "I () be seen!");
             }
 
             {
@@ -497,10 +389,7 @@ const tests = struct {
                     .cannot = null,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("I () be seen!", result);
+                try expectRender(template_text, data, "I () be seen!");
             }
         }
 
@@ -508,14 +397,6 @@ const tests = struct {
         test "Ampersand Null Interpolation" {
             const template_text = "I ({{&cannot}}) be seen!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             {
                 // Optional null
 
@@ -527,10 +408,7 @@ const tests = struct {
                     .cannot = null,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("I () be seen!", result);
+                try expectRender(template_text, data, "I () be seen!");
             }
 
             {
@@ -540,10 +418,7 @@ const tests = struct {
                     .cannot = null,
                 };
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("I () be seen!", result);
+                try expectRender(template_text, data, "I () be seen!");
             }
         }
 
@@ -551,347 +426,171 @@ const tests = struct {
         test "Basic Context Miss Interpolation" {
             const template_text = "I ({{cannot}}) be seen!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{};
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("I () be seen!", result);
+            try expectRender(template_text, data, "I () be seen!");
         }
 
         // Failed context lookups should default to empty strings.
         test "Triple Mustache Context Miss Interpolation" {
             const template_text = "I ({{{cannot}}}) be seen!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{};
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("I () be seen!", result);
+            try expectRender(template_text, data, "I () be seen!");
         }
 
         // Failed context lookups should default to empty strings
         test "Ampersand Context Miss Interpolation" {
             const template_text = "I ({{&cannot}}) be seen!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{};
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("I () be seen!", result);
+            try expectRender(template_text, data, "I () be seen!");
         }
 
         // Dotted names should be considered a form of shorthand for sections.
         test "Dotted Names - Basic Interpolation" {
             const template_text = "'{{person.name}}' == '{{#person}}{{name}}{{/person}}'";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .person = .{
                     .name = "Joe",
                 },
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("'Joe' == 'Joe'", result);
+            try expectRender(template_text, data, "'Joe' == 'Joe'");
         }
 
         // Dotted names should be considered a form of shorthand for sections.
         test "Dotted Names - Triple Mustache Interpolation" {
             const template_text = "'{{{person.name}}}' == '{{#person}}{{{name}}}{{/person}}'";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .person = .{
                     .name = "Joe",
                 },
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("'Joe' == 'Joe'", result);
+            try expectRender(template_text, data, "'Joe' == 'Joe'");
         }
 
         // Dotted names should be considered a form of shorthand for sections.
         test "Dotted Names - Ampersand Interpolation" {
             const template_text = "'{{&person.name}}' == '{{#person}}{{&name}}{{/person}}'";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .person = .{
                     .name = "Joe",
                 },
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("'Joe' == 'Joe'", result);
+            try expectRender(template_text, data, "'Joe' == 'Joe'");
         }
 
         // Dotted names should be functional to any level of nesting.
         test "Dotted Names - Arbitrary Depth" {
             const template_text = "'{{a.b.c.d.e.name}}' == 'Phil'";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .a = .{ .b = .{ .c = .{ .d = .{ .e = .{ .name = "Phil" } } } } },
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("'Phil' == 'Phil'", result);
+            try expectRender(template_text, data, "'Phil' == 'Phil'");
         }
 
         // Any falsey value prior to the last part of the name should yield ''
         test "Dotted Names - Broken Chains" {
             const template_text = "'{{a.b.c}}' == ''";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .a = .{},
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("'' == ''", result);
+            try expectRender(template_text, data, "'' == ''");
         }
 
         // Each part of a dotted name should resolve only against its parent.
         test "Dotted Names - Broken Chain Resolution" {
             const template_text = "'{{a.b.c.name}}' == ''";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .a = .{ .b = .{} },
                 .c = .{ .name = "Jim" },
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("'' == ''", result);
+            try expectRender(template_text, data, "'' == ''");
         }
 
         // The first part of a dotted name should resolve as any other name.
         test "Dotted Names - Initial Resolution" {
             const template_text = "'{{#a}}{{b.c.d.e.name}}{{/a}}' == 'Phil'";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .a = .{ .b = .{ .c = .{ .d = .{ .e = .{ .name = "Phil" } } } } },
                 .b = .{ .c = .{ .d = .{ .e = .{ .name = "Wrong" } } } },
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("'Phil' == 'Phil'", result);
+            try expectRender(template_text, data, "'Phil' == 'Phil'");
         }
 
         // Dotted names should be resolved against former resolutions.
         test "Dotted Names - Context Precedence" {
             const template_text = "{{#a}}{{b.c}}{{/a}}";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = .{
                 .a = .{ .b = .{} },
                 .b = .{ .c = "ERROR" },
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("", result);
+            try expectRender(template_text, data, "");
         }
 
         // Unadorned tags should interpolate content into the template.
         test "Implicit Iterators - Basic Interpolation" {
             const template_text = "Hello, {{.}}!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = "world";
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("Hello, world!", result);
+            try expectRender(template_text, data, "Hello, world!");
         }
 
         // Basic interpolation should be HTML escaped..
         test "Implicit Iterators - HTML Escaping" {
             const template_text = "These characters should be HTML escaped: {{.}}";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = "& \" < >";
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("These characters should be HTML escaped: &amp; &quot; &lt; &gt;", result);
+            try expectRender(template_text, data, "These characters should be HTML escaped: &amp; &quot; &lt; &gt;");
         }
 
         // Triple mustaches should interpolate without HTML escaping.
         test "Implicit Iterators - Triple Mustache" {
             const template_text = "These characters should not be HTML escaped: {{{.}}}";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = "& \" < >";
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("These characters should not be HTML escaped: & \" < >", result);
+            try expectRender(template_text, data, "These characters should not be HTML escaped: & \" < >");
         }
 
         // Ampersand should interpolate without HTML escaping.
         test "Implicit Iterators - Ampersand" {
             const template_text = "These characters should not be HTML escaped: {{&.}}";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             var data = "& \" < >";
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("These characters should not be HTML escaped: & \" < >", result);
+            try expectRender(template_text, data, "These characters should not be HTML escaped: & \" < >");
         }
 
         // Integers should interpolate seamlessly.
         test "Implicit Iterators - Basic Integer Interpolation" {
             const template_text = "{{.}} miles an hour!";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             {
                 // runtime int
                 const data: i32 = 85;
 
-                var result = try renderAlloc(allocator, data, elements);
-                defer allocator.free(result);
-
-                try testing.expectEqualStrings("85 miles an hour!", result);
+                try expectRender(template_text, data, "85 miles an hour!");
             }
         }
 
@@ -899,198 +598,107 @@ const tests = struct {
         test "Interpolation - Surrounding Whitespace" {
             const template_text = "| {{string}} |";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("| --- |", result);
+            try expectRender(template_text, data, "| --- |");
         }
 
         // Interpolation should not alter surrounding whitespace.
         test "Triple Mustache - Surrounding Whitespace" {
             const template_text = "| {{{string}}} |";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("| --- |", result);
+            try expectRender(template_text, data, "| --- |");
         }
 
         // Interpolation should not alter surrounding whitespace.
         test "Ampersand - Surrounding Whitespace" {
             const template_text = "| {{&string}} |";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("| --- |", result);
+            try expectRender(template_text, data, "| --- |");
         }
 
         // Standalone interpolation should not alter surrounding whitespace.
         test "Interpolation - Standalone" {
             const template_text = "  {{string}}\n";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("  ---\n", result);
+            try expectRender(template_text, data, "  ---\n");
         }
 
         // Standalone interpolation should not alter surrounding whitespace.
         test "Triple Mustache - Standalone" {
             const template_text = "  {{{string}}}\n";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("  ---\n", result);
+            try expectRender(template_text, data, "  ---\n");
         }
 
         // Standalone interpolation should not alter surrounding whitespace.
         test "Ampersand - Standalone" {
             const template_text = "  {{&string}}\n";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("  ---\n", result);
+            try expectRender(template_text, data, "  ---\n");
         }
 
         // Superfluous in-tag whitespace should be ignored.
         test "Interpolation With Padding" {
             const template_text = "|{{ string }}|";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("|---|", result);
+            try expectRender(template_text, data, "|---|");
         }
 
         // Superfluous in-tag whitespace should be ignored.
         test "Triple Mustache With Padding" {
             const template_text = "|{{{ string }}}|";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("|---|", result);
+            try expectRender(template_text, data, "|---|");
         }
 
         // Superfluous in-tag whitespace should be ignored.
         test "Ampersand With Padding" {
             const template_text = "|{{& string }}|";
 
-            const allocator = testing.allocator;
-
-            var template = try Template(.{}).init(allocator, template_text);
-            defer template.deinit();
-
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
-
             const data = .{
                 .string = "---",
             };
 
-            var result = try renderAlloc(allocator, data, elements);
-            defer allocator.free(result);
-
-            try testing.expectEqualStrings("|---|", result);
+            try expectRender(template_text, data, "|---|");
         }
+    };
+
+    /// Those tests are a verbatim copy from
+    ///https://github.com/mustache/spec/blob/master/specs/sections.yml
+    const sections = struct {
+
+        // Truthy sections should have their contents rendered.
+        test "Truthy" {}
     };
 };
