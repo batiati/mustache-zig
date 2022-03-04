@@ -272,14 +272,14 @@ pub fn Template(comptime options: TemplateOptions) type {
         const template_options = options;
 
         const Collector = struct {
-            pub const Error = error {};
+            pub const Error = Allocator.Error;
 
             elements: []Element = undefined,
 
-            pub fn render(ctx: *@This(), elements: []Element) void {
+            pub fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
                 ctx.elements = elements;
             }
-        };        
+        };
 
         allocator: Allocator,
         result: union(enum) {
@@ -311,7 +311,7 @@ pub fn Template(comptime options: TemplateOptions) type {
             defer parser.deinit();
 
             var collector = Collector{};
-            try self.produceElements(parser, &collector);
+            try self.produceElements(&parser, &collector);
 
             self.result = .{
                 .Elements = collector.elements,
@@ -323,23 +323,24 @@ pub fn Template(comptime options: TemplateOptions) type {
             defer parser.deinit();
 
             var collector = Collector{};
-            try self.produceElements(parser, &collector);
+            try self.produceElements(&parser, &collector);
 
             self.result = .{
                 .Elements = collector.elements,
             };
         }
 
-        pub fn render(self: *Self, template_text: []const u8, out_render: anytype) StringStreamedParser.Errors!void {
+        pub fn collectElements(self: *Self, template_text: []const u8, out_render: anytype) StringStreamedParser.Errors!void {
             var parser = try StringStreamedParser.init(self.allocator, template_text);
             defer parser.deinit();
+
             try self.produceElements(&parser, out_render);
         }
 
-        pub fn renderFromFile(self: *Self, absolute_path: []const u8, out_render: anytype) FileStreamedParser.Errors!void {
+        pub fn collectElementsFromFile(self: *Self, absolute_path: []const u8, out_render: anytype) FileStreamedParser.Errors!void {
             var parser = try FileStreamedParser.init(self.allocator, absolute_path);
-
             defer parser.deinit();
+
             try self.produceElements(&parser, out_render);
         }
 
@@ -351,8 +352,8 @@ pub fn Template(comptime options: TemplateOptions) type {
             const parserInfo = @typeInfo(@TypeOf(parser));
             const renderInfo = @typeInfo(@TypeOf(out_render));
 
-            if (parserInfo != .Pointer or parserInfo.Pointer.size != .One) @compileError("expected a reference to a render");
-            if (renderInfo != .Pointer or renderInfo.Pointer.size != .One) @compileError("expected a reference to a render");
+            if (parserInfo != .Pointer or parserInfo.Pointer.size != .One) @compileError("expected a reference to a parser, found " ++ @typeName(@TypeOf(parser)));
+            if (renderInfo != .Pointer or renderInfo.Pointer.size != .One) @compileError("expected a reference to a render, found " ++ @typeName(@TypeOf(renderInfo)));
 
             break :errors parserInfo.Pointer.child.Errors || renderInfo.Pointer.child.Error;
         }!void {
@@ -375,8 +376,7 @@ pub fn Template(comptime options: TemplateOptions) type {
                     .Nodes => |nodes| {
                         const elements = try parser.createElements(null, nodes);
                         defer if (TParser.options.streamed) Element.freeMany(self.allocator, options.owns_string, elements);
-                        const ret = out_render.render(elements);
-                        if (std.meta.isError(ret)) try ret;
+                        try out_render.render(elements);
                     },
                     .Done => break,
                 }
@@ -2281,11 +2281,11 @@ const tests = struct {
 
         // A dummy render, just count the produced elements
         const DummyRender = struct {
-            pub const Error = error {};
+            pub const Error = Allocator.Error;
 
             count: usize = 0,
 
-            pub fn render(self: *@This(), elements: []Element) void {
+            pub fn render(self: *@This(), elements: []Element) Allocator.Error!void {
                 self.count += elements.len;
 
                 checkStrings(elements);
@@ -2329,7 +2329,7 @@ const tests = struct {
         };
 
         var dummy_render = DummyRender{};
-        try template.renderFromFile(test_10MB_file, &dummy_render);
+        try template.collectElementsFromFile(test_10MB_file, &dummy_render);
 
         try testing.expectEqual(@as(usize, 3 * REPEAT), dummy_render.count);
     }

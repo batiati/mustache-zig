@@ -41,7 +41,7 @@ pub fn renderFromString(allocator: Allocator, data: anytype, template_text: []co
     };
 
     var render = getRender(allocator, out_writer, data);
-    try template.render(template_text, &render);
+    try template.collectElements(template_text, &render);
 }
 
 pub fn getRender(allocator: Allocator, out_writer: anytype, data: anytype) Render(@TypeOf(out_writer), @TypeOf(data)) {
