@@ -173,15 +173,14 @@ const Comptime = struct {
             } else if (Data == comptime_float) {
                 var runtime_value: f64 = data;
                 return try seek(TReturn, action, param, out_writer, runtime_value, path_iterator, index);
-            } else if (Data == void or Data == @TypeOf(null)) {
+            } else if (Data == @TypeOf(null)) {
+                var runtime_value: ?u0 = null;
+                return try seek(TReturn, action, param, out_writer, runtime_value, path_iterator, index);
+            } else if (Data == void) {
                 return null;
             } else {
                 if (index) |current_index| {
-                    if (iterateAt(data, current_index)) |data_at| {
-                        return try action(param, out_writer, data_at);
-                    } else {
-                        return null;
-                    }
+                    return try iterateAt(TReturn, action, param, out_writer, data, current_index);
                 } else {
                     return try action(param, out_writer, data);
                 }
@@ -203,7 +202,9 @@ const Comptime = struct {
         const typeInfo = @typeInfo(TValue);
 
         switch (typeInfo) {
-            .Struct => return try seekField(TReturn, TValue, action, param, out_writer, data, path, path_iterator, index),
+            .Struct => {
+                return try seekField(TReturn, TValue, action, param, out_writer, data, path, path_iterator, index);
+            },
             .Pointer => |info| switch (info.size) {
                 .One => return try recursiveSeek(TReturn, info.child, action, param, out_writer, data, path, path_iterator, index),
                 .Slice => {
@@ -249,6 +250,46 @@ const Comptime = struct {
         return null;
     }
 
+    inline fn iterateAt(
+        comptime TReturn: type,
+        action: anytype,
+        param: anytype,
+        out_writer: anytype,
+        data: anytype,
+        index: usize,
+    ) TReturn {
+        switch (@typeInfo(@TypeOf(data))) {
+            .Struct => |info| {
+                if (info.is_tuple) {
+                    inline for (info.fields) |_, i| {
+                        if (index == i) return try action(param, out_writer, data[i]);
+                    } else {
+                        return null;
+                    }
+                }
+            },
+
+            // Booleans are evaluated on the iterator
+            .Bool => return if (data == true and index == 0) try action(param, out_writer, data) else null,
+
+            .Pointer => |info| switch (info.size) {
+                .Slice => {
+
+                    //Slice of u8 is always string
+                    if (info.child != u8) {
+                        return if (index < data.len) try action(param, out_writer, data[index]) else null;
+                    }
+                },
+                else => {},
+            },
+
+            .Optional => return if (data) |value| try iterateAt(TReturn, action, param, out_writer, value, index) else null,
+            else => {},
+        }
+
+        return if (index == 0) try action(param, out_writer, data) else null;
+    }
+
     inline fn stringify(
         escape: Escape,
         out_writer: anytype,
@@ -262,16 +303,16 @@ const Comptime = struct {
             // what should we print?
             .Struct, .Opaque => {},
 
-            .Bool => try escape_write(out_writer, if (value) "true" else "false", escape),
-            .Int, .ComptimeInt => try std.fmt.formatInt(value, 10, .lower, .{}, out_writer),
-            .Float, .ComptimeFloat => try std.fmt.formatFloatDecimal(value, .{}, out_writer),
-            .Enum => try escape_write(out_writer, @tagName(value), escape),
+            .Bool => return try escape_write(out_writer, if (value) "true" else "false", escape),
+            .Int, .ComptimeInt => return try std.fmt.formatInt(value, 10, .lower, .{}, out_writer),
+            .Float, .ComptimeFloat => return try std.fmt.formatFloatDecimal(value, .{}, out_writer),
+            .Enum => return try escape_write(out_writer, @tagName(value), escape),
 
             .Pointer => |info| switch (info.size) {
-                TypeInfo.Pointer.Size.One => try stringify(escape, out_writer, value.*),
+                TypeInfo.Pointer.Size.One => return try stringify(escape, out_writer, value.*),
                 TypeInfo.Pointer.Size.Slice => {
                     if (info.child == u8) {
-                        try escape_write(out_writer, value, escape);
+                        return try escape_write(out_writer, value, escape);
                     }
                 },
                 TypeInfo.Pointer.Size.Many => @compileError("[*] pointers not supported"),
@@ -279,12 +320,12 @@ const Comptime = struct {
             },
             .Array => |info| {
                 if (info.child == u8) {
-                    try escape_write(out_writer, &value, escape);
+                    return try escape_write(out_writer, &value, escape);
                 }
             },
             .Optional => {
                 if (value) |not_null| {
-                    try stringify(escape, out_writer, not_null);
+                    return try stringify(escape, out_writer, not_null);
                 }
             },
             else => @compileError("Not supported"),
@@ -343,52 +384,291 @@ const Comptime = struct {
         }
     }
 
-    inline fn iterateAt(data: anytype, index: usize) ?IteratorType(@TypeOf(data)) {
-        switch (@typeInfo(@TypeOf(data))) {
+    const tests = struct {
+        const Tuple = std.meta.Tuple(&.{ u8, u32, u64 });
+        const Data = struct {
+            a1: struct {
+                b1: struct {
+                    c1: struct {
+                        d1: u0 = 0,
+                        d2: u0 = 0,
+                        d_slice: []const u0 = &.{ 0, 0, 0 },
+                        d_array: [3]u0 = .{ 0, 0, 0 },
+                        d_tuple: Tuple = Tuple { @as(u8, 0), @as(u32,0), @as(u64, 0) },
+                    } = .{},
+                    c_slice: []const u0 = &.{ 0, 0, 0 },
+                    c_array: [3]u0 = .{ 0, 0, 0 },
+                    c_tuple: Tuple = Tuple { @as(u8, 0), @as(u32,0), @as(u64, 0) },
+                } = .{},
+                b2: u0 = 0,
+                b_slice: []const u0 = &.{ 0, 0, 0 },
+                b_array: [3]u0 = .{ 0, 0, 0 },
+                b_tuple: Tuple = Tuple { @as(u8, 0), @as(u32,0), @as(u64, 0) },
+            } = .{},
+            a2: u0 = 0,
+            a_slice: []const u0 = &.{ 0, 0, 0 },
+            a_array: [3]u0 = .{ 0, 0, 0 },
+            a_tuple: Tuple = Tuple { @as(u8, 0), @as(u32,0), @as(u64, 0) },
+        };
 
-            // Booleans are evaluated on the iterator
-            .Bool => return if (data == true and index == 0) data else null,
-
-            .Pointer => |info| switch (info.size) {
-                .Slice => {
-
-                    //Slice of u8 is always string
-                    if (info.child != u8) {
-                        return if (index < data.len) data[index] else null;
-                    }
-                },
-                else => {},
-            },
-
-            .Optional => return if (data) |value| iterateAt(value, index) else null,
-
-            else => {},
+        fn fooAction(comptime TExpected: type, out_writer: anytype, value: anytype) error{}!bool {
+            _ = out_writer;
+            return TExpected == @TypeOf(value);
         }
 
-        return if (index == 0) data else null;
-    }
+        fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !?bool {
+            var path_iterator = std.mem.tokenize(u8, path, ".");
 
-    fn IteratorType(comptime T: type) type {
-        switch (@typeInfo(T)) {
-            .Pointer => |info| switch (info.size) {
-                .Slice => {
-
-                    //Slice of u8 is always string
-                    if (info.child != u8) {
-                        return info.child;
-                    }
-                },
-                else => {},
-            },
-            .Optional => |info| return IteratorType(info.child),
-            else => {},
+            const TReturn = error{}!?bool;
+            return try seek(TReturn, fooAction, TExpected, std.io.null_writer, data, &path_iterator, index);
         }
 
-        return T;
-    }
+        fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
+            const value = try fooSeek(TExpected, data, path, null);
+            try testing.expect(value != null);
+            try testing.expect(value.? == true);
+        }
+
+        fn expectNotFound(data: anytype, path: []const u8) !void {
+            const value = try fooSeek(void, data, path, null);
+            try testing.expect(value == null);
+        }
+
+        fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
+            const value = try fooSeek(TExpected, data, path, index);
+            try testing.expect(value != null);
+            try testing.expect(value.? == true);
+        }
+
+        fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
+            const value = try fooSeek(void, data, path, index);
+            try testing.expect(value == null);
+        }                        
+
+        test "Comptime seek - self" {
+            var data = Data{};
+            try expectFound(Data, data, "");
+        }
+
+        test "Comptime seek - dot" {
+            var data = Data{};
+            try expectFound(Data, data, ".");
+        }  
+
+        test "Comptime seek - not found" {
+            var data = Data{};
+            try expectNotFound(data, "wrong");
+        }                
+
+        test "Comptime seek - found" {
+            var data = Data{};
+            try expectFound(@TypeOf(data.a1), data, "a1");
+
+            try expectFound(@TypeOf(data.a2), data, "a2");
+        }                     
+
+        test "Comptime seek - found nested" {
+            var data = Data{};
+            try expectFound(@TypeOf(data.a1.b1), data, "a1.b1");
+            try expectFound(@TypeOf(data.a1.b2), data, "a1.b2");
+            try expectFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1");
+            try expectFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1");
+            try expectFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2");
+        }   
+
+        test "Comptime seek - not found nested" {
+            var data = Data{};
+            try expectNotFound(data, "a1.wong");
+            try expectNotFound(data, "a1.b1.wong");
+            try expectNotFound(data, "a1.b2.wrong");
+            try expectNotFound(data, "a1.b1.c1.wrong");
+            try expectNotFound(data, "a1.b1.c1.d1.wrong");
+            try expectNotFound(data, "a1.b1.c1.d2.wrong");
+        }   
+
+        test "Comptime iter - self" {
+            var data = Data{};
+            try expectIterFound(Data, data, "", 0);
+        }
+
+        test "Comptime iter consumed - self" {
+            var data = Data{};
+            try expectIterNotFound(data, "", 1);
+        }
+
+        test "Comptime iter - dot" {
+            var data = Data{};
+            try expectIterFound(Data, data, ".", 0);
+        }  
+
+        test "Comptime iter consumed - dot" {
+            var data = Data{};
+            try expectIterNotFound(data, ".", 1);
+        }          
+
+        test "Comptime seek - not found" {
+            var data = Data{};
+            try expectIterNotFound(data, "wrong", 0);
+            try expectIterNotFound(data, "wrong", 1);
+        }                
+
+        test "Comptime iter - found" {
+            var data = Data{};
+            try expectIterFound(@TypeOf(data.a1), data, "a1", 0);
+
+            try expectIterFound(@TypeOf(data.a2), data, "a2", 0);
+        } 
+
+        test "Comptime iter consumed - found" {
+            var data = Data{};
+            try expectIterNotFound(data, "a1", 1);
+
+            try expectIterNotFound(data, "a2", 1);
+        }
+
+       test "Comptime iter - found nested" {
+            var data = Data{};
+            try expectIterFound(@TypeOf(data.a1.b1), data, "a1.b1", 0);
+            try expectIterFound(@TypeOf(data.a1.b2), data, "a1.b2", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2", 0);
+        }   
+
+       test "Comptime iter consumed - found nested" {
+            var data = Data{};
+            try expectIterNotFound(data, "a1.b1", 1);
+            try expectIterNotFound(data, "a1.b2", 1);
+            try expectIterNotFound(data, "a1.b1.c1", 1);
+            try expectIterNotFound(data, "a1.b1.c1.d1", 1);
+            try expectIterNotFound(data, "a1.b1.c1.d2", 1);
+        }          
+
+        test "Comptime iter - not found nested" {
+            var data = Data{};
+            try expectIterNotFound(data, "a1.wong", 0);
+            try expectIterNotFound(data, "a1.b1.wong", 0);
+            try expectIterNotFound(data, "a1.b2.wrong", 0);
+            try expectIterNotFound(data, "a1.b1.c1.wrong", 0);
+            try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 0);
+            try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 0);
+
+            try expectIterNotFound(data, "a1.wong", 1);
+            try expectIterNotFound(data, "a1.b1.wong", 1);
+            try expectIterNotFound(data, "a1.b2.wrong", 1);
+            try expectIterNotFound(data, "a1.b1.c1.wrong", 1);
+            try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 1);
+            try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 1);            
+        }    
+
+        test "Comptime iter - slice found" {
+            var data = Data{};
+            try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
+
+            try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
+
+            try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
+
+            try expectIterNotFound(data, "a_slice", 3);
+        } 
+
+        test "Comptime iter - array found" {
+            var data = Data{};
+            try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
+
+            try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
+
+            try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
+
+            try expectIterNotFound(data, "a_array", 3);
+        }       
+        
+        test "Comptime iter - tuple found" {
+            var data = Data{};
+            try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
+
+            try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
+
+            try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
+
+            try expectIterNotFound(data, "a_tuple", 3);
+        }           
+
+
+        test "Comptime iter - nested slice found" {
+            var data = Data{};
+            try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
+            try expectIterFound(@TypeOf(data.a1.b_slice[0]), data, "a1.b_slice", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c_slice[0]), data, "a1.b1.c_slice", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[0]), data, "a1.b1.c1.d_slice", 0);
+
+            try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
+            try expectIterFound(@TypeOf(data.a1.b_slice[1]), data, "a1.b_slice", 1);
+            try expectIterFound(@TypeOf(data.a1.b1.c_slice[1]), data, "a1.b1.c_slice", 1);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[1]), data, "a1.b1.c1.d_slice", 1);
+
+            try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
+            try expectIterFound(@TypeOf(data.a1.b_slice[2]), data, "a1.b_slice", 2);
+            try expectIterFound(@TypeOf(data.a1.b1.c_slice[2]), data, "a1.b1.c_slice", 2);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[2]), data, "a1.b1.c1.d_slice", 2);            
+
+            try expectIterNotFound(data, "a_slice", 3);
+            try expectIterNotFound(data, "a1.b_slice", 3);
+            try expectIterNotFound(data, "a1.b1.c_slice", 3);
+            try expectIterNotFound(data, "a1.b1.c1.d_slice", 3);
+        } 
+
+        test "Comptime iter - nested array found" {
+            var data = Data{};
+            try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
+            try expectIterFound(@TypeOf(data.a1.b_tuple[0]), data, "a1.b_tuple", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c_tuple[0]), data, "a1.b1.c_tuple", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[0]), data, "a1.b1.c1.d_tuple", 0);
+
+            try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
+            try expectIterFound(@TypeOf(data.a1.b_tuple[1]), data, "a1.b_tuple", 1);
+            try expectIterFound(@TypeOf(data.a1.b1.c_tuple[1]), data, "a1.b1.c_tuple", 1);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[1]), data, "a1.b1.c1.d_tuple", 1);
+
+            try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
+            try expectIterFound(@TypeOf(data.a1.b_tuple[2]), data, "a1.b_tuple", 2);
+            try expectIterFound(@TypeOf(data.a1.b1.c_tuple[2]), data, "a1.b1.c_tuple", 2);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[2]), data, "a1.b1.c1.d_tuple", 2);            
+
+            try expectIterNotFound(data, "a_tuple", 3);
+            try expectIterNotFound(data, "a1.b_tuple", 3);
+            try expectIterNotFound(data, "a1.b1.c_tuple", 3);
+            try expectIterNotFound(data, "a1.b1.c1.d_tuple", 3);
+        }       
+        
+        test "Comptime iter - nested tuple found" {
+            var data = Data{};
+            try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
+            try expectIterFound(@TypeOf(data.a1.b_array[0]), data, "a1.b_array", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c_array[0]), data, "a1.b1.c_array", 0);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[0]), data, "a1.b1.c1.d_array", 0);
+
+            try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
+            try expectIterFound(@TypeOf(data.a1.b_array[1]), data, "a1.b_array", 1);
+            try expectIterFound(@TypeOf(data.a1.b1.c_array[1]), data, "a1.b1.c_array", 1);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[1]), data, "a1.b1.c1.d_array", 1);
+
+            try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
+            try expectIterFound(@TypeOf(data.a1.b_array[2]), data, "a1.b_array", 2);
+            try expectIterFound(@TypeOf(data.a1.b1.c_array[2]), data, "a1.b1.c_array", 2);
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[2]), data, "a1.b1.c1.d_array", 2);            
+
+            try expectIterNotFound(data, "a_array", 3);
+            try expectIterNotFound(data, "a1.b_array", 3);
+            try expectIterNotFound(data, "a1.b1.c_array", 3);
+            try expectIterNotFound(data, "a1.b1.c1.d_array", 3);
+        }         
+                                                                             
+    };
 };
 
 test {
+    _ = Comptime.tests;
     _ = struct_tests;
 }
 const testing = std.testing;

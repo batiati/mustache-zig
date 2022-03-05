@@ -699,6 +699,261 @@ const tests = struct {
     const sections = struct {
 
         // Truthy sections should have their contents rendered.
-        test "Truthy" {}
+        test "Truthy" {
+            const template_text = "{{#boolean}}This should be rendered.{{/boolean}}";
+            const expected = "This should be rendered.";
+
+            {
+                var data = .{ .boolean = true };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                const Data = struct { boolean: bool };
+                var data = Data{ .boolean = true };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Falsey sections should have their contents omitted.
+        test "Falsey" {
+            const template_text = "{{#boolean}}This should not be rendered.{{/boolean}}";
+            const expected = "";
+
+            {
+                var data = .{ .boolean = false };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                const Data = struct { boolean: bool };
+                var data = Data{ .boolean = false };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Null is falsey.
+        test "Null is falsey" {
+            const template_text = "{{#null}}This should not be rendered.{{/null}}";
+            const expected = "";
+
+            {
+                var data = .{ .@"null" = null };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                const Data = struct { @"null": ?[]i32 };
+                var data = Data{ .@"null" = null };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Objects and hashes should be pushed onto the context stack.
+        test "Context" {
+            const template_text = "{{#context}}Hi {{name}}.{{/context}}";
+            const expected = "Hi Joe.";
+
+            {
+                var data = .{ .context = .{ .name = "Joe" } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                const Data = struct { context: struct { name: []const u8 } };
+                var data = Data{ .context = .{ .name = "Joe" } };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Names missing in the current context are looked up in the stack.
+        test "Parent contexts" {
+            const template_text = "{{#sec}}{{a}}, {{b}}, {{c.d}}{{/sec}}";
+            const expected = "foo, bar, baz";
+
+            {
+                var data = .{ .a = "foo", .b = "wrong", .sec = .{ .b = "bar" }, .c = .{ .d = "baz" } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                const Data = struct { a: []const u8, b: []const u8, sec: struct { b: []const u8 }, c: struct { d: []const u8 } };
+                var data = Data{ .a = "foo", .b = "wrong", .sec = .{ .b = "bar" }, .c = .{ .d = "baz" } };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Non-false sections have their value at the top of context,
+        // accessible as {{.}} or through the parent context. This gives
+        // a simple way to display content conditionally if a variable exists.
+        test "Variable test" {
+            const template_text = "{{#foo}}{{.}} is {{foo}}{{/foo}}";
+            const expected = "bar is bar";
+
+            {
+                var data = .{ .foo = "bar" };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                const Data = struct { foo: []const u8 };
+                var data = Data{ .foo = "bar" };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // All elements on the context stack should be accessible within lists.
+        test "List Contexts" {
+            const template_text = "{{#tops}}{{#middles}}{{tname.lower}}{{mname}}.{{#bottoms}}{{tname.upper}}{{mname}}{{bname}}.{{/bottoms}}{{/middles}}{{/tops}}";
+            const expected = "a1.A1x.A1y.";
+
+            {
+                // TODO:
+                // All elements must be the same type in a tuple
+                // Rework the iterator to solve that limitation
+                const Bottom = struct {
+                    bname: []const u8,
+                };
+
+                var data = .{
+                    .tops = .{
+                        .{
+                            .tname = .{
+                                .upper = "A",
+                                .lower = "a",
+                            },
+                            .middles = .{
+                                .{
+                                    .mname = "1",
+                                    .bottoms = .{
+                                        Bottom{ .bname = "x" },
+                                        Bottom{ .bname = "y" },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                const Bottom = struct {
+                    bname: []const u8,
+                };
+
+                const Middle = struct {
+                    mname: []const u8,
+                    bottoms: []const Bottom,
+                };
+
+                const Top = struct {
+                    tname: struct {
+                        upper: []const u8,
+                        lower: []const u8,
+                    },
+                    middles: []const Middle,
+                };
+
+                const Data = struct {
+                    tops: []const Top,
+                };
+
+                var data = Data{
+                    .tops = &.{
+                        .{
+                            .tname = .{
+                                .upper = "A",
+                                .lower = "a",
+                            },
+                            .middles = &.{
+                                .{
+                                    .mname = "1",
+                                    .bottoms = &.{
+                                        .{ .bname = "x" },
+                                        .{ .bname = "y" },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // All elements on the context stack should be accessible.
+        test "Deeply Nested Contexts" {
+            const template_text =
+                \\{{#a}}
+                \\{{one}}
+                \\{{#b}}
+                \\{{one}}{{two}}{{one}}
+                \\{{#c}}
+                \\{{one}}{{two}}{{three}}{{two}}{{one}}
+                \\{{#d}}
+                \\{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}
+                \\{{#five}}
+                \\{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}
+                \\{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}
+                \\{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}
+                \\{{/five}}
+                \\{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}
+                \\{{/d}}
+                \\{{one}}{{two}}{{three}}{{two}}{{one}}
+                \\{{/c}}
+                \\{{one}}{{two}}{{one}}
+                \\{{/b}}
+                \\{{one}}
+                \\{{/a}}
+            ;
+
+            const expected =
+                \\1
+                \\121
+                \\12321
+                \\1234321
+                \\123454321
+                \\12345654321
+                \\123454321
+                \\1234321
+                \\12321
+                \\121
+                \\1            
+            ;
+
+            {
+                var data = .{
+                    .a = .{ .one = 1 },
+                    .b = .{ .two = 2 },
+                    .c = .{ .three = 3, .d = .{ .four = 4, .five = 5 } },
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                const Data = struct { a: struct { one: u32 }, b: struct { two: i32 }, c: struct { three: usize, d: struct { four: u8, five: i16 } } };
+
+                var data = Data{
+                    .a = .{ .one = 1 },
+                    .b = .{ .two = 2 },
+                    .c = .{ .three = 3, .d = .{ .four = 4, .five = 5 } },
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
     };
 };
