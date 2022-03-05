@@ -223,6 +223,13 @@ const Comptime = struct {
                     return try return recursiveSeek(TReturn, info.child, action, param, out_writer, value, path, path_iterator, index);
                 }
             },
+            .Array => {
+
+                //Slice supports the "len" field,
+                if (std.mem.eql(u8, "len", path)) {
+                    try return seek(TReturn, action, param, out_writer, data.len, path_iterator, index);
+                }
+            },
             else => {},
         }
 
@@ -281,6 +288,14 @@ const Comptime = struct {
                     }
                 },
                 else => {},
+            },
+
+            .Array => |info| {
+
+                //Array of u8 is always string
+                if (info.child != u8) {
+                    return if (index < data.len) try action(param, out_writer, data[index]) else null;
+                }
             },
 
             .Optional => return if (data) |value| try iterateAt(TReturn, action, param, out_writer, value, index) else null,
@@ -392,23 +407,27 @@ const Comptime = struct {
                     c1: struct {
                         d1: u0 = 0,
                         d2: u0 = 0,
+                        d_null: ?u0 = null,
                         d_slice: []const u0 = &.{ 0, 0, 0 },
                         d_array: [3]u0 = .{ 0, 0, 0 },
-                        d_tuple: Tuple = Tuple { @as(u8, 0), @as(u32,0), @as(u64, 0) },
+                        d_tuple: Tuple = Tuple{ 0, 0, 0 },
                     } = .{},
+                    c_null: ?u0 = null,
                     c_slice: []const u0 = &.{ 0, 0, 0 },
                     c_array: [3]u0 = .{ 0, 0, 0 },
-                    c_tuple: Tuple = Tuple { @as(u8, 0), @as(u32,0), @as(u64, 0) },
+                    c_tuple: Tuple = Tuple{ 0, 0, 0 },
                 } = .{},
                 b2: u0 = 0,
+                b_null: ?u0 = null,
                 b_slice: []const u0 = &.{ 0, 0, 0 },
                 b_array: [3]u0 = .{ 0, 0, 0 },
-                b_tuple: Tuple = Tuple { @as(u8, 0), @as(u32,0), @as(u64, 0) },
+                b_tuple: Tuple = Tuple{ 0, 0, 0 },
             } = .{},
             a2: u0 = 0,
+            a_null: ?u0 = null,
             a_slice: []const u0 = &.{ 0, 0, 0 },
             a_array: [3]u0 = .{ 0, 0, 0 },
-            a_tuple: Tuple = Tuple { @as(u8, 0), @as(u32,0), @as(u64, 0) },
+            a_tuple: Tuple = Tuple{ 0, 0, 0 },
         };
 
         fn fooAction(comptime TExpected: type, out_writer: anytype, value: anytype) error{}!bool {
@@ -443,7 +462,7 @@ const Comptime = struct {
         fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
             const value = try fooSeek(void, data, path, index);
             try testing.expect(value == null);
-        }                        
+        }
 
         test "Comptime seek - self" {
             var data = Data{};
@@ -453,19 +472,29 @@ const Comptime = struct {
         test "Comptime seek - dot" {
             var data = Data{};
             try expectFound(Data, data, ".");
-        }  
+        }
 
         test "Comptime seek - not found" {
             var data = Data{};
             try expectNotFound(data, "wrong");
-        }                
+        }
 
         test "Comptime seek - found" {
             var data = Data{};
             try expectFound(@TypeOf(data.a1), data, "a1");
 
             try expectFound(@TypeOf(data.a2), data, "a2");
-        }                     
+        }
+
+        test "Comptime seek - self null" {
+            var data: ?Data = null;
+            try expectFound(?Data, data, "");
+        }
+
+        test "Comptime seek - self dot" {
+            var data: ?Data = null;
+            try expectFound(?Data, data, ".");
+        }
 
         test "Comptime seek - found nested" {
             var data = Data{};
@@ -474,7 +503,7 @@ const Comptime = struct {
             try expectFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1");
             try expectFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1");
             try expectFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2");
-        }   
+        }
 
         test "Comptime seek - not found nested" {
             var data = Data{};
@@ -484,7 +513,15 @@ const Comptime = struct {
             try expectNotFound(data, "a1.b1.c1.wrong");
             try expectNotFound(data, "a1.b1.c1.d1.wrong");
             try expectNotFound(data, "a1.b1.c1.d2.wrong");
-        }   
+        }
+
+        test "Comptime seek - null nested" {
+            var data = Data{};
+            try expectFound(@TypeOf(data.a_null), data, "a_null");
+            try expectFound(@TypeOf(data.a1.b_null), data, "a1.b_null");
+            try expectFound(@TypeOf(data.a1.b1.c_null), data, "a1.b1.c_null");
+            try expectFound(@TypeOf(data.a1.b1.c1.d_null), data, "a1.b1.c1.d_null");
+        }
 
         test "Comptime iter - self" {
             var data = Data{};
@@ -499,25 +536,25 @@ const Comptime = struct {
         test "Comptime iter - dot" {
             var data = Data{};
             try expectIterFound(Data, data, ".", 0);
-        }  
+        }
 
         test "Comptime iter consumed - dot" {
             var data = Data{};
             try expectIterNotFound(data, ".", 1);
-        }          
+        }
 
         test "Comptime seek - not found" {
             var data = Data{};
             try expectIterNotFound(data, "wrong", 0);
             try expectIterNotFound(data, "wrong", 1);
-        }                
+        }
 
         test "Comptime iter - found" {
             var data = Data{};
             try expectIterFound(@TypeOf(data.a1), data, "a1", 0);
 
             try expectIterFound(@TypeOf(data.a2), data, "a2", 0);
-        } 
+        }
 
         test "Comptime iter consumed - found" {
             var data = Data{};
@@ -526,23 +563,23 @@ const Comptime = struct {
             try expectIterNotFound(data, "a2", 1);
         }
 
-       test "Comptime iter - found nested" {
+        test "Comptime iter - found nested" {
             var data = Data{};
             try expectIterFound(@TypeOf(data.a1.b1), data, "a1.b1", 0);
             try expectIterFound(@TypeOf(data.a1.b2), data, "a1.b2", 0);
             try expectIterFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1", 0);
             try expectIterFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1", 0);
             try expectIterFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2", 0);
-        }   
+        }
 
-       test "Comptime iter consumed - found nested" {
+        test "Comptime iter consumed - found nested" {
             var data = Data{};
             try expectIterNotFound(data, "a1.b1", 1);
             try expectIterNotFound(data, "a1.b2", 1);
             try expectIterNotFound(data, "a1.b1.c1", 1);
             try expectIterNotFound(data, "a1.b1.c1.d1", 1);
             try expectIterNotFound(data, "a1.b1.c1.d2", 1);
-        }          
+        }
 
         test "Comptime iter - not found nested" {
             var data = Data{};
@@ -558,10 +595,10 @@ const Comptime = struct {
             try expectIterNotFound(data, "a1.b2.wrong", 1);
             try expectIterNotFound(data, "a1.b1.c1.wrong", 1);
             try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 1);
-            try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 1);            
-        }    
+            try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 1);
+        }
 
-        test "Comptime iter - slice found" {
+        test "Comptime iter - slice" {
             var data = Data{};
             try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
 
@@ -570,9 +607,9 @@ const Comptime = struct {
             try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
 
             try expectIterNotFound(data, "a_slice", 3);
-        } 
+        }
 
-        test "Comptime iter - array found" {
+        test "Comptime iter - array" {
             var data = Data{};
             try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
 
@@ -581,9 +618,9 @@ const Comptime = struct {
             try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
 
             try expectIterNotFound(data, "a_array", 3);
-        }       
-        
-        test "Comptime iter - tuple found" {
+        }
+
+        test "Comptime iter - tuple" {
             var data = Data{};
             try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
 
@@ -592,10 +629,9 @@ const Comptime = struct {
             try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
 
             try expectIterNotFound(data, "a_tuple", 3);
-        }           
+        }
 
-
-        test "Comptime iter - nested slice found" {
+        test "Comptime iter - nested slice" {
             var data = Data{};
             try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
             try expectIterFound(@TypeOf(data.a1.b_slice[0]), data, "a1.b_slice", 0);
@@ -610,15 +646,15 @@ const Comptime = struct {
             try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
             try expectIterFound(@TypeOf(data.a1.b_slice[2]), data, "a1.b_slice", 2);
             try expectIterFound(@TypeOf(data.a1.b1.c_slice[2]), data, "a1.b1.c_slice", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[2]), data, "a1.b1.c1.d_slice", 2);            
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[2]), data, "a1.b1.c1.d_slice", 2);
 
             try expectIterNotFound(data, "a_slice", 3);
             try expectIterNotFound(data, "a1.b_slice", 3);
             try expectIterNotFound(data, "a1.b1.c_slice", 3);
             try expectIterNotFound(data, "a1.b1.c1.d_slice", 3);
-        } 
+        }
 
-        test "Comptime iter - nested array found" {
+        test "Comptime iter - nested array" {
             var data = Data{};
             try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
             try expectIterFound(@TypeOf(data.a1.b_tuple[0]), data, "a1.b_tuple", 0);
@@ -633,15 +669,15 @@ const Comptime = struct {
             try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
             try expectIterFound(@TypeOf(data.a1.b_tuple[2]), data, "a1.b_tuple", 2);
             try expectIterFound(@TypeOf(data.a1.b1.c_tuple[2]), data, "a1.b1.c_tuple", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[2]), data, "a1.b1.c1.d_tuple", 2);            
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[2]), data, "a1.b1.c1.d_tuple", 2);
 
             try expectIterNotFound(data, "a_tuple", 3);
             try expectIterNotFound(data, "a1.b_tuple", 3);
             try expectIterNotFound(data, "a1.b1.c_tuple", 3);
             try expectIterNotFound(data, "a1.b1.c1.d_tuple", 3);
-        }       
-        
-        test "Comptime iter - nested tuple found" {
+        }
+
+        test "Comptime iter - nested tuple" {
             var data = Data{};
             try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
             try expectIterFound(@TypeOf(data.a1.b_array[0]), data, "a1.b_array", 0);
@@ -656,14 +692,13 @@ const Comptime = struct {
             try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
             try expectIterFound(@TypeOf(data.a1.b_array[2]), data, "a1.b_array", 2);
             try expectIterFound(@TypeOf(data.a1.b1.c_array[2]), data, "a1.b1.c_array", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[2]), data, "a1.b1.c1.d_array", 2);            
+            try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[2]), data, "a1.b1.c1.d_array", 2);
 
             try expectIterNotFound(data, "a_array", 3);
             try expectIterNotFound(data, "a1.b_array", 3);
             try expectIterNotFound(data, "a1.b1.c_array", 3);
             try expectIterNotFound(data, "a1.b1.c1.d_array", 3);
-        }         
-                                                                             
+        }
     };
 };
 
