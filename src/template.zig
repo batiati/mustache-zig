@@ -1585,6 +1585,106 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
         }
+
+        test "Deeply Nested Contexts" {
+            const template_text =
+                \\{{#a}}
+                \\{{one}}
+                \\{{#b}}
+                \\{{one}}{{two}}{{one}}
+                \\{{#c}}
+                \\{{one}}{{two}}{{three}}{{two}}{{one}}
+                \\{{#d}}
+                \\{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}
+                \\{{#five}}
+                \\{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}
+                \\{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}
+                \\{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}
+                \\{{/five}}
+                \\{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}
+                \\{{/d}}
+                \\{{one}}{{two}}{{three}}{{two}}{{one}}
+                \\{{/c}}
+                \\{{one}}{{two}}{{one}}
+                \\{{/b}}
+                \\{{one}}
+                \\{{/a}}
+            ;
+
+            var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 1), elements.len);
+
+            try testing.expectEqual(Element.Section, elements[0]);
+            try testing.expectEqualStrings("a", elements[0].Section.key);
+            try testing.expectEqual(false, elements[0].Section.inverted);
+
+            if (elements[0].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 5), section.len);
+
+                try testing.expectEqual(Element.Interpolation, section[0]);
+                try testing.expectEqualStrings("one", section[0].Interpolation.key);
+
+                try testing.expectEqual(Element.StaticText, section[1]);
+                try testing.expectEqualStrings("\n", section[1].StaticText);
+
+                try testing.expectEqual(Element.Section, section[2]);
+                try testing.expectEqualStrings("b", section[2].Section.key);
+
+                try testing.expectEqual(Element.Interpolation, section[3]);
+                try testing.expectEqualStrings("one", section[3].Interpolation.key);
+
+                try testing.expectEqual(Element.StaticText, section[4]);
+                try testing.expectEqualStrings("\n", section[4].StaticText);
+
+                if (section[2].Section.content) |section_b| {
+                    try testing.expectEqual(@as(usize, 9), section_b.len);
+
+                    try testing.expectEqual(Element.Interpolation, section_b[0]);
+                    try testing.expectEqualStrings("one", section_b[0].Interpolation.key);
+
+                    try testing.expectEqual(Element.Interpolation, section_b[1]);
+                    try testing.expectEqualStrings("two", section_b[1].Interpolation.key);
+
+                    try testing.expectEqual(Element.Interpolation, section_b[2]);
+                    try testing.expectEqualStrings("one", section_b[2].Interpolation.key);
+
+                    try testing.expectEqual(Element.StaticText, section_b[3]);
+                    try testing.expectEqualStrings("\n", section_b[3].StaticText);
+
+                    try testing.expectEqual(Element.Section, section_b[4]);
+                    try testing.expectEqualStrings("c", section_b[4].Section.key);
+
+                    try testing.expectEqual(Element.Interpolation, section_b[5]);
+                    try testing.expectEqualStrings("one", section_b[5].Interpolation.key);
+
+                    try testing.expectEqual(Element.Interpolation, section_b[6]);
+                    try testing.expectEqualStrings("two", section_b[6].Interpolation.key);
+
+                    try testing.expectEqual(Element.Interpolation, section_b[7]);
+                    try testing.expectEqualStrings("one", section_b[7].Interpolation.key);
+
+                    try testing.expectEqual(Element.StaticText, section_b[8]);
+                    try testing.expectEqualStrings("\n", section_b[8].StaticText);
+
+                    if (section_b[4].Section.content) |section_c| {
+                        try testing.expectEqual(@as(usize, 13), section_c.len);
+                    } else {
+                        try testing.expect(false);
+                        unreachable;
+                    }
+                } else {
+                    try testing.expect(false);
+                    unreachable;
+                }
+            } else {
+                try testing.expect(false);
+                unreachable;
+            }
+        }
     };
 
     const inverted = struct {

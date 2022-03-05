@@ -99,7 +99,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return if (try Comptime.write(self.writer, self.data, &path_iterator, escape)) |_| true else false;
+            return try Comptime.write(self.writer, self.data, &path_iterator, escape);
         }
 
         fn deinit(ctx: *anyopaque, allocator: Allocator) void {
@@ -126,16 +126,20 @@ const Comptime = struct {
         // Let's wait for some real use case
         //@setEvalBranchQuota(std.math.maxInt(u32));
 
-        const TReturn = Allocator.Error!?Context(@TypeOf(out_writer));
-        return try seek(
-            TReturn,
-            getContext,
+        const TReturn = Context(@TypeOf(out_writer));
+        const caller = Caller(Allocator.Error, TReturn, getContext);
+        const result = try caller.call(
             allocator,
             out_writer,
             data,
             path_iterator,
             index,
         );
+
+        return switch (result) {
+            .Resolved => |ctx| ctx,
+            else => null,
+        };
     }
 
     pub inline fn write(
@@ -143,166 +147,226 @@ const Comptime = struct {
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
         escape: Escape,
-    ) @TypeOf(out_writer).Error!?void {
+    ) @TypeOf(out_writer).Error!bool {
 
         // TODO: Should we set a new branch quota here??
         // Let's wait for some real use case
         //@setEvalBranchQuota(std.math.maxInt(u32));
 
-        const TReturn = @TypeOf(out_writer).Error!?void;
-        return try seek(TReturn, stringify, escape, out_writer, data, path_iterator, null);
+        const caller = Caller(@TypeOf(out_writer).Error, void, stringify);
+        const result = try caller.call(
+            escape,
+            out_writer,
+            data,
+            path_iterator,
+            null,
+        );
+
+        return switch (result) {
+            .Resolved, .ChainBroken, .IteratorConsumed => true,
+            .ContextNotFound => false,
+        };
     }
 
-    inline fn seek(
-        comptime TReturn: type,
-        action: anytype,
-        param: anytype,
-        out_writer: anytype,
-        data: anytype,
-        path_iterator: *std.mem.TokenIterator(u8),
-        index: ?usize,
-    ) TReturn {
-        if (path_iterator.next()) |token| {
-            return try recursiveSeek(TReturn, @TypeOf(data), action, param, out_writer, data, token, path_iterator, index);
-        } else {
-            const Data = @TypeOf(data);
-            if (Data == comptime_int) {
-                const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
-                var runtime_value: RuntimeInt = data;
-                return try seek(TReturn, action, param, out_writer, runtime_value, path_iterator, index);
-            } else if (Data == comptime_float) {
-                var runtime_value: f64 = data;
-                return try seek(TReturn, action, param, out_writer, runtime_value, path_iterator, index);
-            } else if (Data == @TypeOf(null)) {
-                var runtime_value: ?u0 = null;
-                return try seek(TReturn, action, param, out_writer, runtime_value, path_iterator, index);
-            } else if (Data == void) {
-                return null;
-            } else {
-                if (index) |current_index| {
-                    return try iterateAt(TReturn, action, param, out_writer, data, current_index);
+    fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
+        const action_type_info = @typeInfo(@TypeOf(action_fn));
+        if (action_type_info != .Fn) @compileError("action_fn must be a function");
+
+        return struct {
+            pub const Result = union(enum) {
+
+                ///
+                /// The path could no be found on the current context
+                /// This result indicates that the path should be resolved against the parent context
+                /// For example:
+                /// context = .{ name = "Phill" };
+                /// path = "address"
+                ContextNotFound,
+
+                ///
+                /// Parts of the path were found on the current context, but could not be fully resolved
+                /// This result indicates that the path is broken and should NOT be resolved against the parent context
+                /// For example:
+                /// context = .{ .address = .{ street = "Wall St, 50", } };
+                /// path = "address.country"
+                ChainBroken,
+
+                ///
+                /// The path could be resolved against the current context, but the iterator was fully consumed
+                /// This result indicates that the path is valid, but not to be rendered and should NOT be resolved against the parent context
+                /// For example:
+                /// context = .{ .visible = false  };
+                /// path = "visible"
+                IteratorConsumed,
+
+                ///
+                /// The path could be resolved against the current context
+                /// The payload is the result returned by "action_fn"
+                Resolved: TReturn,
+            };
+
+            const Depth = enum {
+                Root,
+                Leaf,
+            };
+
+            pub inline fn call(
+                action_param: anytype,
+                out_writer: anytype,
+                data: anytype,
+                path_iterator: *std.mem.TokenIterator(u8),
+                index: ?usize,
+            ) TError!Result {
+                return try find(.Root, action_param, out_writer, data, path_iterator, index);
+            }
+
+            inline fn find(
+                depth: Depth,
+                action_param: anytype,
+                out_writer: anytype,
+                data: anytype,
+                path_iterator: *std.mem.TokenIterator(u8),
+                index: ?usize,
+            ) TError!Result {
+                if (path_iterator.next()) |token| {
+                    return try recursiveFind(depth, @TypeOf(data), action_param, out_writer, data, token, path_iterator, index);
                 } else {
-                    return try action(param, out_writer, data);
-                }
-            }
-        }
-    }
-
-    inline fn recursiveSeek(
-        comptime TReturn: type,
-        comptime TValue: type,
-        action: anytype,
-        param: anytype,
-        out_writer: anytype,
-        data: anytype,
-        path: []const u8,
-        path_iterator: *std.mem.TokenIterator(u8),
-        index: ?usize,
-    ) TReturn {
-        const typeInfo = @typeInfo(TValue);
-
-        switch (typeInfo) {
-            .Struct => {
-                return try seekField(TReturn, TValue, action, param, out_writer, data, path, path_iterator, index);
-            },
-            .Pointer => |info| switch (info.size) {
-                .One => return try recursiveSeek(TReturn, info.child, action, param, out_writer, data, path, path_iterator, index),
-                .Slice => {
-
-                    //Slice supports the "len" field,
-                    if (std.mem.eql(u8, "len", path)) {
-                        try return seek(TReturn, action, param, out_writer, data.len, path_iterator, index);
-                    }
-                },
-
-                .Many => @compileError("[*] pointers not supported"),
-                .C => @compileError("[*c] pointers not supported"),
-            },
-            .Optional => |info| {
-                if (data) |value| {
-                    return try return recursiveSeek(TReturn, info.child, action, param, out_writer, value, path, path_iterator, index);
-                }
-            },
-            .Array => {
-
-                //Slice supports the "len" field,
-                if (std.mem.eql(u8, "len", path)) {
-                    try return seek(TReturn, action, param, out_writer, data.len, path_iterator, index);
-                }
-            },
-            else => {},
-        }
-
-        return null;
-    }
-
-    inline fn seekField(
-        comptime TReturn: type,
-        comptime TValue: type,
-        action: anytype,
-        param: anytype,
-        out_writer: anytype,
-        data: anytype,
-        path: []const u8,
-        path_iterator: *std.mem.TokenIterator(u8),
-        index: ?usize,
-    ) TReturn {
-        const fields = std.meta.fields(TValue);
-        inline for (fields) |field| {
-            if (std.mem.eql(u8, field.name, path)) {
-                return try seek(TReturn, action, param, out_writer, @field(data, field.name), path_iterator, index);
-            }
-        }
-
-        return null;
-    }
-
-    inline fn iterateAt(
-        comptime TReturn: type,
-        action: anytype,
-        param: anytype,
-        out_writer: anytype,
-        data: anytype,
-        index: usize,
-    ) TReturn {
-        switch (@typeInfo(@TypeOf(data))) {
-            .Struct => |info| {
-                if (info.is_tuple) {
-                    inline for (info.fields) |_, i| {
-                        if (index == i) return try action(param, out_writer, data[i]);
+                    const Data = @TypeOf(data);
+                    if (Data == comptime_int) {
+                        const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
+                        var runtime_value: RuntimeInt = data;
+                        return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
+                    } else if (Data == comptime_float) {
+                        var runtime_value: f64 = data;
+                        return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
+                    } else if (Data == @TypeOf(null)) {
+                        var runtime_value: ?u0 = null;
+                        return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
+                    } else if (Data == void) {
+                        return if (depth == .Root) .ContextNotFound else .ChainBroken;
                     } else {
-                        return null;
+                        if (index) |current_index| {
+                            return try iterateAt(action_param, out_writer, data, current_index);
+                        } else {
+                            return Result{ .Resolved = try action_fn(action_param, out_writer, data) };
+                        }
                     }
                 }
-            },
+            }
 
-            // Booleans are evaluated on the iterator
-            .Bool => return if (data == true and index == 0) try action(param, out_writer, data) else null,
+            inline fn recursiveFind(
+                depth: Depth,
+                comptime TValue: type,
+                action_param: anytype,
+                out_writer: anytype,
+                data: anytype,
+                path: []const u8,
+                path_iterator: *std.mem.TokenIterator(u8),
+                index: ?usize,
+            ) TError!Result {
+                const typeInfo = @typeInfo(TValue);
 
-            .Pointer => |info| switch (info.size) {
-                .Slice => {
+                switch (typeInfo) {
+                    .Struct => {
+                        return try seekField(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
+                    },
+                    .Pointer => |info| switch (info.size) {
+                        .One => return try recursiveFind(depth, info.child, action_param, out_writer, data, path, path_iterator, index),
+                        .Slice => {
 
-                    //Slice of u8 is always string
-                    if (info.child != u8) {
-                        return if (index < data.len) try action(param, out_writer, data[index]) else null;
-                    }
-                },
-                else => {},
-            },
+                            //Slice supports the "len" field,
+                            if (std.mem.eql(u8, "len", path)) {
+                                return try find(.Leaf, action_param, out_writer, data.len, path_iterator, index);
+                            }
+                        },
 
-            .Array => |info| {
+                        .Many => @compileError("[*] pointers not supported"),
+                        .C => @compileError("[*c] pointers not supported"),
+                    },
+                    .Optional => |info| {
+                        if (data) |value| {
+                            return try recursiveFind(depth, info.child, action_param, out_writer, value, path, path_iterator, index);
+                        }
+                    },
+                    .Array => {
 
-                //Array of u8 is always string
-                if (info.child != u8) {
-                    return if (index < data.len) try action(param, out_writer, data[index]) else null;
+                        //Slice supports the "len" field,
+                        if (std.mem.eql(u8, "len", path)) {
+                            return try find(.Leaf, action_param, out_writer, data.len, path_iterator, index);
+                        }
+                    },
+                    else => {},
                 }
-            },
 
-            .Optional => return if (data) |value| try iterateAt(TReturn, action, param, out_writer, value, index) else null,
-            else => {},
-        }
+                return if (depth == .Root) .ContextNotFound else .ChainBroken;
+            }
 
-        return if (index == 0) try action(param, out_writer, data) else null;
+            inline fn seekField(
+                depth: Depth,
+                comptime TValue: type,
+                action_param: anytype,
+                out_writer: anytype,
+                data: anytype,
+                path: []const u8,
+                path_iterator: *std.mem.TokenIterator(u8),
+                index: ?usize,
+            ) TError!Result {
+                const fields = std.meta.fields(TValue);
+                inline for (fields) |field| {
+                    if (std.mem.eql(u8, field.name, path)) {
+                        return try find(.Leaf, action_param, out_writer, @field(data, field.name), path_iterator, index);
+                    }
+                } else {
+                    return if (depth == .Root) .ContextNotFound else .ChainBroken;
+                }
+            }
+
+            inline fn iterateAt(
+                action_param: anytype,
+                out_writer: anytype,
+                data: anytype,
+                index: usize,
+            ) TError!Result {
+                switch (@typeInfo(@TypeOf(data))) {
+                    .Struct => |info| {
+                        if (info.is_tuple) {
+                            inline for (info.fields) |_, i| {
+                                if (index == i) return Result{ .Resolved = try action_fn(action_param, out_writer, data[i]) };
+                            } else {
+                                return .IteratorConsumed;
+                            }
+                        }
+                    },
+
+                    // Booleans are evaluated on the iterator
+                    .Bool => return if (data == true and index == 0) Result{ .Resolved = try action_fn(action_param, out_writer, data) } else .IteratorConsumed,
+
+                    .Pointer => |info| switch (info.size) {
+                        .Slice => {
+
+                            //Slice of u8 is always string
+                            if (info.child != u8) {
+                                return if (index < data.len) Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) } else .IteratorConsumed;
+                            }
+                        },
+                        else => {},
+                    },
+
+                    .Array => |info| {
+
+                        //Array of u8 is always string
+                        if (info.child != u8) {
+                            return if (index < data.len) Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) } else .IteratorConsumed;
+                        }
+                    },
+
+                    .Optional => return if (data) |value| try iterateAt(action_param, out_writer, value, index) else .IteratorConsumed,
+                    else => {},
+                }
+
+                return if (index == 0) Result{ .Resolved = try action_fn(action_param, out_writer, data) } else .IteratorConsumed;
+            }
+        };
     }
 
     inline fn stringify(
@@ -430,38 +494,38 @@ const Comptime = struct {
             a_tuple: Tuple = Tuple{ 0, 0, 0 },
         };
 
+        const FooCaller = Caller(error{}, bool, fooAction);
+
         fn fooAction(comptime TExpected: type, out_writer: anytype, value: anytype) error{}!bool {
             _ = out_writer;
             return TExpected == @TypeOf(value);
         }
 
-        fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !?bool {
+        fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !FooCaller.Result {
             var path_iterator = std.mem.tokenize(u8, path, ".");
-
-            const TReturn = error{}!?bool;
-            return try seek(TReturn, fooAction, TExpected, std.io.null_writer, data, &path_iterator, index);
+            return try FooCaller.call(TExpected, std.io.null_writer, data, &path_iterator, index);
         }
 
         fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
             const value = try fooSeek(TExpected, data, path, null);
-            try testing.expect(value != null);
-            try testing.expect(value.? == true);
+            try testing.expect(value == .Resolved);
+            try testing.expect(value.Resolved == true);
         }
 
         fn expectNotFound(data: anytype, path: []const u8) !void {
             const value = try fooSeek(void, data, path, null);
-            try testing.expect(value == null);
+            try testing.expect(value != .Resolved);
         }
 
         fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
             const value = try fooSeek(TExpected, data, path, index);
-            try testing.expect(value != null);
-            try testing.expect(value.? == true);
+            try testing.expect(value == .Resolved);
+            try testing.expect(value.Resolved == true);
         }
 
         fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
             const value = try fooSeek(void, data, path, index);
-            try testing.expect(value == null);
+            try testing.expect(value != .Resolved);
         }
 
         test "Comptime seek - self" {

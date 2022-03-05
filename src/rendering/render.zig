@@ -7,6 +7,7 @@ const mustache = @import("../mustache.zig");
 const Element = mustache.template.Element;
 const Template = mustache.template.Template;
 const Interpolation = mustache.template.Interpolation;
+const Section = mustache.template.Section;
 const ParseError = mustache.template.ParseError;
 
 const context = @import("context.zig");
@@ -83,24 +84,31 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                 for (elements) |element| {
                     switch (element) {
                         .StaticText => |content| try self.writer.writeAll(content),
-                        .Interpolation => |interpolation| try interpolate(stack, interpolation),
+                        .Interpolation => |interpolation| {
+                            try interpolate(stack, interpolation);
+                        },
                         .Section => |section| {
-                            var iterator = stack.ctx.iterator(section.key);
-                            if (section.inverted) {
-                                if (try iterator.next(self.allocator)) |some| {
-                                    some.deinit(self.allocator);
-                                } else {
-                                    try self.renderLevel(stack, section.content);
-                                }
-                            } else {
-                                while (try iterator.next(self.allocator)) |item_ctx| {
-                                    var next_step = Stack{
-                                        .parent = stack,
-                                        .ctx = item_ctx,
-                                    };
+                            if (try self.getContext(stack, section)) |*section_ctx| {
+                                defer section_ctx.deinit(self.allocator);
 
-                                    defer next_step.ctx.deinit(self.allocator);
-                                    try self.renderLevel(&next_step, section.content);
+                                var iterator = section_ctx.iterator("");
+
+                                if (section.inverted) {
+                                    if (try iterator.next(self.allocator)) |some| {
+                                        some.deinit(self.allocator);
+                                    } else {
+                                        try self.renderLevel(stack, section.content);
+                                    }
+                                } else {
+                                    while (try iterator.next(self.allocator)) |item_ctx| {
+                                        var next_step = Stack{
+                                            .parent = stack,
+                                            .ctx = item_ctx,
+                                        };
+
+                                        defer next_step.ctx.deinit(self.allocator);
+                                        try self.renderLevel(&next_step, section.content);
+                                    }
                                 }
                             }
                         },
@@ -116,6 +124,18 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             while (level) |current| : (level = current.parent) {
                 const success = try current.ctx.write(interpolation.key, if (interpolation.escaped) .Escaped else .Unescaped);
                 if (success) break;
+            }
+        }
+
+        fn getContext(self: *Self, ctx: *Stack, section: Section) !?Context(Writer) {
+            var level: ?*Stack = ctx;
+
+            while (level) |current| : (level = current.parent) {
+                if (try current.ctx.get(self.allocator, section.key)) |found| {
+                    return found;
+                }
+            } else {
+                return null;
             }
         }
     };
@@ -144,7 +164,6 @@ const tests = struct {
 
             var result = try renderAllocCached(allocator, data, cached_elements);
             defer allocator.free(result);
-
             try testing.expectEqualStrings(expected, result);
         }
 
@@ -930,7 +949,8 @@ const tests = struct {
                 \\1234321
                 \\12321
                 \\121
-                \\1            
+                \\1
+                \\
             ;
 
             {
@@ -944,7 +964,11 @@ const tests = struct {
             }
 
             {
-                const Data = struct { a: struct { one: u32 }, b: struct { two: i32 }, c: struct { three: usize, d: struct { four: u8, five: i16 } } };
+                const Data = struct {
+                    a: struct { one: u32 },
+                    b: struct { two: i32 },
+                    c: struct { three: usize, d: struct { four: u8, five: i16 } },
+                };
 
                 var data = Data{
                     .a = .{ .one = 1 },
