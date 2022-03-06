@@ -3,6 +3,42 @@ const Allocator = std.mem.Allocator;
 const TypeInfo = std.builtin.TypeInfo;
 const trait = std.meta.trait;
 
+const assert = std.debug.assert;
+
+pub fn PathResolution(comptime Payload: type) type {
+    return union(enum) {
+
+        ///
+        /// The path could no be found on the current context
+        /// This result indicates that the path should be resolved against the parent context
+        /// For example:
+        /// context = .{ name = "Phill" };
+        /// path = "address"
+        NotFoundInContext,
+
+        ///
+        /// Parts of the path could not be found on the current context.
+        /// This result indicates that the path is broken and should NOT be resolved against the parent context
+        /// For example:
+        /// context = .{ .address = .{ street = "Wall St, 50", } };
+        /// path = "address.country"
+        ChainBroken,
+
+        ///
+        /// The path could be resolved against the current context, but the iterator was fully consumed
+        /// This result indicates that the path is valid, but not to be rendered and should NOT be resolved against the parent context
+        /// For example:
+        /// context = .{ .visible = false  };
+        /// path = "visible"
+        IteratorConsumed,
+
+        ///
+        /// The path could be resolved against the current context
+        /// The payload is the result returned by "action_fn"
+        Resolved: Payload,
+    };
+}
+
 pub const Escape = enum {
     Escaped,
     Unescaped,
@@ -21,35 +57,64 @@ pub fn Context(comptime Writer: type) type {
         vtable: *const VTable,
 
         pub const VTable = struct {
-            get: fn (ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!?Self,
-            write: fn (ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!bool,
+            get: fn (ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!PathResolution(Self),
+            write: fn (ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void),
+            check: fn (ctx: *anyopaque, path: []const u8, index: usize) PathResolution(void),
             deinit: fn (ctx: *anyopaque, allocator: Allocator) void,
         };
 
         pub const Iterator = struct {
-            context: *Self,
+            context: *const Self,
             path: []const u8,
             current: usize,
+            finished: bool,
 
             pub fn next(self: *Iterator, allocator: Allocator) Allocator.Error!?Self {
-                defer self.current += 1;
-                return try self.context.vtable.get(self.context.ptr, allocator, self.path, self.current);
+                if (self.finished) {
+                    return null;
+                } else {
+                    defer self.current += 1;
+                    const result = try self.context.vtable.get(self.context.ptr, allocator, self.path, self.current);
+
+                    // Keeping the iterator pattern
+                    switch (result) {
+                        .Resolved => |found| return found,
+                        .IteratorConsumed => {
+                            self.finished = true;
+                            return null;
+                        },
+                        else => {
+                            assert(false);
+                            unreachable;
+                        },
+                    }
+                }
             }
         };
 
-        pub inline fn get(self: Self, allocator: Allocator, path: []const u8) Allocator.Error!?Self {
+        pub inline fn get(self: Self, allocator: Allocator, path: []const u8) Allocator.Error!PathResolution(Self) {
             return try self.vtable.get(self.ptr, allocator, path, null);
         }
 
-        pub fn iterator(self: *Self, path: []const u8) Iterator {
-            return .{
-                .context = self,
-                .path = path,
-                .current = 0,
+        pub fn iterator(self: *const Self, path: []const u8) PathResolution(Iterator) {
+            const result = self.vtable.check(self.ptr, path, 0);
+
+            return switch (result) {
+                .Resolved, .IteratorConsumed => .{
+                    .Resolved = .{
+                        .context = self,
+                        .path = path,
+                        .current = 0,
+                        .finished = result == .IteratorConsumed,
+                    },
+                },
+
+                .ChainBroken => .ChainBroken,
+                .NotFoundInContext => .NotFoundInContext,
             };
         }
 
-        pub inline fn write(self: Self, path: []const u8, escape: Escape) Writer.Error!bool {
+        pub inline fn write(self: Self, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
             return try self.vtable.write(self.ptr, path, escape);
         }
 
@@ -65,6 +130,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
 
         const vtable = ContextInterface.VTable{
             .get = get,
+            .check = check,
             .write = write,
             .deinit = deinit,
         };
@@ -88,14 +154,21 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             };
         }
 
-        fn get(ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!?ContextInterface {
+        fn get(ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!PathResolution(ContextInterface) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Comptime.get(allocator, self.writer, self.data, &path_iterator, index);
         }
 
-        fn write(ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!bool {
+        fn check(ctx: *anyopaque, path: []const u8, index: usize) PathResolution(void) {
+            var self = getSelf(ctx);
+
+            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
+            return Comptime.check(self.data, &path_iterator, index);
+        }
+
+        fn write(ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
@@ -120,26 +193,15 @@ const Comptime = struct {
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
         index: ?usize,
-    ) Allocator.Error!?Context(@TypeOf(out_writer)) {
-
-        // TODO: Should we set a new branch quota here??
-        // Let's wait for some real use case
-        //@setEvalBranchQuota(std.math.maxInt(u32));
-
-        const TReturn = Context(@TypeOf(out_writer));
-        const caller = Caller(Allocator.Error, TReturn, getContext);
-        const result = try caller.call(
+    ) Allocator.Error!PathResolution(Context(@TypeOf(out_writer))) {
+        const GetContext = Caller(Allocator.Error, Context(@TypeOf(out_writer)), getContext);
+        return try GetContext.call(
             allocator,
             out_writer,
             data,
             path_iterator,
             index,
         );
-
-        return switch (result) {
-            .Resolved => |ctx| ctx,
-            else => null,
-        };
     }
 
     pub inline fn write(
@@ -147,25 +209,31 @@ const Comptime = struct {
         data: anytype,
         path_iterator: *std.mem.TokenIterator(u8),
         escape: Escape,
-    ) @TypeOf(out_writer).Error!bool {
-
-        // TODO: Should we set a new branch quota here??
-        // Let's wait for some real use case
-        //@setEvalBranchQuota(std.math.maxInt(u32));
-
-        const caller = Caller(@TypeOf(out_writer).Error, void, stringify);
-        const result = try caller.call(
+    ) @TypeOf(out_writer).Error!PathResolution(void) {
+        const Stringify = Caller(@TypeOf(out_writer).Error, void, stringify);
+        return try Stringify.call(
             escape,
             out_writer,
             data,
             path_iterator,
             null,
         );
+    }
 
-        return switch (result) {
-            .Resolved, .ChainBroken, .IteratorConsumed => true,
-            .ContextNotFound => false,
-        };
+    pub inline fn check(
+        data: anytype,
+        path_iterator: *std.mem.TokenIterator(u8),
+        index: usize,
+    ) PathResolution(void) {
+        const null_writer = std.io.null_writer;
+        const NoAction = Caller(@TypeOf(null_writer).Error, void, no_action);
+        return try NoAction.call(
+            {},
+            null_writer,
+            data,
+            path_iterator,
+            index,
+        );
     }
 
     fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
@@ -173,37 +241,7 @@ const Comptime = struct {
         if (action_type_info != .Fn) @compileError("action_fn must be a function");
 
         return struct {
-            pub const Result = union(enum) {
-
-                ///
-                /// The path could no be found on the current context
-                /// This result indicates that the path should be resolved against the parent context
-                /// For example:
-                /// context = .{ name = "Phill" };
-                /// path = "address"
-                ContextNotFound,
-
-                ///
-                /// Parts of the path were found on the current context, but could not be fully resolved
-                /// This result indicates that the path is broken and should NOT be resolved against the parent context
-                /// For example:
-                /// context = .{ .address = .{ street = "Wall St, 50", } };
-                /// path = "address.country"
-                ChainBroken,
-
-                ///
-                /// The path could be resolved against the current context, but the iterator was fully consumed
-                /// This result indicates that the path is valid, but not to be rendered and should NOT be resolved against the parent context
-                /// For example:
-                /// context = .{ .visible = false  };
-                /// path = "visible"
-                IteratorConsumed,
-
-                ///
-                /// The path could be resolved against the current context
-                /// The payload is the result returned by "action_fn"
-                Resolved: TReturn,
-            };
+            const Result = PathResolution(TReturn);
 
             const Depth = enum {
                 Root,
@@ -243,7 +281,7 @@ const Comptime = struct {
                         var runtime_value: ?u0 = null;
                         return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
                     } else if (Data == void) {
-                        return if (depth == .Root) .ContextNotFound else .ChainBroken;
+                        return if (depth == .Root) .NotFoundInContext else .ChainBroken;
                     } else {
                         if (index) |current_index| {
                             return try iterateAt(action_param, out_writer, data, current_index);
@@ -298,7 +336,7 @@ const Comptime = struct {
                     else => {},
                 }
 
-                return if (depth == .Root) .ContextNotFound else .ChainBroken;
+                return if (depth == .Root) .NotFoundInContext else .ChainBroken;
             }
 
             inline fn seekField(
@@ -317,7 +355,7 @@ const Comptime = struct {
                         return try find(.Leaf, action_param, out_writer, @field(data, field.name), path_iterator, index);
                     }
                 } else {
-                    return if (depth == .Root) .ContextNotFound else .ChainBroken;
+                    return if (depth == .Root) .NotFoundInContext else .ChainBroken;
                 }
             }
 
@@ -367,6 +405,16 @@ const Comptime = struct {
                 return if (index == 0) Result{ .Resolved = try action_fn(action_param, out_writer, data) } else .IteratorConsumed;
             }
         };
+    }
+
+    inline fn no_action(
+        param: void,
+        out_writer: anytype,
+        value: anytype,
+    ) @TypeOf(out_writer).Error!void {
+        _ = param;
+        _ = out_writer;
+        _ = value;
     }
 
     inline fn stringify(
@@ -1159,9 +1207,12 @@ const struct_tests = struct {
 
         // Address
 
-        var address_ctx = (try person_ctx.get(allocator, "address")) orelse {
-            try testing.expect(false);
-            return;
+        var address_ctx = switch (try person_ctx.get(allocator, "address")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
         };
         defer address_ctx.deinit(allocator);
 
@@ -1171,9 +1222,12 @@ const struct_tests = struct {
 
         // Street
 
-        var street_ctx = (try address_ctx.get(allocator, "street")) orelse {
-            try testing.expect(false);
-            return;
+        var street_ctx = switch (try address_ctx.get(allocator, "street")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
         };
         defer street_ctx.deinit(allocator);
 
@@ -1207,9 +1261,12 @@ const struct_tests = struct {
 
         // Indication
 
-        var indication_ctx = (try person_ctx.get(allocator, "indication")) orelse {
-            try testing.expect(false);
-            return;
+        var indication_ctx = switch (try person_ctx.get(allocator, "indication")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
         };
         defer indication_ctx.deinit(allocator);
 
@@ -1219,9 +1276,12 @@ const struct_tests = struct {
 
         // Address
 
-        var address_ctx = (try indication_ctx.get(allocator, "address")) orelse {
-            try testing.expect(false);
-            return;
+        var address_ctx = switch (try indication_ctx.get(allocator, "address")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
         };
         defer address_ctx.deinit(allocator);
 
@@ -1231,9 +1291,12 @@ const struct_tests = struct {
 
         // Street
 
-        var street_ctx = (try address_ctx.get(allocator, "street")) orelse {
-            try testing.expect(false);
-            return;
+        var street_ctx = switch (try address_ctx.get(allocator, "street")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
         };
         defer street_ctx.deinit(allocator);
 
@@ -1256,34 +1319,43 @@ const struct_tests = struct {
         defer person_ctx.deinit(allocator);
 
         // Person.address
-        var address_ctx = (try person_ctx.get(allocator, "address")) orelse {
-            try testing.expect(false);
-            return;
+        var address_ctx = switch (try person_ctx.get(allocator, "address")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
         };
         defer address_ctx.deinit(allocator);
 
         var wrong_address = try person_ctx.get(allocator, "wrong_address");
-        try testing.expect(wrong_address == null);
+        try testing.expect(wrong_address == .NotFoundInContext);
 
         // Person.address.street
-        var street_ctx = (try address_ctx.get(allocator, "street")) orelse {
-            try testing.expect(false);
-            return;
+        var street_ctx = switch (try address_ctx.get(allocator, "street")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
         };
         defer street_ctx.deinit(allocator);
 
         var wrong_street = try address_ctx.get(allocator, "wrong_street");
-        try testing.expect(wrong_street == null);
+        try testing.expect(wrong_street == .NotFoundInContext);
 
         // Person.address.street.len
-        var street_len_ctx = (try street_ctx.get(allocator, "len")) orelse {
-            try testing.expect(false);
-            return;
+        var street_len_ctx = switch (try street_ctx.get(allocator, "len")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
         };
         defer street_len_ctx.deinit(allocator);
 
         var wrong_len = try street_ctx.get(allocator, "wrong_len");
-        try testing.expect(wrong_len == null);
+        try testing.expect(wrong_len == .NotFoundInContext);
     }
 
     test "Iterator over slice" {
@@ -1297,7 +1369,13 @@ const struct_tests = struct {
         var ctx = try getContext(allocator, writer, person_2);
         defer ctx.deinit(allocator);
 
-        var iterator = ctx.iterator("items");
+        var iterator = switch (ctx.iterator("items")) {
+            .Resolved => |found| found,
+            else => {
+                try testing.expect(false);
+                unreachable;
+            },
+        };
 
         var item_1 = (try iterator.next(allocator)) orelse {
             try testing.expect(false);
@@ -1334,7 +1412,13 @@ const struct_tests = struct {
 
         {
             // iterator over true
-            var iterator = ctx.iterator("active");
+            var iterator = switch (ctx.iterator("active")) {
+                .Resolved => |found| found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            };
 
             var item_1 = (try iterator.next(allocator)) orelse {
                 try testing.expect(false);
@@ -1348,7 +1432,13 @@ const struct_tests = struct {
 
         {
             // iterator over false
-            var iterator = ctx.iterator("indication.active");
+            var iterator = switch (ctx.iterator("indication.active")) {
+                .Resolved => |found| found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            };
 
             var no_more = try iterator.next(allocator);
             try testing.expect(no_more == null);
@@ -1364,7 +1454,13 @@ const struct_tests = struct {
 
         {
             // iterator over true
-            var iterator = ctx.iterator("additional_information");
+            var iterator = switch (ctx.iterator("additional_information")) {
+                .Resolved => |found| found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            };
 
             var item_1 = (try iterator.next(allocator)) orelse {
                 try testing.expect(false);
@@ -1378,7 +1474,13 @@ const struct_tests = struct {
 
         {
             // iterator over false
-            var iterator = ctx.iterator("indication.additional_information");
+            var iterator = switch (ctx.iterator("indication.additional_information")) {
+                .Resolved => |found| found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            };
 
             var no_more = try iterator.next(allocator);
             try testing.expect(no_more == null);

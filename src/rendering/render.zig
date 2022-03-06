@@ -88,11 +88,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                             try interpolate(stack, interpolation);
                         },
                         .Section => |section| {
-                            if (try self.getContext(stack, section)) |*section_ctx| {
-                                defer section_ctx.deinit(self.allocator);
-
-                                var iterator = section_ctx.iterator("");
-
+                            if (self.getIterator(stack, section)) |*iterator| {
                                 if (section.inverted) {
                                     if (try iterator.next(self.allocator)) |some| {
                                         some.deinit(self.allocator);
@@ -101,12 +97,13 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                                     }
                                 } else {
                                     while (try iterator.next(self.allocator)) |item_ctx| {
+                                        defer item_ctx.deinit(self.allocator);
+
                                         var next_step = Stack{
                                             .parent = stack,
                                             .ctx = item_ctx,
                                         };
 
-                                        defer next_step.ctx.deinit(self.allocator);
                                         try self.renderLevel(&next_step, section.content);
                                     }
                                 }
@@ -122,21 +119,50 @@ fn Render(comptime Writer: type, comptime Data: type) type {
         fn interpolate(ctx: *Stack, interpolation: Interpolation) Writer.Error!void {
             var level: ?*Stack = ctx;
             while (level) |current| : (level = current.parent) {
-                const success = try current.ctx.write(interpolation.key, if (interpolation.escaped) .Escaped else .Unescaped);
-                if (success) break;
+                const path_resolution = try current.ctx.write(interpolation.key, if (interpolation.escaped) .Escaped else .Unescaped);
+
+                switch (path_resolution) {
+                    .Resolved => {
+
+                        // Success, break the loop
+                        break;
+                    },
+
+                    .IteratorConsumed, .ChainBroken => {
+
+                        // Not rendered, but should NOT try against the parent context
+                        break;
+                    },
+
+                    .NotFoundInContext => {
+
+                        // Not rendered, should try against the parent context
+                        continue;
+                    },
+                }
             }
         }
 
-        fn getContext(self: *Self, ctx: *Stack, section: Section) !?Context(Writer) {
+        fn getIterator(self: *Self, ctx: *Stack, section: Section) ?Context(Writer).Iterator {
+            _ = self;
             var level: ?*Stack = ctx;
 
             while (level) |current| : (level = current.parent) {
-                if (try current.ctx.get(self.allocator, section.key)) |found| {
-                    return found;
+                switch (current.ctx.iterator(section.key)) {
+                    .Resolved => |found| return found,
+                    .IteratorConsumed, .ChainBroken => {
+
+                        // Not found, but should NOT try against the parent context
+                        break;
+                    },
+                    .NotFoundInContext => {
+                        // Should try against the parent context
+                        continue;
+                    },
                 }
-            } else {
-                return null;
             }
+
+            return null;
         }
     };
 }
