@@ -4,13 +4,11 @@
 
 Mustache-Zig is an implementation of the [{{mustache}} template system](https://mustache.github.io/) for [Zig](https://ziglang.org/).
 
-
 # ! Under development !
-
 
 ## Full spec compliant
 
-Supports all elements from [mustache spec](https://github.com/mustache/spec) with all tests passing ✔️.
+- Supports all elements from [mustache spec](https://github.com/mustache/spec) with all tests passing ✔️.
 
     delimiters
     interpolation
@@ -18,6 +16,9 @@ Supports all elements from [mustache spec](https://github.com/mustache/spec) wit
     sections
     inverted sections
     comments
+
+- Partials and inheritance comming soon ...
+
     partials
     parent
     blocks
@@ -36,17 +37,13 @@ So, it's important to be able to deal with multi-megabyte inputs without eating 
     };
     defer _ = plenty_of_memory.deinit();
 
-    try mustache.render(plenty_of_memory.allocator(), "10MB_file.mustache", data, out_writer);
+    try mustache.renderFromFile(plenty_of_memory.allocator(), data, "10MB_file.mustache", ctx, out_writer);
 
 ```
 
-## Comptime bindings, runtime templates.
+## Samples
 
-//TODO:
-
-## Cached or dynamic template loading.
-
-//TODO:
+- See the source code
 
 ## Licensing
 
