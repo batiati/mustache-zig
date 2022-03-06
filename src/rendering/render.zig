@@ -173,6 +173,7 @@ const tests = struct {
         _ = interpolation;
         _ = sections;
         _ = inverted;
+        _ = delimiters;
     }
 
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
@@ -1673,6 +1674,168 @@ const tests = struct {
             const expected = "|=|";
 
             var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+    };
+
+    /// Those tests are a verbatim copy from
+    /// https://github.com/mustache/spec/blob/master/specs/delimiters.yml
+    const delimiters = struct {
+
+        // The equals sign (used on both sides) should permit delimiter changes.
+        test "Pair Behavior" {
+            const template_text = "{{=<% %>=}}(<%text%>)";
+            const expected = "(Hey!)";
+
+            var data = .{ .text = "Hey!" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Characters with special meaning regexen should be valid delimiters.
+        test "Special Characters" {
+            const template_text = "({{=[ ]=}}[text])";
+            const expected = "(It worked!)";
+
+            var data = .{ .text = "It worked!" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Delimiters set outside sections should persist.
+        test "Sections" {
+            const template_text =
+                \\[
+                \\{{#section}}
+                \\  {{data}}
+                \\  |data|
+                \\{{/section}}
+                \\{{= | | =}}
+                \\|#section|
+                \\  {{data}}
+                \\  |data|
+                \\|/section|
+                \\]
+            ;
+
+            const expected =
+                \\[
+                \\  I got interpolated.
+                \\  |data|
+                \\  {{data}}
+                \\  I got interpolated.
+                \\]
+            ;
+
+            var data = .{ .section = true, .data = "I got interpolated." };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Delimiters set outside inverted sections should persist.
+        test "Inverted Sections" {
+            const template_text =
+                \\[
+                \\{{^section}}
+                \\  {{data}}
+                \\  |data|
+                \\{{/section}}
+                \\{{= | | =}}
+                \\|^section|
+                \\  {{data}}
+                \\  |data|
+                \\|/section|
+                \\]
+            ;
+
+            const expected =
+                \\[
+                \\  I got interpolated.
+                \\  |data|
+                \\  {{data}}
+                \\  I got interpolated.
+                \\]
+            ;
+
+            var data = .{ .section = false, .data = "I got interpolated." };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Delimiters set in a parent template should not affect a partial.
+        test "Partial Inheritence" {
+            return error.SkipZigTest;
+        }
+
+        // Delimiters set in a partial should not affect the parent template.
+        test "Post-Partial Behavior" {
+            return error.SkipZigTest;
+        }
+
+        // Surrounding whitespace should be left untouched.
+        test "Surrounding Whitespace" {
+            const template_text = "| {{=@ @=}} |";
+            const expected = "|  |";
+
+            var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Whitespace should be left untouched.
+        test "Outlying Whitespace (Inline)" {
+            const template_text = " | {{=@ @=}}\n";
+            const expected = " | \n";
+
+            var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Indented standalone lines should be removed from the template.
+        test "Indented Standalone Tag" {
+            const template_text =
+                \\Begin.
+                \\  {{=@ @=}}
+                \\End.
+            ;
+
+            const expected =
+                \\Begin.
+                \\End.
+            ;
+
+            var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // "\r\n" should be considered a newline for standalone tags.
+        test "Standalone Line Endings" {
+            const template_text = "|\r\n{{= @ @ =}}\r\n|";
+            const expected = "|\r\n|";
+
+            var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone tags should not require a newline to precede them.
+        test "Standalone Without Previous Line" {
+            const template_text = "  {{=@ @=}}\n=";
+            const expected = "=";
+
+            var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone tags should not require a newline to follow them.
+        test "Standalone Without Newline" {
+            const template_text = "=\n  {{=@ @=}}";
+            const expected = "=\n";
+
+            var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Pair with Padding" {
+            const template_text = "|{{= @   @ =}}|";
+            const expected = "||";
+
+            var data = .{};
             try expectRender(template_text, data, expected);
         }
     };
