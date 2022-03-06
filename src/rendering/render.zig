@@ -172,6 +172,7 @@ const tests = struct {
     test {
         _ = interpolation;
         _ = sections;
+        _ = inverted;
     }
 
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
@@ -1383,6 +1384,194 @@ const tests = struct {
             const expected = "#\n/\n";
 
             var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Padding" {
+            const template_text = "|{{# boolean }}={{/ boolean }}|";
+            const expected = "|=|";
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+    };
+
+    /// Those tests are a verbatim copy from
+    /// https://github.com/mustache/spec/blob/master/specs/inverted.yml
+    const inverted = struct {
+
+        // Falsey sections should have their contents rendered.
+        test "Falsey" {
+            const template_text = "{{^boolean}}This should be rendered.{{/boolean}}";
+            const expected = "This should be rendered.";
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Truthy sections should have their contents omitted.
+        test "Truthy" {
+            const template_text = "{{^boolean}}This should not be rendered.{{/boolean}}";
+            const expected = "";
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Null is falsey.
+        test "Null is falsey" {
+            const template_text = "{{^null}}This should be rendered.{{/null}}";
+            const expected = "This should be rendered.";
+
+            {
+                // comptime
+                var data = .{ .@"null" = null };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // runtime
+                const Data = struct { @"null": ?u0 };
+                var data = Data{ .@"null" = null };
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Objects and hashes should behave like truthy values.
+        test "Context" {
+            const template_text = "{{^context}}Hi {{name}}.{{/context}}";
+            const expected = "";
+
+            var data = .{ .context = .{ .name = "Joe" } };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Lists should behave like truthy values.
+        test "List" {
+            const template_text = "{{^list}}{{n}}{{/list}}";
+            const expected = "";
+
+            {
+                // Slice
+                const Data = struct { list: []const struct { n: u32 } };
+                var data = Data{ .list = &.{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // Array
+                const Data = struct { list: [3]struct { n: u32 } };
+                var data = Data{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // tuple
+                var data = .{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Empty lists should behave like falsey values.
+        test "Empty List" {
+            const template_text = "{{^list}}Yay lists!{{/list}}";
+            const expected = "Yay lists!";
+
+            {
+                // Slice
+                const Data = struct { list: []const struct { n: u32 } };
+                var data = Data{ .list = &.{} };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // Array
+                const Data = struct { list: [0]struct { n: u32 } };
+                var data = Data{ .list = .{} };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // tuple
+                var data = .{ .list = .{} };
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Multiple sections per template should be permitted.
+        test "Doubled" {
+            const template_text =
+                \\{{^bool}}
+                \\* first
+                \\{{/bool}}
+                \\* {{two}}
+                \\{{^bool}}
+                \\* third
+                \\{{/bool}}
+            ;
+            const expected =
+                \\* first
+                \\* second
+                \\* third
+                \\
+            ;
+
+            var data = .{ .bool = false, .two = "second" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Nested falsey sections should have their contents rendered.
+        test "Nested (Falsey)" {
+            const template_text = "| A {{^bool}}B {{^bool}}C{{/bool}} D{{/bool}} E |";
+            const expected = "| A B C D E |";
+
+            var data = .{ .bool = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Nested truthy sections should be omitted.
+        test "Nested (Truthy)" {
+            const template_text = "| A {{^bool}}B {{^bool}}C{{/bool}} D{{/bool}} E |";
+            const expected = "| A  E |";
+
+            var data = .{ .bool = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Failed context lookups should be considered falsey.
+        test "Context Misses" {
+            const template_text = "[{{^missing}}Cannot find key 'missing'!{{/missing}}]";
+            const expected = "[Cannot find key 'missing'!]";
+
+            var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Dotted names should be valid for Inverted Section tags.
+        test "Dotted Names - Truthy" {
+            const template_text = "'{{^a.b.c}}Not Here{{/a.b.c}}' == ''";
+            const expected = "'' == ''";
+
+            var data = .{ .a = .{ .b = .{ .c = true } } };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Dotted names should be valid for Inverted Section tags.
+        test "Dotted Names - Falsey" {
+            const template_text = "'{{^a.b.c}}Not Here{{/a.b.c}}' == 'Not Here'";
+            const expected = "'Not Here' == 'Not Here'";
+
+            var data = .{ .a = .{ .b = .{ .c = false } } };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Dotted names that cannot be resolved should be considered falsey.
+        test "Dotted Names - Broken Chains" {
+            const template_text = "'{{^a.b.c}}Not Here{{/a.b.c}}' == 'Not Here'";
+            const expected = "'Not Here' == 'Not Here'";
+
+            var data = .{ .a = .{} };
             try expectRender(template_text, data, expected);
         }
     };

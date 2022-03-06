@@ -2367,7 +2367,7 @@ const tests = struct {
                             .InvertedSection => |item| {
                                 scan(item.key);
                                 checkStrings(item.content);
-                            },                            
+                            },
                             .Parent => |item| {
                                 scan(item.key);
                                 checkStrings(item.content);
