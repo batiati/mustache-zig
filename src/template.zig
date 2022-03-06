@@ -21,7 +21,7 @@ pub const ParseError = error{
 
 pub const LastError = struct {
     error_code: ParseError,
-    row: usize = 0,
+    lin: usize = 0,
     col: usize = 0,
     detail: ?[]const u8 = null,
 };
@@ -251,7 +251,7 @@ pub fn loadCachedTemplate(
     delimiters: Delimiters,
     comptime owns_string: bool,
 ) Allocator.Error!LoadCachedTemplateResult {
-    var template = Template(.{ .owns_string = owns_string }) {
+    var template = Template(.{ .owns_string = owns_string }){
         .allocator = allocator,
         .delimiters = delimiters,
     };
@@ -363,14 +363,14 @@ pub fn Template(comptime options: TemplateOptions) type {
             };
         }
 
-        pub fn collectElements(self: *Self, template_text: []const u8, out_render: anytype) StringStreamedParser.LoadError!void {
+        pub fn collectElements(self: *Self, template_text: []const u8, out_render: anytype) ErrorSet(StringStreamedParser, @TypeOf(out_render))!void {
             var parser = try StringStreamedParser.init(self.allocator, template_text, self.delimiters);
             defer parser.deinit();
 
             try self.produceElements(&parser, out_render);
         }
 
-        pub fn collectElementsFromFile(self: *Self, absolute_path: []const u8, out_render: anytype) FileStreamedParser.LoadError!void {
+        pub fn collectElementsFromFile(self: *Self, absolute_path: []const u8, out_render: anytype) ErrorSet(FileStreamedParser, @TypeOf(out_render))!void {
             var parser = try FileStreamedParser.init(self.allocator, absolute_path, self.delimiters);
             defer parser.deinit();
 
@@ -423,10 +423,19 @@ pub fn Template(comptime options: TemplateOptions) type {
             const parserInfo = @typeInfo(TParser);
             const renderInfo = @typeInfo(TRender);
 
-            if (parserInfo != .Pointer or parserInfo.Pointer.size != .One) @compileError("expected a reference to a parser, found " ++ @typeName(TParser));
-            if (renderInfo != .Pointer or renderInfo.Pointer.size != .One) @compileError("expected a reference to a render, found " ++ @typeName(TRender));
+            const ParserError = switch (parserInfo) {
+                .Struct => TParser.LoadError,
+                .Pointer => |info| if (info.size == .One) info.child.LoadError else @compileError("expected a reference to a parser, found " ++ @typeName(TParser)),
+                else => @compileError("expected a parser, found " ++ @typeName(TParser)),
+            };
 
-            return parserInfo.Pointer.child.LoadError || renderInfo.Pointer.child.Error;
+            const RenderError = switch (renderInfo) {
+                .Struct => TRender.Error,
+                .Pointer => |info| if (info.size == .One) info.child.Error else @compileError("expected a reference to a render, found " ++ @typeName(TParser)),
+                else => @compileError("expected a render, found " ++ @typeName(TParser)),
+            };
+
+            return ParserError || RenderError;
         }
     };
 }
@@ -457,7 +466,7 @@ const tests = struct {
 
         if (template.result == .Error) {
             const last_error = template.result.Error;
-            std.log.err("{s} row {}, col {}", .{ @errorName(last_error.error_code), last_error.row, last_error.col });
+            std.log.err("{s} row {}, col {}", .{ @errorName(last_error.error_code), last_error.lin, last_error.col });
             return last_error.error_code;
         }
 

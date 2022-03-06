@@ -36,7 +36,7 @@ ref_counter: RefCounter,
 ///
 /// The line on the template source
 /// Used mostly for error messages
-row: u32,
+lin: u32,
 
 ///
 /// The column on the template source

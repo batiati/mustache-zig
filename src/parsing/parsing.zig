@@ -527,7 +527,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
         fn setLastError(self: *Self, err: ParseError, text_block: ?*const TextBlock, detail: ?[]const u8) AbortError {
             self.last_error = LastError{
                 .error_code = err,
-                .row = if (text_block) |p| p.row else 0,
+                .lin = if (text_block) |p| p.lin else 0,
                 .col = if (text_block) |p| p.col else 0,
                 .detail = detail,
             };
@@ -538,7 +538,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                 \\Line {} col {}
                 \\Err {}
                 \\=================================
-            , .{ self.last_error.?.row, self.last_error.?.col, self.last_error.?.error_code });
+            , .{ self.last_error.?.lin, self.last_error.?.col, self.last_error.?.error_code });
 
             return AbortError.ParserAbortedError;
         }
@@ -730,7 +730,7 @@ test "Scan delimiters Tags" {
 fn testParseTree(parser: anytype) !?[]*Node {
     return parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
-            std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.row, err.col });
+            std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.lin, err.col });
             try testing.expect(false);
         }
 

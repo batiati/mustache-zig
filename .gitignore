@@ -1,3 +1,6 @@
 /zig-cache
 /zig-out
 src/zig-cache
+samples/zig-cache
+samples/zig-out
+samples/src/zig-cache

@@ -61,7 +61,7 @@ pub fn TextScanner(comptime source: TextSource) type {
         content: []const u8 = &.{},
         index: usize = 0,
         block_index: usize = 0,
-        row: u32 = 1,
+        lin: u32 = 1,
         col: u32 = 1,
         delimiters: [MAX_DELIMITERS]Delimiter = undefined,
         delimiters_count: u4 = 0,
@@ -193,7 +193,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                 var increment: u32 = 1;
                 defer {
                     if (self.content[self.index] == '\n') {
-                        self.row += 1;
+                        self.lin += 1;
                         self.col = 1;
                     } else {
                         self.col += increment;
@@ -209,7 +209,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                         .event = .{ .Mark = mark },
                         .tail = tail,
                         .ref_counter = if (source == .File and tail != null) self.ref_counter.ref() else .{},
-                        .row = self.row,
+                        .lin = self.lin,
                         .col = self.col,
                         .left_trimming = trimmer.getLeftTrimmingIndex(),
                         .right_trimming = trimmer.getRightTrimmingIndex(),
@@ -227,7 +227,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                         .event = .Eof,
                         .tail = self.content[self.block_index..],
                         .ref_counter = if (source == .File) self.ref_counter.ref() else .{},
-                        .row = self.row,
+                        .lin = self.lin,
                         .col = self.col,
                         .left_trimming = trimmer.getLeftTrimmingIndex(),
                         .right_trimming = trimmer.getRightTrimmingIndex(),
@@ -286,7 +286,7 @@ test "basic tests" {
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("{{", part_1.?.event.Mark.delimiter);
     try testing.expectEqualStrings("Hello", part_1.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_1.?.row);
+    try testing.expectEqual(@as(usize, 1), part_1.?.lin);
     try testing.expectEqual(@as(usize, 6), part_1.?.col);
 
     var part_2 = try reader.next(allocator);
@@ -298,7 +298,7 @@ test "basic tests" {
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("}}", part_2.?.event.Mark.delimiter);
     try testing.expectEqualStrings("tag1", part_2.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_2.?.row);
+    try testing.expectEqual(@as(usize, 1), part_2.?.lin);
     try testing.expectEqual(@as(usize, 12), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
@@ -310,7 +310,7 @@ test "basic tests" {
     try testing.expectEqual(DelimiterType.NoScapeDelimiter, part_3.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("{{{", part_3.?.event.Mark.delimiter);
     try testing.expectEqualStrings("\nWorld", part_3.?.tail.?);
-    try testing.expectEqual(@as(usize, 2), part_3.?.row);
+    try testing.expectEqual(@as(usize, 2), part_3.?.lin);
     try testing.expectEqual(@as(usize, 6), part_3.?.col);
 
     var part_4 = try reader.next(allocator);
@@ -322,7 +322,7 @@ test "basic tests" {
     try testing.expectEqual(DelimiterType.NoScapeDelimiter, part_4.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("}}}", part_4.?.event.Mark.delimiter);
     try testing.expectEqualStrings(" tag2 ", part_4.?.tail.?);
-    try testing.expectEqual(@as(usize, 2), part_4.?.row);
+    try testing.expectEqual(@as(usize, 2), part_4.?.lin);
     try testing.expectEqual(@as(usize, 15), part_4.?.col);
 
     var part_5 = try reader.next(allocator);
@@ -331,7 +331,7 @@ test "basic tests" {
 
     try testing.expectEqual(Event.Eof, part_5.?.event);
     try testing.expectEqualStrings("Until eof", part_5.?.tail.?);
-    try testing.expectEqual(@as(usize, 2), part_5.?.row);
+    try testing.expectEqual(@as(usize, 2), part_5.?.lin);
     try testing.expectEqual(@as(usize, 26), part_5.?.col);
 
     var part_6 = try reader.next(allocator);
@@ -360,7 +360,7 @@ test "custom tags" {
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("[", part_1.?.event.Mark.delimiter);
     try testing.expectEqualStrings("Hello", part_1.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_1.?.row);
+    try testing.expectEqual(@as(usize, 1), part_1.?.lin);
     try testing.expectEqual(@as(usize, 6), part_1.?.col);
 
     var part_2 = try reader.next(allocator);
@@ -372,7 +372,7 @@ test "custom tags" {
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("]", part_2.?.event.Mark.delimiter);
     try testing.expectEqualStrings("tag1", part_2.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_2.?.row);
+    try testing.expectEqual(@as(usize, 1), part_2.?.lin);
     try testing.expectEqual(@as(usize, 11), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
@@ -384,7 +384,7 @@ test "custom tags" {
     try testing.expectEqual(DelimiterType.Regular, part_3.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("[", part_3.?.event.Mark.delimiter);
     try testing.expectEqualStrings("\nWorld", part_3.?.tail.?);
-    try testing.expectEqual(@as(usize, 2), part_3.?.row);
+    try testing.expectEqual(@as(usize, 2), part_3.?.lin);
     try testing.expectEqual(@as(usize, 6), part_3.?.col);
 
     var part_4 = try reader.next(allocator);
@@ -396,7 +396,7 @@ test "custom tags" {
     try testing.expectEqual(DelimiterType.Regular, part_4.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("]", part_4.?.event.Mark.delimiter);
     try testing.expectEqualStrings(" tag2 ", part_4.?.tail.?);
-    try testing.expectEqual(@as(usize, 2), part_4.?.row);
+    try testing.expectEqual(@as(usize, 2), part_4.?.lin);
     try testing.expectEqual(@as(usize, 13), part_4.?.col);
 
     var part_5 = try reader.next(allocator);
@@ -405,7 +405,7 @@ test "custom tags" {
 
     try testing.expectEqual(Event.Eof, part_5.?.event);
     try testing.expectEqualStrings("Until eof", part_5.?.tail.?);
-    try testing.expectEqual(@as(usize, 2), part_5.?.row);
+    try testing.expectEqual(@as(usize, 2), part_5.?.lin);
     try testing.expectEqual(@as(usize, 22), part_5.?.col);
 
     var part_6 = try reader.next(allocator);
@@ -431,7 +431,7 @@ test "EOF" {
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("{{", part_1.?.event.Mark.delimiter);
     try testing.expect(part_1.?.tail == null);
-    try testing.expectEqual(@as(usize, 1), part_1.?.row);
+    try testing.expectEqual(@as(usize, 1), part_1.?.lin);
     try testing.expectEqual(@as(usize, 1), part_1.?.col);
 
     var part_2 = try reader.next(allocator);
@@ -443,7 +443,7 @@ test "EOF" {
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("}}", part_2.?.event.Mark.delimiter);
     try testing.expectEqualStrings("tag1", part_2.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_2.?.row);
+    try testing.expectEqual(@as(usize, 1), part_2.?.lin);
     try testing.expectEqual(@as(usize, 7), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
@@ -469,7 +469,7 @@ test "EOF custom tags" {
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("[", part_1.?.event.Mark.delimiter);
     try testing.expect(part_1.?.tail == null);
-    try testing.expectEqual(@as(usize, 1), part_1.?.row);
+    try testing.expectEqual(@as(usize, 1), part_1.?.lin);
     try testing.expectEqual(@as(usize, 1), part_1.?.col);
 
     var part_2 = try reader.next(allocator);
@@ -481,7 +481,7 @@ test "EOF custom tags" {
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
     try testing.expectEqualStrings("]", part_2.?.event.Mark.delimiter);
     try testing.expectEqualStrings("tag1", part_2.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_2.?.row);
+    try testing.expectEqual(@as(usize, 1), part_2.?.lin);
     try testing.expectEqual(@as(usize, 6), part_2.?.col);
 
     var part_3 = try reader.next(allocator);

@@ -15,6 +15,8 @@ const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
 
+const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
+
 pub fn renderAllocCached(allocator: Allocator, cached_template: CachedTemplate, data: anytype) Allocator.Error![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
     errdefer builder.deinit();
@@ -42,9 +44,20 @@ pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: a
     var template = Template(.{ .owns_string = false }){
         .allocator = allocator,
     };
+    errdefer template.deinit();
 
     var render = getRender(allocator, out_writer, data);
     try template.collectElements(template_text, &render);
+}
+
+pub fn renderFromFile(allocator: Allocator, absolute_template_path: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(out_writer).Error)!void {
+    var template = Template(.{ .owns_string = false }){
+        .allocator = allocator,
+    };
+    errdefer template.deinit();
+
+    var render = getRender(allocator, out_writer, data);
+    try template.collectElementsFromFile(absolute_template_path, &render);
 }
 
 fn getRender(allocator: Allocator, out_writer: anytype, data: anytype) Render(@TypeOf(out_writer), @TypeOf(data)) {
