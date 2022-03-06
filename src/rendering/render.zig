@@ -1187,5 +1187,201 @@ const tests = struct {
                 try expectRender(template_text, data, expected);
             }
         }
+
+        // Implicit iterators should cast decimals to strings and interpolate.
+        test "Implicit Iterator - Decimal" {
+            if (true) return error.SkipZigTest;
+
+            const template_text = "{{#list}}({{.}}){{/list}}";
+            const expected = "(1.1)(2.2)(3.3)(4.4)(5.5)";
+
+            {
+                // slice
+                const Data = struct { list: []const f32 };
+                var data = Data{ .list = &.{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // array
+                const Data = struct { list: [5]f32 };
+                var data = Data{ .list = .{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // tuple
+                var data = .{ .list = .{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Implicit iterators should allow iterating over nested arrays.
+        test "Implicit Iterator - Array" {
+            const template_text = "{{#list}}({{#.}}{{.}}{{/.}}){{/list}}";
+            const expected = "(123)(456)";
+
+            {
+                // slice
+
+                const Data = struct { list: []const []const u32 };
+                var data = Data{ .list = &.{
+                    &.{ 1, 2, 3 },
+                    &.{ 4, 5, 6 },
+                } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // array
+                const Data = struct { list: [2][3]u32 };
+                var data = Data{ .list = .{
+                    .{ 1, 2, 3 },
+                    .{ 4, 5, 6 },
+                } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // tuple
+                var data = .{ .list = .{
+                    .{ 1, 2, 3 },
+                    .{ 4, 5, 6 },
+                } };
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Implicit iterators should allow iterating over nested arrays.
+        test "Implicit Iterator - Mixed Array" {
+            const template_text = "{{#list}}({{#.}}{{.}}{{/.}}){{/list}}";
+            const expected = "(123)(abc)";
+
+            // Tuple is the only way to have mixed element types inside a list
+            var data = .{ .list = .{
+                .{ 1, 2, 3 },
+                .{ "a", "b", "c" },
+            } };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Dotted names should be valid for Section tags.
+        test "Dotted Names - Truthy" {
+            const template_text = "'{{#a.b.c}}Here{{/a.b.c}}' == 'Here'";
+            const expected = "'Here' == 'Here'";
+
+            var data = .{ .a = .{ .b = .{ .c = true } } };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Dotted names should be valid for Section tags.
+        test "Dotted Names - Falsey" {
+            const template_text = "'{{#a.b.c}}Here{{/a.b.c}}' == ''";
+            const expected = "'' == ''";
+
+            var data = .{ .a = .{ .b = .{ .c = false } } };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Dotted names that cannot be resolved should be considered falsey.
+        test "Dotted Names - Broken Chains" {
+            const template_text = "'{{#a.b.c}}Here{{/a.b.c}}' == ''";
+            const expected = "'' == ''";
+
+            var data = .{ .a = .{} };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Sections should not alter surrounding whitespace.
+        test "Surrounding Whitespace" {
+            const template_text = " | {{#boolean}}\t|\t{{/boolean}} | \n";
+            const expected = " | \t|\t | \n";
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Sections should not alter internal whitespace.
+        test "Internal Whitespace" {
+            const template_text = " | {{#boolean}} {{! Important Whitespace }}\n {{/boolean}} | \n";
+            const expected = " |  \n  | \n";
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Single-line sections should not alter surrounding whitespace.
+        test "Indented Inline Sections" {
+            const template_text = " {{#boolean}}YES{{/boolean}}\n {{#boolean}}GOOD{{/boolean}}\n";
+            const expected = " YES\n GOOD\n";
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone lines should be removed from the template.
+        test "Standalone Lines" {
+            const template_text =
+                \\| This Is
+                \\{{#boolean}}
+                \\|
+                \\{{/boolean}}
+                \\| A Line
+            ;
+            const expected =
+                \\| This Is
+                \\|
+                \\| A Line
+            ;
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Indented standalone lines should be removed from the template.
+        test "Indented Standalone Lines" {
+            const template_text =
+                \\| This Is
+                \\  {{#boolean}}
+                \\|
+                \\  {{/boolean}}
+                \\| A Line
+            ;
+            const expected =
+                \\| This Is
+                \\|
+                \\| A Line
+            ;
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // "\r\n" should be considered a newline for standalone tags.
+        test "Standalone Line Endings" {
+            const template_text = "|\r\n{{#boolean}}\r\n{{/boolean}}\r\n|";
+            const expected = "|\r\n|";
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone tags should not require a newline to precede them.
+        test "Standalone Line Endings" {
+            const template_text = "  {{#boolean}}\n#{{/boolean}}\n/";
+            const expected = "#\n/";
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone tags should not require a newline to follow them.
+        test "Standalone Without Newline" {
+            const template_text = "#{{#boolean}}\n/\n  {{/boolean}}";
+            const expected = "#\n/\n";
+
+            var data = .{ .boolean = true };
+            try expectRender(template_text, data, expected);
+        }
     };
 };
