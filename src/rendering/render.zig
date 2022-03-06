@@ -1574,5 +1574,106 @@ const tests = struct {
             var data = .{ .a = .{} };
             try expectRender(template_text, data, expected);
         }
+
+        // Inverted sections should not alter surrounding whitespace.
+        test "Surrounding Whitespace" {
+            const template_text = " | {{^boolean}}\t|\t{{/boolean}} | \n";
+            const expected = " | \t|\t | \n";
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Inverted should not alter internal whitespace.
+        test "Internal Whitespace" {
+            const template_text = " | {{^boolean}} {{! Important Whitespace }}\n {{/boolean}} | \n";
+            const expected = " |  \n  | \n";
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Single-line sections should not alter surrounding whitespace.
+        test "Indented Inline Sections" {
+            const template_text = " {{^boolean}}NO{{/boolean}}\n {{^boolean}}WAY{{/boolean}}\n";
+            const expected = " NO\n WAY\n";
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone lines should be removed from the template.
+        test "Standalone Lines" {
+            const template_text =
+                \\| This Is
+                \\{{^boolean}}
+                \\|
+                \\{{/boolean}}
+                \\| A Line
+            ;
+            const expected =
+                \\| This Is
+                \\|
+                \\| A Line
+            ;
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone indented lines should be removed from the template.
+        test "Standalone Indented Lines" {
+            const template_text =
+                \\| This Is
+                \\  {{^boolean}}
+                \\|
+                \\  {{/boolean}}
+                \\| A Line
+            ;
+            const expected =
+                \\| This Is
+                \\|
+                \\| A Line
+            ;
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // "\r\n" should be considered a newline for standalone tags.
+        test "Standalone Line Endings" {
+            const template_text = "|\r\n{{^boolean}}\r\n{{/boolean}}\r\n|";
+            const expected = "|\r\n|";
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone tags should not require a newline to precede them.
+        test "Standalone Without Previous Line" {
+            const template_text = "  {{^boolean}}\n^{{/boolean}}\n/";
+            const expected = "^\n/";
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Standalone tags should not require a newline to follow them.
+        test "Standalone Without Newline" {
+            const template_text = "^{{^boolean}}\n/\n  {{/boolean}}";
+            const expected = "^\n/\n";
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Superfluous in-tag whitespace should be ignored.
+        test "Padding" {
+            const template_text = "|{{^ boolean }}={{/ boolean }}|";
+            const expected = "|=|";
+
+            var data = .{ .boolean = false };
+            try expectRender(template_text, data, expected);
+        }
     };
 };
