@@ -8,7 +8,7 @@ Mustache-Zig is an implementation of the [{{mustache}} template system](https://
 
 ## Full spec compliant
 
-- Supports all elements from [mustache spec](https://github.com/mustache/spec) with all tests passing ✔️.
+- Supports most of elements from [mustache spec](https://github.com/mustache/spec) with all tests passing ✔️.
 
     delimiters
     interpolation
