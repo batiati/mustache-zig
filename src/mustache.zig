@@ -19,6 +19,11 @@ pub const CachedTemplate = template.CachedTemplate;
 pub const loadCachedTemplate = template.loadCachedTemplate;
 pub const loadCachedTemplateFromFile = template.loadCachedTemplateFromFile;
 
+pub const renderCached = rendering.renderCached;
+pub const renderAllocCached = rendering.renderAllocCached;
+pub const renderFromString = rendering.renderFromString;
+pub const renderAllocFromString = rendering.renderAllocFromString;
+
 test {
     std.testing.refAllDecls(@This());
 }

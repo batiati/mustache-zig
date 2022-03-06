@@ -251,8 +251,13 @@ pub fn loadCachedTemplate(
     delimiters: Delimiters,
     comptime owns_string: bool,
 ) Allocator.Error!LoadCachedTemplateResult {
-    var template = try Template(.{ .owns_string = owns_string }).init(allocator, template_text, delimiters);
-    defer template.deinit(allocator);
+    var template = Template(.{ .owns_string = owns_string }) {
+        .allocator = allocator,
+        .delimiters = delimiters,
+    };
+    errdefer template.deinit();
+
+    try template.load(template_text);
 
     switch (template.result) {
         .Error => |last_error| return LoadCachedTemplateResult{ .ParseError = last_error },

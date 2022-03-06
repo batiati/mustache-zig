@@ -7,6 +7,7 @@ const mustache = @import("../mustache.zig");
 const Element = mustache.Element;
 const Section = mustache.Section;
 const ParseError = mustache.ParseError;
+const CachedTemplate = mustache.CachedTemplate;
 
 const Template = @import("../template.zig").Template;
 
@@ -14,30 +15,30 @@ const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
 
-pub fn renderAllocCached(allocator: Allocator, data: anytype, elements: []const Element) Allocator.Error![]const u8 {
+pub fn renderAllocCached(allocator: Allocator, cached_template: CachedTemplate, data: anytype) Allocator.Error![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
     errdefer builder.deinit();
 
-    try renderCached(allocator, data, elements, builder.writer());
+    try renderCached(allocator, cached_template, data, builder.writer());
 
     return builder.toOwnedSlice();
 }
 
-pub fn renderCached(allocator: Allocator, data: anytype, elements: []const Element, out_writer: anytype) (Allocator.Error || @TypeOf(out_writer).Error)!void {
+pub fn renderCached(allocator: Allocator, cached_template: CachedTemplate, data: anytype, out_writer: anytype) (Allocator.Error || @TypeOf(out_writer).Error)!void {
     var render = getRender(allocator, out_writer, data);
-    try render.render(elements);
+    try render.render(cached_template.elements);
 }
 
-pub fn renderAllocFromString(allocator: Allocator, data: anytype, template_text: []const u8) (Allocator.Error || ParseError)![]const u8 {
+pub fn renderAllocFromString(allocator: Allocator, template_text: []const u8, data: anytype) (Allocator.Error || ParseError)![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
     errdefer builder.deinit();
 
-    try renderFromString(allocator, data, template_text, builder.writer());
+    try renderFromString(allocator, template_text, data, builder.writer());
 
     return builder.toOwnedSlice();
 }
 
-pub fn renderFromString(allocator: Allocator, data: anytype, template_text: []const u8, out_writer: anytype) (Allocator.Error || ParseError || @TypeOf(out_writer).Error)!void {
+pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || @TypeOf(out_writer).Error)!void {
     var template = Template(.{ .owns_string = false }){
         .allocator = allocator,
     };
@@ -46,7 +47,7 @@ pub fn renderFromString(allocator: Allocator, data: anytype, template_text: []co
     try template.collectElements(template_text, &render);
 }
 
-pub fn getRender(allocator: Allocator, out_writer: anytype, data: anytype) Render(@TypeOf(out_writer), @TypeOf(data)) {
+fn getRender(allocator: Allocator, out_writer: anytype, data: anytype) Render(@TypeOf(out_writer), @TypeOf(data)) {
     return Render(@TypeOf(out_writer), @TypeOf(data)){
         .allocator = allocator,
         .writer = out_writer,
@@ -181,24 +182,20 @@ const tests = struct {
 
         {
             // Cached template render
-            var cached_template = Template(.{}){
-                .allocator = allocator,
+            var cached_template = switch (try mustache.loadCachedTemplate(allocator, template_text, .{}, false)) {
+                .ParseError => return try testing.expect(false),
+                .Success => |ret| ret,
             };
-            defer cached_template.deinit();
+            defer cached_template.free(allocator);
 
-            try cached_template.load(template_text);
-
-            try testing.expect(cached_template.result == .Elements);
-            const cached_elements = cached_template.result.Elements;
-
-            var result = try renderAllocCached(allocator, data, cached_elements);
+            var result = try renderAllocCached(allocator, cached_template, data);
             defer allocator.free(result);
             try testing.expectEqualStrings(expected, result);
         }
 
         {
             // Streamed template render
-            var result = try renderAllocFromString(allocator, data, template_text);
+            var result = try renderAllocFromString(allocator, template_text, data);
             defer allocator.free(result);
 
             try testing.expectEqualStrings(expected, result);
