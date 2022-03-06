@@ -69,12 +69,38 @@ pub fn Context(comptime Writer: type) type {
             current: usize,
             finished: bool,
 
+            pub fn hasNext(self: Iterator) bool {
+                if (self.finished) {
+                    return false;
+                } else {
+                    const result = self.context.vtable.check(
+                        self.context.ptr,
+                        self.path,
+                        self.current,
+                    );
+
+                    return switch (result) {
+                        .Resolved => true,
+                        .IteratorConsumed => false,
+                        else => {
+                            assert(false);
+                            unreachable;
+                        },
+                    };
+                }
+            }
+
             pub fn next(self: *Iterator, allocator: Allocator) Allocator.Error!?Self {
                 if (self.finished) {
                     return null;
                 } else {
                     defer self.current += 1;
-                    const result = try self.context.vtable.get(self.context.ptr, allocator, self.path, self.current);
+                    const result = try self.context.vtable.get(
+                        self.context.ptr,
+                        allocator,
+                        self.path,
+                        self.current,
+                    );
 
                     // Keeping the iterator pattern
                     switch (result) {
@@ -243,10 +269,7 @@ const Comptime = struct {
         return struct {
             const Result = PathResolution(TReturn);
 
-            const Depth = enum {
-                Root,
-                Leaf,
-            };
+            const Depth = enum { Root, Leaf };
 
             pub inline fn call(
                 action_param: anytype,
@@ -369,7 +392,31 @@ const Comptime = struct {
                     .Struct => |info| {
                         if (info.is_tuple) {
                             inline for (info.fields) |_, i| {
-                                if (index == i) return Result{ .Resolved = try action_fn(action_param, out_writer, data[i]) };
+                                if (index == i) {
+                                    return Result{
+                                        .Resolved = blk: {
+
+                                            // Tuple fields can be a comptime value
+                                            // We must convert it to a runtime type
+                                            const Data = @TypeOf(data[i]);
+                                            if (Data == comptime_int) {
+                                                const RuntimeInt = if (data[i] > 0) std.math.IntFittingRange(0, data[i]) else std.math.IntFittingRange(data[i], 0);
+                                                var runtime_value: RuntimeInt = data[i];
+                                                break :blk try action_fn(action_param, out_writer, runtime_value);
+                                            } else if (Data == comptime_float) {
+                                                var runtime_value: f64 = data[i];
+                                                break :blk try action_fn(action_param, out_writer, runtime_value);
+                                            } else if (Data == @TypeOf(null)) {
+                                                var runtime_value: ?u0 = null;
+                                                break :blk try action_fn(action_param, out_writer, runtime_value);
+                                            } else if (Data == void) {
+                                                return .IteratorConsumed;
+                                            } else {
+                                                break :blk try action_fn(action_param, out_writer, data[i]);
+                                            }
+                                        },
+                                    };
+                                }
                             } else {
                                 return .IteratorConsumed;
                             }
@@ -377,14 +424,22 @@ const Comptime = struct {
                     },
 
                     // Booleans are evaluated on the iterator
-                    .Bool => return if (data == true and index == 0) Result{ .Resolved = try action_fn(action_param, out_writer, data) } else .IteratorConsumed,
+                    .Bool => {
+                        return if (data == true and index == 0)
+                            Result{ .Resolved = try action_fn(action_param, out_writer, data) }
+                        else
+                            .IteratorConsumed;
+                    },
 
                     .Pointer => |info| switch (info.size) {
                         .Slice => {
 
                             //Slice of u8 is always string
                             if (info.child != u8) {
-                                return if (index < data.len) Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) } else .IteratorConsumed;
+                                return if (index < data.len)
+                                    Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                                else
+                                    .IteratorConsumed;
                             }
                         },
                         else => {},
@@ -394,15 +449,26 @@ const Comptime = struct {
 
                         //Array of u8 is always string
                         if (info.child != u8) {
-                            return if (index < data.len) Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) } else .IteratorConsumed;
+                            return if (index < data.len)
+                                Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                            else
+                                .IteratorConsumed;
                         }
                     },
 
-                    .Optional => return if (data) |value| try iterateAt(action_param, out_writer, value, index) else .IteratorConsumed,
+                    .Optional => {
+                        return if (data) |value|
+                            try iterateAt(action_param, out_writer, value, index)
+                        else
+                            .IteratorConsumed;
+                    },
                     else => {},
                 }
 
-                return if (index == 0) Result{ .Resolved = try action_fn(action_param, out_writer, data) } else .IteratorConsumed;
+                return if (index == 0)
+                    Result{ .Resolved = try action_fn(action_param, out_writer, data) }
+                else
+                    .IteratorConsumed;
             }
         };
     }

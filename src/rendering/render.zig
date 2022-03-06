@@ -90,21 +90,19 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                         .Section => |section| {
                             if (self.getIterator(stack, section)) |*iterator| {
                                 if (section.inverted) {
-                                    if (try iterator.next(self.allocator)) |some| {
-                                        some.deinit(self.allocator);
-                                    } else {
+                                    if (!iterator.hasNext()) {
                                         try self.renderLevel(stack, section.content);
                                     }
                                 } else {
                                     while (try iterator.next(self.allocator)) |item_ctx| {
                                         defer item_ctx.deinit(self.allocator);
 
-                                        var next_step = Stack{
+                                        var next_level = Stack{
                                             .parent = stack,
                                             .ctx = item_ctx,
                                         };
 
-                                        try self.renderLevel(&next_step, section.content);
+                                        try self.renderLevel(&next_level, section.content);
                                     }
                                 }
                             }
@@ -123,19 +121,16 @@ fn Render(comptime Writer: type, comptime Data: type) type {
 
                 switch (path_resolution) {
                     .Resolved => {
-
                         // Success, break the loop
                         break;
                     },
 
                     .IteratorConsumed, .ChainBroken => {
-
                         // Not rendered, but should NOT try against the parent context
                         break;
                     },
 
                     .NotFoundInContext => {
-
                         // Not rendered, should try against the parent context
                         continue;
                     },
@@ -150,8 +145,8 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             while (level) |current| : (level = current.parent) {
                 switch (current.ctx.iterator(section.key)) {
                     .Resolved => |found| return found,
-                    .IteratorConsumed, .ChainBroken => {
 
+                    .IteratorConsumed, .ChainBroken => {
                         // Not found, but should NOT try against the parent context
                         break;
                     },
@@ -1002,6 +997,193 @@ const tests = struct {
                     .c = .{ .three = 3, .d = .{ .four = 4, .five = 5 } },
                 };
 
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Lists should be iterated; list items should visit the context stack.
+        test "List" {
+            const template_text = "{{#list}}{{item}}{{/list}}";
+            const expected = "123";
+
+            {
+                // slice
+                const Data = struct { list: []const struct { item: u32 } };
+
+                var data = Data{
+                    .list = &.{
+                        .{ .item = 1 },
+                        .{ .item = 2 },
+                        .{ .item = 3 },
+                    },
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // array
+                const Data = struct { list: [3]struct { item: u32 } };
+
+                var data = Data{
+                    .list = .{
+                        .{ .item = 1 },
+                        .{ .item = 2 },
+                        .{ .item = 3 },
+                    },
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // tuple
+                var data = .{
+                    .list = .{
+                        .{ .item = 1 },
+                        .{ .item = 2 },
+                        .{ .item = 3 },
+                    },
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Empty lists should behave like falsey values.
+        test "Empty List" {
+            const template_text = "{{#list}}Yay lists!{{/list}}";
+            const expected = "";
+
+            {
+                // slice
+                const Data = struct { list: []const struct { item: u32 } };
+
+                var data = Data{
+                    .list = &.{},
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // array
+                const Data = struct { list: [0]struct { item: u32 } };
+
+                var data = Data{
+                    .list = .{},
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // tuple
+                var data = .{
+                    .list = .{},
+                };
+
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Multiple sections per template should be permitted.
+        test "Doubled" {
+            const template_text =
+                \\{{#bool}}
+                \\* first
+                \\{{/bool}}
+                \\* {{two}}
+                \\{{#bool}}
+                \\* third
+                \\{{/bool}}
+            ;
+            const expected =
+                \\* first
+                \\* second
+                \\* third
+                \\
+            ;
+
+            var data = .{ .bool = true, .two = "second" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Nested truthy sections should have their contents rendered.
+        test "Nested (Truthy)" {
+            const template_text = "| A {{#bool}}B {{#bool}}C{{/bool}} D{{/bool}} E |";
+            const expected = "| A B C D E |";
+
+            var data = .{ .bool = true };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Nested falsey sections should be omitted.
+        test "Nested (Falsey)" {
+            const template_text = "| A {{#bool}}B {{#bool}}C{{/bool}} D{{/bool}} E |";
+            const expected = "| A  E |";
+
+            var data = .{ .bool = false };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Failed context lookups should be considered falsey.
+        test "Context Misses" {
+            const template_text = "[{{#missing}}Found key 'missing'!{{/missing}}]";
+            const expected = "[]";
+
+            var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Implicit iterators should directly interpolate strings.
+        test "Implicit Iterator - String" {
+            const template_text = "{{#list}}({{.}}){{/list}}";
+            const expected = "(a)(b)(c)(d)(e)";
+
+            {
+                // slice
+                const Data = struct { list: []const []const u8 };
+                var data = Data{ .list = &.{ "a", "b", "c", "d", "e" } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // array
+                const Data = struct { list: [5][]const u8 };
+                var data = Data{ .list = .{ "a", "b", "c", "d", "e" } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // tuple
+                var data = .{ .list = .{ "a", "b", "c", "d", "e" } };
+                try expectRender(template_text, data, expected);
+            }
+        }
+
+        // Implicit iterators should cast integers to strings and interpolate.
+        test "Implicit Iterator - Integer" {
+            const template_text = "{{#list}}({{.}}){{/list}}";
+            const expected = "(1)(2)(3)(4)(5)";
+
+            {
+                // slice
+                const Data = struct { list: []const u32 };
+                var data = Data{ .list = &.{ 1, 2, 3, 4, 5 } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // array
+                const Data = struct { list: [5]u32 };
+                var data = Data{ .list = .{ 1, 2, 3, 4, 5 } };
+                try expectRender(template_text, data, expected);
+            }
+
+            {
+                // tuple
+                var data = .{ .list = .{ 1, 2, 3, 4, 5 } };
                 try expectRender(template_text, data, expected);
             }
         }
