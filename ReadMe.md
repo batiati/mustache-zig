@@ -11,17 +11,26 @@ Mustache-Zig is an implementation of the [{{mustache}} template system](https://
 - Supports most of elements from [mustache spec](https://github.com/mustache/spec) with all tests passing ✔️.
 
 delimiters: `{{=[]=}}`
+
 interpolation: `{{name}}`
+
 unescaped interpolation: `{{&name}}` and `{{{name}}}`
+
 sections: `{{#items}}` and `{{/items}}`
+
 inverted sections: `{{^finished}}` and `{{/finished}}`
+
 comments: `{{! blah blah }}`
+
 
 - Partials and inheritance comming soon ...
 
 partials: `{{>partial}}`
+
 parent: `{{<parent}}`
+
 blocks: `{{$block}}`
+
 
 ## Designed for low memory consumption.
 
