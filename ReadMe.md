@@ -43,7 +43,7 @@ So, it's important to be able to deal with multi-megabyte inputs without eating 
 
 ## Samples
 
-- See the source code
+- See the [source code](https://github.com/batiati/mustache-zig/tree/master/samples)
 
 ## Licensing
 
