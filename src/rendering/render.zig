@@ -4,11 +4,11 @@ const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
 const mustache = @import("../mustache.zig");
-const Element = mustache.template.Element;
-const Template = mustache.template.Template;
-const Interpolation = mustache.template.Interpolation;
-const Section = mustache.template.Section;
-const ParseError = mustache.template.ParseError;
+const Element = mustache.Element;
+const Section = mustache.Section;
+const ParseError = mustache.ParseError;
+
+const Template = @import("../template.zig").Template;
 
 const context = @import("context.zig");
 const Context = context.Context;
@@ -181,8 +181,12 @@ const tests = struct {
 
         {
             // Cached template render
-            var cached_template = try Template(.{}).init(allocator, template_text);
+            var cached_template = Template(.{}){
+                .allocator = allocator,
+            };
             defer cached_template.deinit();
+
+            try cached_template.load(template_text);
 
             try testing.expect(cached_template.result == .Elements);
             const cached_elements = cached_template.result.Elements;

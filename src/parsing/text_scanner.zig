@@ -8,7 +8,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const ParseError = mustache.template.ParseError;
+const ParseError = mustache.ParseError;
 
 const parsing = @import("parsing.zig");
 const Event = parsing.Event;

@@ -3,18 +3,16 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 const mustache = @import("../mustache.zig");
-const TemplateOptions = mustache.template.TemplateOptions;
+const TemplateOptions = mustache.TemplateOptions;
+const Element = mustache.Element;
+const Section = mustache.Section;
+const Partial = mustache.Partial;
+const Parent = mustache.Parent;
+const Block = mustache.Block;
+const LastError = mustache.LastError;
+const ParseError = mustache.ParseError;
 
-const Template = mustache.template.Template;
-const Element = mustache.template.Element;
-const Interpolation = mustache.template.Interpolation;
-const Section = mustache.template.Section;
-const Partial = mustache.template.Partial;
-const Parent = mustache.template.Parent;
-const Block = mustache.template.Block;
-const LastError = mustache.template.LastError;
-
-const ParseError = mustache.template.ParseError;
+const Template = @import("../template.zig").Template;
 
 const mem = @import("../mem.zig");
 const EpochArena = mem.EpochArena;
@@ -141,9 +139,9 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             WaitingEndingTag,
         };
 
-        const ProcessingError = Allocator.Error || if (options.source == .File) std.fs.File.ReadError || std.fs.File.OpenError else error{};
+        pub const LoadError = Allocator.Error || if (options.source == .File) std.fs.File.ReadError || std.fs.File.OpenError else error{};
 
-        pub const Error = (ParseError || ProcessingError);
+        pub const AbortError = error{ParserAbortedError};
 
         pub const options = struct {
             pub const source = parser_options.source;
@@ -208,31 +206,16 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             if (!options.owns_string) self.ref_counter_holder.free(self.gpa);
         }
 
-        pub fn parse(self: *Self) ProcessingError!ParseResult {
-            var ret = self.parseTree() catch |err| {
-                return try self.fromError(err);
+        pub fn parse(self: *Self) LoadError!ParseResult {
+            var ret = self.parseTree() catch |err| switch (err) {
+                error.ParserAbortedError => return ParseResult{ .Error = self.last_error orelse unreachable },
+                else => return @errSetCast(LoadError, err),
             };
 
             if (ret) |nodes| {
                 return ParseResult{ .Nodes = nodes };
             } else {
                 return ParseResult.Done;
-            }
-        }
-
-        fn fromError(self: *Self, err: Error) ProcessingError!ParseResult {
-            switch (err) {
-                ParseError.StartingDelimiterMismatch,
-                ParseError.EndingDelimiterMismatch,
-                ParseError.UnexpectedEof,
-                ParseError.UnexpectedCloseSection,
-                ParseError.InvalidDelimiters,
-                ParseError.InvalidIdentifier,
-                ParseError.ClosingTagMismatch,
-                => |parse_err| return ParseResult{
-                    .Error = self.last_error orelse .{ .error_code = parse_err },
-                },
-                else => |any| return any,
             }
         }
 
@@ -245,7 +228,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             }
         }
 
-        pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) Error![]Element {
+        pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) (AbortError || LoadError)![]Element {
             var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
             errdefer list.deinit(self.gpa);
             defer Node.deinitMany(self.gpa, nodes);
@@ -322,7 +305,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             return list.toOwnedSlice(self.gpa);
         }
 
-        fn matchBlockType(self: *Self, text_block: *TextBlock) Error!?BlockType {
+        fn matchBlockType(self: *Self, text_block: *TextBlock) AbortError!?BlockType {
             switch (text_block.event) {
                 .Mark => |tag_mark| {
                     switch (self.state) {
@@ -367,7 +350,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             return null;
         }
 
-        fn parseDelimiters(self: *Self, text_block: *TextBlock) Error!Delimiters {
+        fn parseDelimiters(self: *Self, text_block: *TextBlock) AbortError!Delimiters {
             var delimiter: ?Delimiters = if (text_block.tail) |content| blk: {
 
                 // Delimiters are the only case of match closing tags {{= and =}}
@@ -394,7 +377,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             }
         }
 
-        fn parseIdentificator(self: *Self, text_block: *const TextBlock) ParseError![]const u8 {
+        fn parseIdentificator(self: *Self, text_block: *const TextBlock) AbortError![]const u8 {
             if (text_block.tail) |tail| {
                 var tokenizer = std.mem.tokenize(u8, tail, " \t");
                 if (tokenizer.next()) |token| {
@@ -407,7 +390,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             return self.setLastError(ParseError.InvalidIdentifier, text_block, null);
         }
 
-        fn parseTree(self: *Self) Error!?[]*Node {
+        fn parseTree(self: *Self) (AbortError || LoadError)!?[]*Node {
             if (self.text_scanner.delimiters_count == 0) {
                 self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
                     return self.setLastError(err, null, null);
@@ -541,7 +524,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             }
         }
 
-        fn setLastError(self: *Self, err: ParseError, text_block: ?*const TextBlock, detail: ?[]const u8) ParseError {
+        fn setLastError(self: *Self, err: ParseError, text_block: ?*const TextBlock, detail: ?[]const u8) AbortError {
             self.last_error = LastError{
                 .error_code = err,
                 .row = if (text_block) |p| p.row else 0,
@@ -557,7 +540,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                 \\=================================
             , .{ self.last_error.?.row, self.last_error.?.col, self.last_error.?.error_code });
 
-            return err;
+            return AbortError.ParserAbortedError;
         }
     };
 }
