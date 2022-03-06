@@ -10,18 +10,18 @@ Mustache-Zig is an implementation of the [{{mustache}} template system](https://
 
 - Supports most of elements from [mustache spec](https://github.com/mustache/spec) with all tests passing ✔️.
 
-    delimiters
-    interpolation
-    unescaped interpolation
-    sections
-    inverted sections
-    comments
+delimiters: `{{=[]=}}`
+interpolation: `{{name}}`
+unescaped interpolation: `{{&name}}` and `{{{name}}}`
+sections: `{{#items}}` and `{{/items}}`
+inverted sections: `{{^finished}}` and `{{/finished}}`
+comments: `{{! blah blah }}`
 
 - Partials and inheritance comming soon ...
 
-    partials
-    parent
-    blocks
+partials: `{{>partial}}`
+parent: `{{<parent}}`
+blocks: `{{$block}}`
 
 ## Designed for low memory consumption.
 
@@ -37,13 +37,14 @@ So, it's important to be able to deal with multi-megabyte inputs without eating 
     };
     defer _ = plenty_of_memory.deinit();
 
-    try mustache.renderFromFile(plenty_of_memory.allocator(), data, "10MB_file.mustache", ctx, out_writer);
+    try mustache.renderFromFile(plenty_of_memory.allocator(), "10MB_file.mustache", ctx, out_writer);
 
 ```
 
 ## Samples
 
-- See the [source code](https://github.com/batiati/mustache-zig/tree/master/samples)
+Render template from strings, files and cached templates.
+See the [source code](https://github.com/batiati/mustache-zig/tree/master/samples)
 
 ## Licensing
 
