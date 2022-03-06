@@ -59,7 +59,7 @@ pub const BlockType = enum {
     Comment,
     Delimiters,
     Interpolation,
-    NoScapeInterpolation,
+    UnescapedInterpolation,
     Section,
     InvertedSection,
     CloseSection,
@@ -71,7 +71,7 @@ pub const BlockType = enum {
         return switch (self) {
             .StaticText,
             .Interpolation,
-            .NoScapeInterpolation,
+            .UnescapedInterpolation,
             => false,
             else => true,
         };
@@ -297,63 +297,18 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                             errdefer if (options.owns_string) if (indentation) |indentation_value| self.gpa.free(indentation_value);
 
                             break :blk switch (block_type) {
-                                .Interpolation,
-                                .NoScapeInterpolation,
-                                => {
-                                    break :blk Element{
-                                        .Interpolation = Interpolation{
-                                            .escaped = block_type != .NoScapeInterpolation,
-                                            .key = key,
-                                        },
-                                    };
-                                },
-
-                                .Section,
-                                .InvertedSection,
-                                => {
-                                    break :blk Element{
-                                        .Section = Section{
-                                            .inverted = block_type == .InvertedSection,
-                                            .key = key,
-                                            .content = content,
-                                        },
-                                    };
-                                },
-
-                                .Partial => {
-                                    break :blk Element{
-                                        .Partial = Partial{
-                                            .key = key,
-                                            .indentation = indentation,
-                                        },
-                                    };
-                                },
-
-                                .Parent => {
-                                    break :blk Element{
-                                        .Parent = Parent{
-                                            .key = key,
-                                            .indentation = indentation,
-                                            .content = content,
-                                        },
-                                    };
-                                },
-
-                                .Block => {
-                                    break :blk Element{
-                                        .Block = Block{
-                                            .key = key,
-                                            .content = content,
-                                        },
-                                    };
-                                },
-
-                                // Already processed
+                                .Interpolation => Element{ .Interpolation = key },
+                                .UnescapedInterpolation => Element{ .UnescapedInterpolation = key },
+                                .Section => Element{ .Section = .{ .key = key, .content = content } },
+                                .InvertedSection => Element{ .InvertedSection = .{ .key = key, .content = content } },
+                                .Partial => Element{ .Partial = .{ .key = key, .indentation = indentation } },
+                                .Parent => Element{ .Parent = .{ .key = key, .indentation = indentation, .content = content } },
+                                .Block => Element{ .Block = .{ .key = key, .content = content } },
                                 .StaticText,
                                 .Comment,
                                 .Delimiters,
                                 .CloseSection,
-                                => unreachable,
+                                => unreachable, // Already processed
                             };
                         },
                     }
@@ -393,7 +348,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
 
                             const is_triple_mustache = tag_mark.delimiter_type == .NoScapeDelimiter;
                             if (is_triple_mustache) {
-                                return .NoScapeInterpolation;
+                                return .UnescapedInterpolation;
                             } else {
 
                                 // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, <, $, =, &, /)
@@ -664,7 +619,7 @@ test "Basic parse" {
 
             try testing.expectEqual(BlockType.StaticText, section[2].block_type);
 
-            try testing.expectEqual(BlockType.NoScapeInterpolation, section[3].block_type);
+            try testing.expectEqual(BlockType.UnescapedInterpolation, section[3].block_type);
             try testing.expectEqualStrings("comments", section[3].text_block.tail.?);
 
             try testing.expectEqual(BlockType.StaticText, section[4].block_type);

@@ -73,7 +73,7 @@ pub fn readBlockType(self: *Self) ?BlockType {
             tokens.Parent => .Parent,
             tokens.Block => .Block,
             tokens.Delimiters => .Delimiters,
-            tokens.NoEscape => .NoScapeInterpolation,
+            tokens.NoEscape => .UnescapedInterpolation,
             tokens.CloseSection => .CloseSection,
             else => null,
         };

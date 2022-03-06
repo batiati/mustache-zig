@@ -27,12 +27,10 @@ pub const LastError = struct {
 };
 
 pub const Interpolation = struct {
-    escaped: bool,
     key: []const u8,
 };
 
 pub const Section = struct {
-    inverted: bool,
     key: []const u8,
     content: ?[]const Element,
 };
@@ -90,7 +88,8 @@ pub const Element = union(enum) {
     ///  interpolation.
     ///
     ///  The Interpolation tags MUST NOT be treated as standalone.
-    Interpolation: Interpolation,
+    Interpolation: []const u8,
+    UnescapedInterpolation: []const u8,
 
     ///
     ///  Section tags and End Section tags are used in combination to wrap a section
@@ -135,6 +134,7 @@ pub const Element = union(enum) {
     ///  
     ///  Section and End Section tags SHOULD be treated as standalone when appropriate.
     Section: Section,
+    InvertedSection: Section,
 
     ///
     /// Partial tags are used to expand an external template into the current
@@ -198,12 +198,16 @@ pub const Element = union(enum) {
     pub fn free(self: Element, allocator: Allocator, owns_string: bool) void {
         switch (self) {
             .StaticText => |content| if (owns_string) allocator.free(content),
-            .Interpolation => |interpolation| if (owns_string) allocator.free(interpolation.key),
+            .Interpolation => |path| if (owns_string) allocator.free(path),
+            .UnescapedInterpolation => |path| if (owns_string) allocator.free(path),
             .Section => |section| {
                 if (owns_string) allocator.free(section.key);
                 freeMany(allocator, owns_string, section.content);
             },
-
+            .InvertedSection => |section| {
+                if (owns_string) allocator.free(section.key);
+                freeMany(allocator, owns_string, section.content);
+            },
             .Partial => |partial| {
                 if (owns_string) allocator.free(partial.key);
                 if (partial.indentation) |indentation| allocator.free(indentation);
@@ -651,7 +655,7 @@ const tests = struct {
             try testing.expectEqualStrings("(", elements[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("text", elements[1].Interpolation.key);
+            try testing.expectEqualStrings("text", elements[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings(")", elements[2].StaticText);
@@ -673,7 +677,7 @@ const tests = struct {
             try testing.expectEqualStrings("(", elements[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("text", elements[1].Interpolation.key);
+            try testing.expectEqualStrings("text", elements[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings(")", elements[2].StaticText);
@@ -716,7 +720,7 @@ const tests = struct {
                 try testing.expectEqualStrings("  ", section[0].StaticText);
 
                 try testing.expectEqual(Element.Interpolation, section[1]);
-                try testing.expectEqualStrings("data", section[1].Interpolation.key);
+                try testing.expectEqualStrings("data", section[1].Interpolation);
 
                 try testing.expectEqual(Element.StaticText, section[2]);
                 try testing.expectEqualStrings("\n  |data|\n", section[2].StaticText);
@@ -737,7 +741,7 @@ const tests = struct {
                 try testing.expectEqualStrings("  {{data}}\n  ", section[0].StaticText);
 
                 try testing.expectEqual(Element.Interpolation, section[1]);
-                try testing.expectEqualStrings("data", section[1].Interpolation.key);
+                try testing.expectEqualStrings("data", section[1].Interpolation);
 
                 try testing.expectEqual(Element.StaticText, section[2]);
                 try testing.expectEqualStrings("\n", section[2].StaticText);
@@ -777,18 +781,17 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("[\n", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("section", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("section", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 3), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
                 try testing.expectEqualStrings("  ", section[0].StaticText);
 
                 try testing.expectEqual(Element.Interpolation, section[1]);
-                try testing.expectEqualStrings("data", section[1].Interpolation.key);
+                try testing.expectEqualStrings("data", section[1].Interpolation);
 
                 try testing.expectEqual(Element.StaticText, section[2]);
                 try testing.expectEqualStrings("\n  |data|\n", section[2].StaticText);
@@ -799,18 +802,17 @@ const tests = struct {
 
             // Delimiters changed
 
-            try testing.expectEqual(Element.Section, elements[2]);
-            try testing.expectEqualStrings("section", elements[2].Section.key);
-            try testing.expectEqual(true, elements[2].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[2]);
+            try testing.expectEqualStrings("section", elements[2].InvertedSection.key);
 
-            if (elements[2].Section.content) |section| {
+            if (elements[2].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 3), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
                 try testing.expectEqualStrings("  {{data}}\n  ", section[0].StaticText);
 
                 try testing.expectEqual(Element.Interpolation, section[1]);
-                try testing.expectEqualStrings("data", section[1].Interpolation.key);
+                try testing.expectEqualStrings("data", section[1].Interpolation);
 
                 try testing.expectEqual(Element.StaticText, section[2]);
                 try testing.expectEqualStrings("\n", section[2].StaticText);
@@ -1011,7 +1013,7 @@ const tests = struct {
             try testing.expectEqualStrings("Hello, ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("subject", elements[1].Interpolation.key);
+            try testing.expectEqualStrings("subject", elements[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("!", elements[2].StaticText);
@@ -1032,8 +1034,7 @@ const tests = struct {
             try testing.expectEqualStrings("These characters should be HTML escaped: ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("forbidden", elements[1].Interpolation.key);
-            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+            try testing.expectEqualStrings("forbidden", elements[1].Interpolation);
         }
 
         // Triple mustaches should interpolate without HTML escaping.
@@ -1050,9 +1051,8 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("forbidden", elements[1].Interpolation.key);
-            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, elements[1]);
+            try testing.expectEqualStrings("forbidden", elements[1].UnescapedInterpolation);
         }
 
         // Ampersand should interpolate without HTML escaping.
@@ -1069,9 +1069,8 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("forbidden", elements[1].Interpolation.key);
-            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, elements[1]);
+            try testing.expectEqualStrings("forbidden", elements[1].UnescapedInterpolation);
         }
 
         // Interpolation should not alter surrounding whitespace.
@@ -1089,8 +1088,7 @@ const tests = struct {
             try testing.expectEqualStrings("| ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+            try testing.expectEqualStrings("string", elements[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings(" |", elements[2].StaticText);
@@ -1110,9 +1108,8 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("| ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings(" |", elements[2].StaticText);
@@ -1132,9 +1129,8 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("| ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings(" |", elements[2].StaticText);
@@ -1155,8 +1151,7 @@ const tests = struct {
             try testing.expectEqualStrings("  ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+            try testing.expectEqualStrings("string", elements[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("\n", elements[2].StaticText);
@@ -1176,9 +1171,8 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("  ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("\n", elements[2].StaticText);
@@ -1198,9 +1192,8 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("  ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("\n", elements[2].StaticText);
@@ -1221,8 +1214,7 @@ const tests = struct {
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+            try testing.expectEqualStrings("string", elements[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
@@ -1242,9 +1234,8 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
@@ -1264,9 +1255,8 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation.key);
-            try testing.expectEqual(false, elements[1].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, elements[1]);
+            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
@@ -1291,7 +1281,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1323,7 +1312,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 2), section.len);
@@ -1358,7 +1346,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1375,7 +1362,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[3]);
             try testing.expectEqualStrings("boolean", elements[3].Section.key);
-            try testing.expectEqual(false, elements[3].Section.inverted);
 
             if (elements[3].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1413,7 +1399,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1445,7 +1430,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 0), section.len);
@@ -1471,7 +1455,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[0]);
             try testing.expectEqualStrings("boolean", elements[0].Section.key);
-            try testing.expectEqual(false, elements[0].Section.inverted);
 
             if (elements[0].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1503,7 +1486,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1538,7 +1520,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1570,7 +1551,6 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(false, elements[1].Section.inverted);
 
             if (elements[1].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
@@ -1620,13 +1600,12 @@ const tests = struct {
 
             try testing.expectEqual(Element.Section, elements[0]);
             try testing.expectEqualStrings("a", elements[0].Section.key);
-            try testing.expectEqual(false, elements[0].Section.inverted);
 
             if (elements[0].Section.content) |section| {
                 try testing.expectEqual(@as(usize, 5), section.len);
 
                 try testing.expectEqual(Element.Interpolation, section[0]);
-                try testing.expectEqualStrings("one", section[0].Interpolation.key);
+                try testing.expectEqualStrings("one", section[0].Interpolation);
 
                 try testing.expectEqual(Element.StaticText, section[1]);
                 try testing.expectEqualStrings("\n", section[1].StaticText);
@@ -1635,7 +1614,7 @@ const tests = struct {
                 try testing.expectEqualStrings("b", section[2].Section.key);
 
                 try testing.expectEqual(Element.Interpolation, section[3]);
-                try testing.expectEqualStrings("one", section[3].Interpolation.key);
+                try testing.expectEqualStrings("one", section[3].Interpolation);
 
                 try testing.expectEqual(Element.StaticText, section[4]);
                 try testing.expectEqualStrings("\n", section[4].StaticText);
@@ -1644,13 +1623,13 @@ const tests = struct {
                     try testing.expectEqual(@as(usize, 9), section_b.len);
 
                     try testing.expectEqual(Element.Interpolation, section_b[0]);
-                    try testing.expectEqualStrings("one", section_b[0].Interpolation.key);
+                    try testing.expectEqualStrings("one", section_b[0].Interpolation);
 
                     try testing.expectEqual(Element.Interpolation, section_b[1]);
-                    try testing.expectEqualStrings("two", section_b[1].Interpolation.key);
+                    try testing.expectEqualStrings("two", section_b[1].Interpolation);
 
                     try testing.expectEqual(Element.Interpolation, section_b[2]);
-                    try testing.expectEqualStrings("one", section_b[2].Interpolation.key);
+                    try testing.expectEqualStrings("one", section_b[2].Interpolation);
 
                     try testing.expectEqual(Element.StaticText, section_b[3]);
                     try testing.expectEqualStrings("\n", section_b[3].StaticText);
@@ -1659,13 +1638,13 @@ const tests = struct {
                     try testing.expectEqualStrings("c", section_b[4].Section.key);
 
                     try testing.expectEqual(Element.Interpolation, section_b[5]);
-                    try testing.expectEqualStrings("one", section_b[5].Interpolation.key);
+                    try testing.expectEqualStrings("one", section_b[5].Interpolation);
 
                     try testing.expectEqual(Element.Interpolation, section_b[6]);
-                    try testing.expectEqualStrings("two", section_b[6].Interpolation.key);
+                    try testing.expectEqualStrings("two", section_b[6].Interpolation);
 
                     try testing.expectEqual(Element.Interpolation, section_b[7]);
-                    try testing.expectEqualStrings("one", section_b[7].Interpolation.key);
+                    try testing.expectEqualStrings("one", section_b[7].Interpolation);
 
                     try testing.expectEqual(Element.StaticText, section_b[8]);
                     try testing.expectEqualStrings("\n", section_b[8].StaticText);
@@ -1703,11 +1682,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -1735,11 +1713,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 2), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -1770,11 +1747,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings(" ", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -1787,11 +1763,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("\n ", elements[2].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[3]);
-            try testing.expectEqualStrings("boolean", elements[3].Section.key);
-            try testing.expectEqual(true, elements[3].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[3]);
+            try testing.expectEqualStrings("boolean", elements[3].InvertedSection.key);
 
-            if (elements[3].Section.content) |section| {
+            if (elements[3].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -1825,11 +1800,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -1857,11 +1831,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 0), section.len);
             } else {
                 try testing.expect(false);
@@ -1883,11 +1856,10 @@ const tests = struct {
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Section, elements[0]);
-            try testing.expectEqualStrings("boolean", elements[0].Section.key);
-            try testing.expectEqual(true, elements[0].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[0]);
+            try testing.expectEqualStrings("boolean", elements[0].InvertedSection.key);
 
-            if (elements[0].Section.content) |section| {
+            if (elements[0].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -1915,11 +1887,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("^", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -1950,11 +1921,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -1982,11 +1952,10 @@ const tests = struct {
             try testing.expectEqual(Element.StaticText, elements[0]);
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
-            try testing.expectEqual(Element.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
-            try testing.expectEqual(true, elements[1].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, elements[1]);
+            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
 
-            if (elements[1].Section.content) |section| {
+            if (elements[1].InvertedSection.content) |section| {
                 try testing.expectEqual(@as(usize, 1), section.len);
 
                 try testing.expectEqual(Element.StaticText, section[0]);
@@ -2040,8 +2009,7 @@ const tests = struct {
             try testing.expectEqualStrings("  ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, elements[1]);
-            try testing.expectEqualStrings("data", elements[1].Interpolation.key);
-            try testing.expectEqual(true, elements[1].Interpolation.escaped);
+            try testing.expectEqualStrings("data", elements[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
             try testing.expectEqualStrings("  ", elements[2].StaticText);
@@ -2199,24 +2167,21 @@ const tests = struct {
             try testing.expectEqualStrings("Name: ", section[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, section[1]);
-            try testing.expectEqualStrings("name", section[1].Interpolation.key);
-            try testing.expectEqual(true, section[1].Interpolation.escaped);
+            try testing.expectEqualStrings("name", section[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, section[2]);
             try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, section[3]);
-            try testing.expectEqualStrings("comments", section[3].Interpolation.key);
-            try testing.expectEqual(false, section[3].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, section[3]);
+            try testing.expectEqualStrings("comments", section[3].UnescapedInterpolation);
 
             try testing.expectEqual(Element.StaticText, section[4]);
             try testing.expectEqualStrings("\n", section[4].StaticText);
 
-            try testing.expectEqual(Element.Section, section[5]);
-            try testing.expectEqualStrings("inverted", section[5].Section.key);
-            try testing.expectEqual(true, section[5].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, section[5]);
+            try testing.expectEqualStrings("inverted", section[5].InvertedSection.key);
 
-            if (section[5].Section.content) |inverted_section| {
+            if (section[5].InvertedSection.content) |inverted_section| {
                 try testing.expectEqual(@as(usize, 1), inverted_section.len);
 
                 try testing.expectEqual(Element.StaticText, inverted_section[0]);
@@ -2283,24 +2248,21 @@ const tests = struct {
             try testing.expectEqualStrings("Name: ", section[0].StaticText);
 
             try testing.expectEqual(Element.Interpolation, section[1]);
-            try testing.expectEqualStrings("name", section[1].Interpolation.key);
-            try testing.expectEqual(true, section[1].Interpolation.escaped);
+            try testing.expectEqualStrings("name", section[1].Interpolation);
 
             try testing.expectEqual(Element.StaticText, section[2]);
             try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
 
-            try testing.expectEqual(Element.Interpolation, section[3]);
-            try testing.expectEqualStrings("comments", section[3].Interpolation.key);
-            try testing.expectEqual(false, section[3].Interpolation.escaped);
+            try testing.expectEqual(Element.UnescapedInterpolation, section[3]);
+            try testing.expectEqualStrings("comments", section[3].UnescapedInterpolation);
 
             try testing.expectEqual(Element.StaticText, section[4]);
             try testing.expectEqualStrings("\n", section[4].StaticText);
 
-            try testing.expectEqual(Element.Section, section[5]);
-            try testing.expectEqualStrings("inverted", section[5].Section.key);
-            try testing.expectEqual(true, section[5].Section.inverted);
+            try testing.expectEqual(Element.InvertedSection, section[5]);
+            try testing.expectEqualStrings("inverted", section[5].InvertedSection.key);
 
-            if (section[5].Section.content) |inverted_section| {
+            if (section[5].InvertedSection.content) |inverted_section| {
                 try testing.expectEqual(@as(usize, 1), inverted_section.len);
 
                 try testing.expectEqual(Element.StaticText, inverted_section[0]);
@@ -2395,12 +2357,17 @@ const tests = struct {
                     for (any) |element| {
                         switch (element) {
                             .StaticText => |item| scan(item),
-                            .Interpolation => |item| scan(item.key),
+                            .Interpolation => |item| scan(item),
+                            .UnescapedInterpolation => |item| scan(item),
                             .Partial => |item| scan(item.key),
                             .Section => |item| {
                                 scan(item.key);
                                 checkStrings(item.content);
                             },
+                            .InvertedSection => |item| {
+                                scan(item.key);
+                                checkStrings(item.content);
+                            },                            
                             .Parent => |item| {
                                 scan(item.key);
                                 checkStrings(item.content);

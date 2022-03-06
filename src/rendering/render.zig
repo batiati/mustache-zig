@@ -12,6 +12,7 @@ const ParseError = mustache.template.ParseError;
 
 const context = @import("context.zig");
 const Context = context.Context;
+const Escape = context.Escape;
 
 pub fn renderAllocCached(allocator: Allocator, data: anytype, elements: []const Element) Allocator.Error![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
@@ -84,29 +85,30 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                 for (elements) |element| {
                     switch (element) {
                         .StaticText => |content| try self.writer.writeAll(content),
-                        .Interpolation => |interpolation| {
-                            try interpolate(stack, interpolation);
-                        },
+                        .Interpolation => |path| try interpolate(stack, path, .Escaped),
+                        .UnescapedInterpolation => |path| try interpolate(stack, path, .Unescaped),
                         .Section => |section| {
                             if (self.getIterator(stack, section)) |*iterator| {
-                                if (section.inverted) {
-                                    if (!iterator.hasNext()) {
-                                        try self.renderLevel(stack, section.content);
-                                    }
-                                } else {
-                                    while (try iterator.next(self.allocator)) |item_ctx| {
-                                        defer item_ctx.deinit(self.allocator);
+                                while (try iterator.next(self.allocator)) |item_ctx| {
+                                    defer item_ctx.deinit(self.allocator);
 
-                                        var next_level = Stack{
-                                            .parent = stack,
-                                            .ctx = item_ctx,
-                                        };
+                                    var next_level = Stack{
+                                        .parent = stack,
+                                        .ctx = item_ctx,
+                                    };
 
-                                        try self.renderLevel(&next_level, section.content);
-                                    }
+                                    try self.renderLevel(&next_level, section.content);
                                 }
                             }
                         },
+                        .InvertedSection => |section| {
+                            var iterator = self.getIterator(stack, section);
+
+                            if (iterator == null or iterator.?.hasNext() == false) {
+                                try self.renderLevel(stack, section.content);
+                            }
+                        },
+
                         //TODO Partial, Parent, Block
                         else => {},
                     }
@@ -114,10 +116,10 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             }
         }
 
-        fn interpolate(ctx: *Stack, interpolation: Interpolation) Writer.Error!void {
+        fn interpolate(ctx: *Stack, path: []const u8, escape: Escape) Writer.Error!void {
             var level: ?*Stack = ctx;
             while (level) |current| : (level = current.parent) {
-                const path_resolution = try current.ctx.write(interpolation.key, if (interpolation.escaped) .Escaped else .Unescaped);
+                const path_resolution = try current.ctx.write(path, escape);
 
                 switch (path_resolution) {
                     .Resolved => {
