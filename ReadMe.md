@@ -1,10 +1,17 @@
 # MUSTACHE-ZIG
-
-![logo](mustache.png)
+[![made with Zig](https://img.shields.io/badge/made%20with%20%E2%9D%A4%20-Zig-orange)]()
+[![license mit](https://img.shields.io/github/license/batiati/mustache-zig)]()
 
 Mustache-Zig is an implementation of the [{{mustache}} template system](https://mustache.github.io/) for [Zig](https://ziglang.org/).
 
+![logo](mustache.png)
+
 # ! Under development !
+
+## Samples
+
+Render from strings, files and cached templates.
+See the [source code](https://github.com/batiati/mustache-zig/tree/master/samples) for more details.
 
 ## Full spec compliant
 
@@ -49,11 +56,6 @@ So, it's important to be able to deal with multi-megabyte inputs without eating 
     try mustache.renderFromFile(plenty_of_memory.allocator(), "10MB_file.mustache", ctx, out_writer);
 
 ```
-
-## Samples
-
-Render template from strings, files and cached templates.
-See the [source code](https://github.com/batiati/mustache-zig/tree/master/samples)
 
 ## Licensing
 
