@@ -4,3 +4,6 @@ src/zig-cache
 samples/zig-cache
 samples/zig-out
 samples/src/zig-cache
+benchmark/zig-cache
+benchmark/zig-out
+benchmark/src/zig-cache

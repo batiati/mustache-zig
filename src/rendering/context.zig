@@ -167,7 +167,13 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         writer: Writer,
         data: Data,
 
+        // Workarround: If a NullWriter is used with and a zero size Data, this field must hold any size
+        // otherwise alloc will generate a null pointer to this type
+        // Improve this, creating a dummy context without a vtable
+        pack: if (@sizeOf(Writer) + @sizeOf(Data) == 0) u1 else void = if (@sizeOf(Writer) + @sizeOf(Data) == 0) 0 else {},
+
         pub fn init(allocator: Allocator, writer: Writer, data: Data) Allocator.Error!ContextInterface {
+
             var self = try allocator.create(Self);
             self.* = .{
                 .writer = writer,
