@@ -546,45 +546,80 @@ const Comptime = struct {
             },
 
             .Escaped => {
-                const html_quot: []const u8 = "&quot;";
-                const quot = '"';
-
-                const html_apos: []const u8 = "&#39;";
-                const apos = '\'';
-
-                const html_amp: []const u8 = "&amp;";
-                const amp = '&';
-
-                const html_lt: []const u8 = "&lt;";
-                const lt = '<';
-
-                const html_gt: []const u8 = "&gt;";
-                const gt = '>';
-
-                const html_null: []const u8 = "\u{fffd}";
                 const @"null" = '\x00';
+                const html_null: []const u8 = "\u{fffd}";
 
-                if (std.mem.indexOfAny(u8, value, &[_]u8{ quot, apos, amp, lt, gt, @"null" })) |index| {
-                    if (index > 0) {
-                        try out_writer.writeAll(value[0..index]);
+                var index: usize = 0;
+
+                for (value) |char, char_index| {
+                    const replace = switch (char) {
+                        '"' => "&quot;",
+                        '\'' => "&#39;",
+                        '&' => "&amp;",
+                        '<' => "&lt;",
+                        '>' => "&gt;",
+                        @"null" => html_null,
+                        else => continue,
+                    };
+
+                    if (char_index > index) {
+                        try out_writer.writeAll(value[index..char_index]);
                     }
 
-                    for (value[index..]) |char| {
-                        try switch (char) {
-                            @"null" => out_writer.writeAll(html_null),
-                            quot => out_writer.writeAll(html_quot),
-                            apos => out_writer.writeAll(html_apos),
-                            amp => out_writer.writeAll(html_amp),
-                            lt => out_writer.writeAll(html_lt),
-                            gt => out_writer.writeAll(html_gt),
-                            else => out_writer.writeByte(char),
-                        };
-                    }
-                } else {
-                    try out_writer.writeAll(value);
+                    try out_writer.writeAll(replace);
+                    index = char_index + 1;
+                    if (index == value.len) break;
+                }
+
+                if (index < value.len) {
+                    try out_writer.writeAll(value[index..]);
                 }
             },
         }
+    }
+
+    test "escape_write" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        try escape_write(list.writer(), ">abc", .Escaped);
+        try testing.expectEqualStrings("&gt;abc", list.items);
+
+        list.clearAndFree();
+
+        try escape_write(list.writer(), "abc<", .Escaped);
+        try testing.expectEqualStrings("abc&lt;", list.items);
+
+        list.clearAndFree();
+
+        try escape_write(list.writer(), ">abc<", .Escaped);
+        try testing.expectEqualStrings("&gt;abc&lt;", list.items);
+
+        list.clearAndFree();
+
+        try escape_write(list.writer(), "ab&cd", .Escaped);
+        try testing.expectEqualStrings("ab&amp;cd", list.items);
+
+        list.clearAndFree();
+
+        try escape_write(list.writer(), ">ab&cd", .Escaped);
+        try testing.expectEqualStrings("&gt;ab&amp;cd", list.items);
+
+        list.clearAndFree();
+
+        try escape_write(list.writer(), "ab&cd<", .Escaped);
+        try testing.expectEqualStrings("ab&amp;cd&lt;", list.items);
+
+        list.clearAndFree();
+
+        try escape_write(list.writer(), ">ab&cd<", .Escaped);
+        try testing.expectEqualStrings("&gt;ab&amp;cd&lt;", list.items);
+
+        list.clearAndFree();
+
+        try escape_write(list.writer(), ">ab&cd<", .Unescaped);
+        try testing.expectEqualStrings(">ab&cd<", list.items);
     }
 
     const tests = struct {
