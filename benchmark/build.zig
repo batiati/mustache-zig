@@ -11,7 +11,7 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("samples", "src/main.zig");
+    const exe = b.addExecutable("benchmark", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.addPackagePath("mustache", "../src/mustache.zig");
