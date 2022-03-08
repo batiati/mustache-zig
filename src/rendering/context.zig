@@ -164,23 +164,26 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         const PATH_SEPARATOR = ".";
         const Self = @This();
 
+        // If a NullWriter is used with and a zero size Data, we cannot create an pointer
+        // Compiler error: '*Self' and '*anyopaque' do not have the same in-memory representation
+        // note: '*Self" has no in-memory bits
+        // note: '*anyopaque' has in-memory bits
+        const is_zero_size = @sizeOf(Writer) + @sizeOf(Data) == 0;
+
         writer: Writer,
         data: Data,
 
-        // Workarround: If a NullWriter is used with and a zero size Data, this field must hold any size
-        // otherwise alloc will generate a null pointer to this type
-        // Improve this, creating a dummy context without a vtable
-        pack: if (@sizeOf(Writer) + @sizeOf(Data) == 0) u1 else void = if (@sizeOf(Writer) + @sizeOf(Data) == 0) 0 else {},
-
         pub fn init(allocator: Allocator, writer: Writer, data: Data) Allocator.Error!ContextInterface {
-            var self = try allocator.create(Self);
-            self.* = .{
-                .writer = writer,
-                .data = data,
-            };
-
             return ContextInterface{
-                .ptr = self,
+                .ptr = if (is_zero_size) undefined else blk: {
+                    var self = try allocator.create(Self);
+                    self.* = .{
+                        .writer = writer,
+                        .data = data,
+                    };
+
+                    break :blk self;
+                },
                 .vtable = &vtable,
             };
         }
@@ -207,12 +210,14 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         }
 
         fn deinit(ctx: *anyopaque, allocator: Allocator) void {
-            var self = getSelf(ctx);
-            allocator.destroy(self);
+            if (!is_zero_size) {
+                var self = getSelf(ctx);
+                allocator.destroy(self);
+            }
         }
 
         inline fn getSelf(ctx: *anyopaque) *Self {
-            return @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
+            return if (is_zero_size) undefined else @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
         }
     };
 }
