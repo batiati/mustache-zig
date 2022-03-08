@@ -615,8 +615,8 @@ test "Trimming left only \\r\\n" {
 test "Trimming right only" {
     const allocator = testing.allocator;
 
-    //                                                           7
-    //                                                           ↓
+    //                                                          7
+    //                                                          ↓
     var text_scanner = try TestScanner.init(allocator, "   ABC\n   ");
     defer text_scanner.deinit(allocator);
 
@@ -636,8 +636,8 @@ test "Trimming right only" {
 test "Trimming right only \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                             8
-    //                                                             ↓
+    //                                                            8
+    //                                                            ↓
     var text_scanner = try TestScanner.init(allocator, "   ABC\r\n   ");
     defer text_scanner.deinit(allocator);
 
@@ -657,8 +657,8 @@ test "Trimming right only \\r\\n" {
 test "Only whitespace" {
     const allocator = testing.allocator;
 
-    //                                                   0
-    //                                                   ↓
+    //                                                  0
+    //                                                  ↓
     var text_scanner = try TestScanner.init(allocator, "   ");
     defer text_scanner.deinit(allocator);
 
