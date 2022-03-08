@@ -240,48 +240,63 @@ pub const CachedTemplate = struct {
     }
 };
 
-const LoadCachedTemplateResult = union(enum) {
+const ParseTemplateResult = union(enum) {
     ParseError: LastError,
     Success: CachedTemplate,
 };
 
-pub fn loadCachedTemplate(
+/// Parses a string and returns an union containing either a ParseError or the CachedTemplate
+/// parameters:
+/// allocator used to all temporary and permanent allocations.
+///   Use this same allocator to free the returned template
+/// template_text: utf-8 encoded template text to be parsed
+/// delimiters: define custom delimiters, or use .{} for the default
+/// owns_string: comptime bool indicating if the cached template shoud owns its strings.
+///   When true, all strings will be copied to the template and the "template_text" slice can be freed by the caller 
+///   When false, the "template_text" slice must be static or be valid during the template lifetime.
+pub fn parseTemplate(
     allocator: Allocator,
     template_text: []const u8,
     delimiters: Delimiters,
     comptime owns_string: bool,
-) Allocator.Error!LoadCachedTemplateResult {
-    var template = Template(.{ .owns_string = owns_string }){
-        .allocator = allocator,
-        .delimiters = delimiters,
-    };
-    errdefer template.deinit();
-
-    try template.load(template_text);
-
-    switch (template.result) {
-        .Error => |last_error| return LoadCachedTemplateResult{ .ParseError = last_error },
-        .Elements => |elements| return LoadCachedTemplateResult{ .Success = .{ .elements = elements, .owns_string = owns_string } },
-        .NotLoaded => unreachable,
-    }
+) Allocator.Error!ParseTemplateResult {
+    return try parse(.String, owns_string, allocator, template_text, delimiters);
 }
 
-pub fn loadCachedTemplateFromFile(
+pub fn parseTemplateFromFile(
     allocator: Allocator,
     template_absolute_path: []const u8,
     delimiters: Delimiters,
-) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!LoadCachedTemplateResult {
-    var template = Template(.{ .owns_string = true }){
+) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseTemplateResult {
+    return try parse(.File, true, allocator, template_absolute_path, delimiters);
+}
+
+inline fn parse(
+    comptime source: parsing.TextSource,
+    comptime owns_string: bool,
+    allocator: Allocator,
+    source_content: []const u8,
+    delimiters: Delimiters,
+) !ParseTemplateResult {
+    const options = TemplateOptions{
+        .owns_string = owns_string,
+    };
+
+    var template = Template(options){
         .allocator = allocator,
         .delimiters = delimiters,
     };
+
     errdefer template.deinit();
 
-    try template.loadFromFile(template_absolute_path);
+    switch (source) {
+        .File => try template.loadFromFile(source_content),
+        .String => try template.load(source_content),
+    }
 
     switch (template.result) {
-        .Error => |last_error| return LoadCachedTemplateResult{ .ParseError = last_error },
-        .Elements => |elements| return LoadCachedTemplateResult{ .Success = .{ .elements = elements, .owns_string = true } },
+        .Error => |last_error| return ParseTemplateResult{ .ParseError = last_error },
+        .Elements => |elements| return ParseTemplateResult{ .Success = .{ .elements = elements, .owns_string = owns_string } },
         .NotLoaded => unreachable,
     }
 }
@@ -387,9 +402,9 @@ pub fn Template(comptime options: TemplateOptions) type {
             while (true) {
                 var parse_result = try parser.parse();
 
-                // When "options.owns_string = false", all read buffer must be freed after producing the nodes
-                // This option should be used only when the template source is a static string, or when rendering direct to a stream.
-                defer if (!options.owns_string) parser.ref_counter_holder.free(self.allocator);
+                // When parsing from a file, all read buffer must be freed after producing the nodes
+                const is_ref_counted = @TypeOf(parser.ref_counter_holder) != void;
+                defer if (is_ref_counted) parser.ref_counter_holder.free(self.allocator);
 
                 switch (parse_result) {
                     .Error => |err| {

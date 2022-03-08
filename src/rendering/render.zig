@@ -195,7 +195,7 @@ const tests = struct {
 
         {
             // Cached template render
-            var cached_template = switch (try mustache.loadCachedTemplate(allocator, template_text, .{}, false)) {
+            var cached_template = switch (try mustache.parseTemplate(allocator, template_text, .{}, false)) {
                 .ParseError => return try testing.expect(false),
                 .Success => |ret| ret,
             };

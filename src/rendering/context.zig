@@ -173,7 +173,6 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         pack: if (@sizeOf(Writer) + @sizeOf(Data) == 0) u1 else void = if (@sizeOf(Writer) + @sizeOf(Data) == 0) 0 else {},
 
         pub fn init(allocator: Allocator, writer: Writer, data: Data) Allocator.Error!ContextInterface {
-
             var self = try allocator.create(Self);
             self.* = .{
                 .writer = writer,

@@ -157,6 +157,10 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
 
         const Self = @This();
 
+        /// When parsing from file and the field "options.owns_string" == false, 
+        /// the read buffer slice is ref counted
+        const is_ref_counted = options.source == .File and options.owns_string == false;
+
         /// General purpose allocator
         gpa: Allocator,
 
@@ -179,9 +183,8 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
         /// Stores the last error ocurred parsing the content
         last_error: ?LastError = null,
 
-        /// Used when the field "options.owns_string = false"
         /// Holds a ref_counter to the read buffer for all produced elements
-        ref_counter_holder: if (options.owns_string) void else RefCounterHolder = if (options.owns_string) {} else RefCounterHolder{},
+        ref_counter_holder: if (is_ref_counted) RefCounterHolder else void = if (is_ref_counted) RefCounterHolder{} else {},
 
         pub fn init(gpa: Allocator, template: []const u8, delimiters: Delimiters) if (options.source == .String) Allocator.Error!Self else FileReader.Error!Self {
             const Arena = if (options.output == .Streamed) EpochArena else ArenaAllocator;
@@ -203,7 +206,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
         pub fn deinit(self: *Self) void {
             self.text_scanner.deinit(self.gpa);
             self.arena.deinit();
-            if (!options.owns_string) self.ref_counter_holder.free(self.gpa);
+            if (is_ref_counted) self.ref_counter_holder.free(self.gpa);
         }
 
         pub fn parse(self: *Self) LoadError!ParseResult {
@@ -223,7 +226,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             if (options.owns_string) {
                 return try self.gpa.dupe(u8, slice);
             } else {
-                try self.ref_counter_holder.add(self.gpa, ref_counter);
+                if (is_ref_counted) try self.ref_counter_holder.add(self.gpa, ref_counter);
                 return slice;
             }
         }

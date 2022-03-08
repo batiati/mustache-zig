@@ -1,107 +1,139 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const mustache = @import("mustache");
 
 pub fn main() anyerror!void {
-    try runParseAndAlloc();
-    try runCachedAlloc();
-    try runParseStream();
-    try runCachedStream();
+
+    std.debug.print("Benchmark based on {s}\n", .{ "https://github.com/batiati/mustache_benchmark" });
+    std.debug.print("==================================\n\n", .{});
+    try runTemplate("Template 1", Binding1, "../data/template1.html", "../data/bindings1.json");
+    try runTemplate("Template 2", Binding2, "../data/template2.html", "../data/bindings2.json");
+    try runTemplate("Template 3", Binding3, "../data/template3.html", "../data/bindings3.json");
 }
 
 const TIMES = 1_000_000;
 
-// Based on https://www.measurethat.net/Benchmarks/Show/817/3/mustache-rendering-performance
-const template = "<strong>This is a slightly more complicated {{thing}}.</strong>.\n{{! Just ignore this business. }}\nCheck this out:\n{{#hasThings}}\n<ul>\n{{#things}}\n<li class={{className}}>{{word}}</li>\n{{/things}}</ul>.\n{{/hasThings}}\n{{^hasThings}}\n\n<small>Nothing to check out...</small>\n{{/hasThings}}";
+const Binding1 = struct {
+    title: []const u8,
+    txt1: []const u8,
+    txt2: []const u8,
+    txt3: []const u8,
 
-// On the original benchmark, this context has a function
-// It's not supported yet
-var context = .{
-    .thing = "blah",
-    .things = .{
-        .{ .className = "one", .word = "@fat" },
-        .{ .className = "two", .word = "@dhg" },
-        .{ .className = "three", .word = "@sayrer" },
-    },
-    .hasThings = true,
+    pub fn free(self: *Binding1, allocator: Allocator) void {
+        allocator.free(self.title);
+        allocator.free(self.txt1);
+        allocator.free(self.txt2);
+        allocator.free(self.txt3);
+    }
 };
 
-fn runParseAndAlloc() !void {
-    const allocator = std.heap.raw_c_allocator;
+const Binding2 = struct {
+    title: []const u8,
+    image_url: []const u8,
+    icon_url: []const u8,
+    short_description: []const u8,
+    detail_description: []const u8,
+    offer_id: u32,
+
+    pub fn free(self: *Binding2, allocator: Allocator) void {
+        allocator.free(self.title);
+        allocator.free(self.image_url);
+        allocator.free(self.icon_url);
+        allocator.free(self.short_description);
+        allocator.free(self.detail_description);
+    }
+};
+
+const Binding3 = struct {
+    const Repo = struct { name: []const u8 };
+
+    name: []const u8,
+    age: u32,
+    company: []const u8,
+    person: bool,
+    repo: []const Repo,
+    repo2: []const Repo,
+
+    pub fn free(self: *Binding3, allocator: Allocator) void {
+        allocator.free(self.name);
+        allocator.free(self.company);
+        for (self.repo) |item| {
+            allocator.free(item.name);    
+        }
+
+        for (self.repo2) |item| {
+            allocator.free(item.name);    
+        }
+
+        allocator.free(self.repo);
+        allocator.free(self.repo2);
+    }    
+};
+
+fn runTemplate(comptime caption: []const u8, comptime TBinding: type, comptime template: []const u8, comptime json: []const u8) !void {
+    const template_text = @embedFile(template);
+
+    const allocator = std.heap.c_allocator;
+    
+    var cached_template = parseTemplate(allocator, template_text);
+    defer cached_template.free(allocator);
+
+    try runTemplatePreParsed(allocator, caption ++ " - pre-parsed", TBinding, json, cached_template);
+    try runTemplateNotParsed(allocator, caption ++ " - not parsed", TBinding, json, template_text);
+}
+
+fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comptime TBinding: type, comptime json: []const u8, template: mustache.CachedTemplate) !void {
+
+    var data = try loadData(TBinding, allocator, json);
+    defer data.free(allocator);
 
     var repeat: u32 = 0;
     const start = std.time.nanoTimestamp();
     while (repeat < TIMES) : (repeat += 1) {
-        const result = try mustache.renderAllocFromString(allocator, template, context);
+        const result = try mustache.renderAllocCached(allocator, template, data);
         allocator.free(result);
     }
     const end = std.time.nanoTimestamp();
 
     const ellapsed = end - start;
-    printSummary("Parse and alloc", ellapsed);
+    printSummary(caption, ellapsed);
 }
 
-fn runCachedAlloc() !void {
-    const allocator = std.heap.raw_c_allocator;
+fn runTemplateNotParsed(allocator: Allocator, comptime caption: []const u8, comptime TBinding: type, comptime json: []const u8, comptime template_text: []const u8) !void {
 
-    const cached_template = switch (try mustache.loadCachedTemplate(allocator, template, .{}, false)) {
-        .ParseError => |last_error| {
-            std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(last_error.error_code), last_error.lin, last_error.col });
-            return;
-        },
-        .Success => |ret| ret,
-    };
+    var data = try loadData(TBinding, allocator, json);
+    defer data.free(allocator);
 
     var repeat: u32 = 0;
     const start = std.time.nanoTimestamp();
     while (repeat < TIMES) : (repeat += 1) {
-        const result = try mustache.renderAllocCached(allocator, cached_template, context);
+        const result = try mustache.renderAllocFromString(allocator, template_text, data);
         allocator.free(result);
     }
     const end = std.time.nanoTimestamp();
 
     const ellapsed = end - start;
-    printSummary("Cached and alloc", ellapsed);
-}
-
-fn runParseStream() !void {
-    const allocator = std.heap.raw_c_allocator;
-
-    var repeat: u32 = 0;
-    const start = std.time.nanoTimestamp();
-    while (repeat < TIMES) : (repeat += 1) {
-        try mustache.renderFromString(allocator, template, context, std.io.null_writer);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const ellapsed = end - start;
-    printSummary("Parse stream", ellapsed);
-}
-
-fn runCachedStream() !void {
-    const allocator = std.heap.raw_c_allocator;
-
-    const cached_template = switch (try mustache.loadCachedTemplate(allocator, template, .{}, false)) {
-        .ParseError => |last_error| {
-            std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(last_error.error_code), last_error.lin, last_error.col });
-            return;
-        },
-        .Success => |ret| ret,
-    };
-
-    var repeat: u32 = 0;
-    const start = std.time.nanoTimestamp();
-    while (repeat < TIMES) : (repeat += 1) {
-        try mustache.renderCached(allocator, cached_template, context, std.io.null_writer);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const ellapsed = end - start;
-    printSummary("Cached stream", ellapsed);
+    printSummary(caption, ellapsed);
 }
 
 fn printSummary(caption: []const u8, ellapsed: i128) void {
-    std.debug.print("\n{s}", .{caption});
+    std.debug.print("\n{s}\n", .{caption});
     std.debug.print("Total time {d:.3}ms\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_s});
     std.debug.print("Total per item {d:.5}ms\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_ms / TIMES});
     std.debug.print("Ops per second {d:.3}\n", .{TIMES / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
+}
+
+fn parseTemplate(allocator: Allocator, template_text: []const u8) mustache.CachedTemplate {
+    return switch (mustache.parseTemplate(allocator, template_text, .{}, false) catch unreachable) {
+        .ParseError => |last_error| {
+            std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(last_error.error_code), last_error.lin, last_error.col });
+            @panic("parser error");
+        },
+        .Success => |ret| ret,
+    };
+}
+
+fn loadData(comptime T: type, allocator: Allocator, comptime json: []const u8) !T {
+    var token_stream = std.json.TokenStream.init(@embedFile(json));
+    return try std.json.parse(T, &token_stream, .{ .allocator = allocator });
 }

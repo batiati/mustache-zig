@@ -16,8 +16,8 @@ pub const Parent = template.Parent;
 pub const Block = template.Block;
 pub const CachedTemplate = template.CachedTemplate;
 
-pub const loadCachedTemplate = template.loadCachedTemplate;
-pub const loadCachedTemplateFromFile = template.loadCachedTemplateFromFile;
+pub const parseTemplate = template.parseTemplate;
+pub const parseTemplateFromFile = template.parseTemplateFromFile;
 
 pub const renderCached = rendering.renderCached;
 pub const renderAllocCached = rendering.renderAllocCached;
