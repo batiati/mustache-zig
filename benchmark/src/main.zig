@@ -4,8 +4,8 @@ const mustache = @import("mustache");
 
 pub fn main() anyerror!void {
 
-    std.debug.print("Benchmark based on {s}\n", .{ "https://github.com/batiati/mustache_benchmark" });
-    std.debug.print("==================================\n\n", .{});
+    std.debug.print("Benchmark\n{s}\n", .{ "https://github.com/batiati/mustache_benchmark" });
+    std.debug.print("=============================\n\n", .{});
     try runTemplate("Template 1", Binding1, "../data/template1.html", "../data/bindings1.json");
     try runTemplate("Template 2", Binding2, "../data/template2.html", "../data/bindings2.json");
     try runTemplate("Template 3", Binding3, "../data/template3.html", "../data/bindings3.json");

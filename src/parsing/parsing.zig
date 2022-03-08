@@ -33,8 +33,6 @@ pub const FileReader = @import("FileReader.zig");
 pub const Delimiters = struct {
     pub const DefaultStartingDelimiter = "{{";
     pub const DefaultEndingDelimiter = "}}";
-    pub const NoScapeStartingDelimiter = "{{{";
-    pub const NoScapeEndingDelimiter = "}}}";
 
     starting_delimiter: []const u8 = DefaultStartingDelimiter,
     ending_delimiter: []const u8 = DefaultEndingDelimiter,
@@ -90,9 +88,6 @@ pub const MarkType = enum {
 
     /// A ending tag mark, such '}}', '}}}' or any configured delimiter
     Ending,
-
-    /// The same tag mark is used both for staring and ending, such '%' or '|'
-    Both,
 };
 
 pub const DelimiterType = enum {
@@ -107,7 +102,7 @@ pub const DelimiterType = enum {
 pub const Mark = struct {
     mark_type: MarkType,
     delimiter_type: DelimiterType,
-    delimiter: []const u8,
+    delimiter_len: u32,
 };
 
 pub const Event = union(enum) {
@@ -134,11 +129,6 @@ pub const ParserOptions = struct {
 
 pub fn Parser(comptime parser_options: ParserOptions) type {
     return struct {
-        const State = enum {
-            WaitingStaringTag,
-            WaitingEndingTag,
-        };
-
         pub const LoadError = Allocator.Error || if (options.source == .File) std.fs.File.ReadError || std.fs.File.OpenError else error{};
 
         pub const AbortError = error{ParserAbortedError};
@@ -171,9 +161,6 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
         /// Text scanner instance, shoud not be accessed directly
         text_scanner: TextScanner(options.source),
 
-        /// Parser state, shoud not be accessed directly
-        state: State,
-
         /// Root level, holding all nested nodes produced, should not be accessed direcly
         root: *Level,
 
@@ -197,7 +184,6 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                 .gpa = gpa,
                 .arena = arena,
                 .text_scanner = try TextScanner(options.source).init(gpa, template),
-                .state = .WaitingStaringTag,
                 .root = root,
                 .current_level = root,
             };
@@ -308,51 +294,6 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             return list.toOwnedSlice(self.gpa);
         }
 
-        fn matchBlockType(self: *Self, text_block: *TextBlock) AbortError!?BlockType {
-            switch (text_block.event) {
-                .Mark => |tag_mark| {
-                    switch (self.state) {
-                        .WaitingStaringTag => {
-                            defer self.state = .WaitingEndingTag;
-
-                            if (tag_mark.mark_type == .Ending) {
-                                return self.setLastError(ParseError.EndingDelimiterMismatch, text_block, null);
-                            }
-
-                            // If there is no current action, any content is a static text
-                            if (text_block.tail != null) {
-                                return .StaticText;
-                            }
-                        },
-
-                        .WaitingEndingTag => {
-                            defer self.state = .WaitingStaringTag;
-
-                            if (tag_mark.mark_type == .Starting) {
-                                return self.setLastError(ParseError.StartingDelimiterMismatch, text_block, null);
-                            }
-
-                            const is_triple_mustache = tag_mark.delimiter_type == .NoScapeDelimiter;
-                            if (is_triple_mustache) {
-                                return .UnescapedInterpolation;
-                            } else {
-
-                                // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, <, $, =, &, /)
-                                return text_block.readBlockType() orelse .Interpolation;
-                            }
-                        },
-                    }
-                },
-                .Eof => {
-                    if (text_block.tail != null) {
-                        return .StaticText;
-                    }
-                },
-            }
-
-            return null;
-        }
-
         fn parseDelimiters(self: *Self, text_block: *TextBlock) AbortError!Delimiters {
             var delimiter: ?Delimiters = if (text_block.tail) |content| blk: {
 
@@ -394,7 +335,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
         }
 
         fn parseTree(self: *Self) (AbortError || LoadError)!?[]*Node {
-            if (self.text_scanner.delimiters_count == 0) {
+            if (self.text_scanner.delimiter_max_size == 0) {
                 self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
                     return self.setLastError(err, null, null);
                 };
@@ -406,7 +347,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             while (try self.text_scanner.next(self.gpa)) |*text_block| {
                 errdefer text_block.deinit(self.gpa);
 
-                var block_type = (try self.matchBlockType(text_block)) orelse {
+                var block_type = text_block.matchBlockType() orelse {
                     text_block.deinit(self.gpa);
                     continue;
                 };

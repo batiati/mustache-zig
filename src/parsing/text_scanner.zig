@@ -28,43 +28,16 @@ pub fn TextScanner(comptime source: TextSource) type {
     return struct {
         const Self = @This();
 
-        ///
-        /// Mustache allows changing delimiters while processing the text, by special tags {{=[ ]=}}
-        /// Implements a list of runtime-known delimiters to split the text
-        ///
-        /// Triple-mustache delimiters '{{{' and ''}}}' are fixed
-        /// It is not defined by mustache's specs, but some implementations use the current delimiter + '{' or '}' to represent the unescaped tag.
-        /// The '&' symbol can be used instead of the triple-mustache for custom delimiters use cases.
-        const MAX_DELIMITERS = 4;
-
-        const Delimiter = struct {
-            delimiter: []const u8,
-            mark_type: MarkType,
-            delimiter_type: DelimiterType,
-
-            pub inline fn match(self: Delimiter, slice: []const u8) ?Mark {
-                if (std.mem.startsWith(u8, slice, self.delimiter)) {
-                    return Mark{
-                        .mark_type = self.mark_type,
-                        .delimiter_type = self.delimiter_type,
-                        .delimiter = self.delimiter,
-                    };
-                } else {
-                    return null;
-                }
-            }
-        };
-
         reader: if (source == .File) *FileReader else void,
         ref_counter: if (source == .File) RefCounter else void = if (source == .File) .{} else {},
 
         content: []const u8 = &.{},
         index: usize = 0,
         block_index: usize = 0,
+        expected_mark: MarkType = .Starting,
         lin: u32 = 1,
         col: u32 = 1,
-        delimiters: [MAX_DELIMITERS]Delimiter = undefined,
-        delimiters_count: u4 = 0,
+        delimiters: Delimiters = undefined,
         delimiter_max_size: u32 = 0,
 
         ///
@@ -93,64 +66,8 @@ pub fn TextScanner(comptime source: TextSource) type {
             if (delimiters.starting_delimiter.len == 0) return ParseError.InvalidDelimiters;
             if (delimiters.ending_delimiter.len == 0) return ParseError.InvalidDelimiters;
 
-            var index: u4 = 0;
-            var delimiter_max_size = std.math.max(Delimiters.NoScapeStartingDelimiter.len, Delimiters.NoScapeEndingDelimiter.len);
-
-            if (!std.mem.eql(u8, delimiters.starting_delimiter, Delimiters.NoScapeStartingDelimiter)) {
-                self.delimiters[index] = .{
-                    .delimiter = Delimiters.NoScapeStartingDelimiter,
-                    .mark_type = .Starting,
-                    .delimiter_type = .NoScapeDelimiter,
-                };
-                index += 1;
-            }
-
-            if (!std.mem.eql(u8, delimiters.ending_delimiter, Delimiters.NoScapeEndingDelimiter)) {
-                self.delimiters[index] = .{
-                    .delimiter = Delimiters.NoScapeEndingDelimiter,
-                    .mark_type = .Ending,
-                    .delimiter_type = .NoScapeDelimiter,
-                };
-                index += 1;
-            }
-
-            if (std.mem.eql(u8, delimiters.starting_delimiter, delimiters.ending_delimiter)) {
-                self.delimiters[index] = .{
-                    .delimiter = delimiters.starting_delimiter,
-                    .mark_type = .Both,
-                    .delimiter_type = .Regular,
-                };
-                index += 1;
-                if (delimiters.starting_delimiter.len > delimiter_max_size) delimiter_max_size = delimiters.starting_delimiter.len;
-            } else {
-                self.delimiters[index] = .{
-                    .delimiter = delimiters.starting_delimiter,
-                    .mark_type = .Starting,
-                    .delimiter_type = .Regular,
-                };
-                index += 1;
-                if (delimiters.starting_delimiter.len > delimiter_max_size) delimiter_max_size = delimiters.starting_delimiter.len;
-
-                self.delimiters[index] = .{
-                    .delimiter = delimiters.ending_delimiter,
-                    .mark_type = .Ending,
-                    .delimiter_type = .Regular,
-                };
-                index += 1;
-                if (delimiters.ending_delimiter.len > delimiter_max_size) delimiter_max_size = delimiters.ending_delimiter.len;
-            }
-
-            // Order desc by the delimiter length, avoiding ambiguity during the "startsWith" comparison
-            const order = struct {
-                pub fn desc(context: void, lhs: Delimiter, rhs: Delimiter) bool {
-                    _ = context;
-
-                    return lhs.delimiter.len >= rhs.delimiter.len;
-                }
-            };
-
-            self.delimiters_count = index;
-            std.sort.sort(Delimiter, self.delimiters[0..self.delimiters_count], {}, order.desc);
+            self.delimiter_max_size = @intCast(u32, std.math.max(delimiters.starting_delimiter.len, delimiters.ending_delimiter.len) + 1);
+            self.delimiters = delimiters;
         }
 
         fn requestContent(self: *Self, allocator: Allocator) !void {
@@ -215,7 +132,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                         .right_trimming = trimmer.getRightTrimmingIndex(),
                     };
 
-                    increment = @intCast(u32, mark.delimiter.len);
+                    increment = mark.delimiter_len;
 
                     return block;
                 }
@@ -242,20 +159,33 @@ pub fn TextScanner(comptime source: TextSource) type {
         fn matchTagMark(self: *Self) ?Mark {
             const slice = self.content[self.index..];
 
-            if (self.delimiters_count >= 1) {
-                if (self.delimiters[0].match(slice)) |mark| return mark;
-            }
+            switch (self.expected_mark) {
+                .Starting => {
+                    const match = std.mem.startsWith(u8, slice, self.delimiters.starting_delimiter);
+                    if (match) {
+                        self.expected_mark = .Ending;
+                        const is_triple_mustache = slice.len > self.delimiters.starting_delimiter.len and slice[self.delimiters.starting_delimiter.len] == '{';
 
-            if (self.delimiters_count >= 2) {
-                if (self.delimiters[1].match(slice)) |mark| return mark;
-            }
+                        return Mark{
+                            .mark_type = .Starting,
+                            .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
+                            .delimiter_len = @intCast(u32, if (is_triple_mustache) self.delimiters.starting_delimiter.len + 1 else self.delimiters.starting_delimiter.len),
+                        };
+                    }
+                },
+                .Ending => {
+                    const match = std.mem.startsWith(u8, slice, self.delimiters.ending_delimiter);
+                    if (match) {
+                        self.expected_mark = .Starting;
+                        const is_triple_mustache = slice.len > self.delimiters.ending_delimiter.len and slice[self.delimiters.ending_delimiter.len] == '}';
 
-            if (self.delimiters_count >= 3) {
-                if (self.delimiters[2].match(slice)) |mark| return mark;
-            }
-
-            if (self.delimiters_count == 4) {
-                if (self.delimiters[3].match(slice)) |mark| return mark;
+                        return Mark{
+                            .mark_type = .Ending,
+                            .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
+                            .delimiter_len = @intCast(u32, if (is_triple_mustache) self.delimiters.ending_delimiter.len + 1 else self.delimiters.ending_delimiter.len),
+                        };
+                    }
+                },
             }
 
             return null;
@@ -284,7 +214,7 @@ test "basic tests" {
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("{{", part_1.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 2), part_1.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings("Hello", part_1.?.tail.?);
     try testing.expectEqual(@as(usize, 1), part_1.?.lin);
     try testing.expectEqual(@as(usize, 6), part_1.?.col);
@@ -296,7 +226,7 @@ test "basic tests" {
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("}}", part_2.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 2), part_2.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings("tag1", part_2.?.tail.?);
     try testing.expectEqual(@as(usize, 1), part_2.?.lin);
     try testing.expectEqual(@as(usize, 12), part_2.?.col);
@@ -308,7 +238,7 @@ test "basic tests" {
     try testing.expectEqual(Event.Mark, part_3.?.event);
     try testing.expectEqual(MarkType.Starting, part_3.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.NoScapeDelimiter, part_3.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("{{{", part_3.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 3), part_3.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings("\nWorld", part_3.?.tail.?);
     try testing.expectEqual(@as(usize, 2), part_3.?.lin);
     try testing.expectEqual(@as(usize, 6), part_3.?.col);
@@ -320,7 +250,7 @@ test "basic tests" {
     try testing.expectEqual(Event.Mark, part_4.?.event);
     try testing.expectEqual(MarkType.Ending, part_4.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.NoScapeDelimiter, part_4.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("}}}", part_4.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 3), part_4.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings(" tag2 ", part_4.?.tail.?);
     try testing.expectEqual(@as(usize, 2), part_4.?.lin);
     try testing.expectEqual(@as(usize, 15), part_4.?.col);
@@ -358,7 +288,7 @@ test "custom tags" {
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("[", part_1.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 1), part_1.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings("Hello", part_1.?.tail.?);
     try testing.expectEqual(@as(usize, 1), part_1.?.lin);
     try testing.expectEqual(@as(usize, 6), part_1.?.col);
@@ -370,7 +300,7 @@ test "custom tags" {
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("]", part_2.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 1), part_2.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings("tag1", part_2.?.tail.?);
     try testing.expectEqual(@as(usize, 1), part_2.?.lin);
     try testing.expectEqual(@as(usize, 11), part_2.?.col);
@@ -382,7 +312,7 @@ test "custom tags" {
     try testing.expectEqual(Event.Mark, part_3.?.event);
     try testing.expectEqual(MarkType.Starting, part_3.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_3.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("[", part_3.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 1), part_3.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings("\nWorld", part_3.?.tail.?);
     try testing.expectEqual(@as(usize, 2), part_3.?.lin);
     try testing.expectEqual(@as(usize, 6), part_3.?.col);
@@ -394,7 +324,7 @@ test "custom tags" {
     try testing.expectEqual(Event.Mark, part_4.?.event);
     try testing.expectEqual(MarkType.Ending, part_4.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_4.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("]", part_4.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 1), part_4.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings(" tag2 ", part_4.?.tail.?);
     try testing.expectEqual(@as(usize, 2), part_4.?.lin);
     try testing.expectEqual(@as(usize, 13), part_4.?.col);
@@ -429,7 +359,7 @@ test "EOF" {
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("{{", part_1.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 2), part_1.?.event.Mark.delimiter_len);
     try testing.expect(part_1.?.tail == null);
     try testing.expectEqual(@as(usize, 1), part_1.?.lin);
     try testing.expectEqual(@as(usize, 1), part_1.?.col);
@@ -441,7 +371,7 @@ test "EOF" {
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("}}", part_2.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 2), part_2.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings("tag1", part_2.?.tail.?);
     try testing.expectEqual(@as(usize, 1), part_2.?.lin);
     try testing.expectEqual(@as(usize, 7), part_2.?.col);
@@ -467,7 +397,7 @@ test "EOF custom tags" {
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("[", part_1.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 1), part_1.?.event.Mark.delimiter_len);
     try testing.expect(part_1.?.tail == null);
     try testing.expectEqual(@as(usize, 1), part_1.?.lin);
     try testing.expectEqual(@as(usize, 1), part_1.?.col);
@@ -479,7 +409,7 @@ test "EOF custom tags" {
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
-    try testing.expectEqualStrings("]", part_2.?.event.Mark.delimiter);
+    try testing.expectEqual(@as(u32, 1), part_2.?.event.Mark.delimiter_len);
     try testing.expectEqualStrings("tag1", part_2.?.tail.?);
     try testing.expectEqual(@as(usize, 1), part_2.?.lin);
     try testing.expectEqual(@as(usize, 6), part_2.?.col);

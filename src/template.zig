@@ -10,8 +10,6 @@ const Node = parsing.Node;
 pub const Delimiters = parsing.Delimiters;
 
 pub const ParseError = error{
-    StartingDelimiterMismatch,
-    EndingDelimiterMismatch,
     UnexpectedEof,
     UnexpectedCloseSection,
     InvalidDelimiters,

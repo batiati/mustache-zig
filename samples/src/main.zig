@@ -22,7 +22,7 @@ var ctx = .{
     .name = "friends",
     .env = .{
         .zig_version = "master",
-        .mustache_version = "alfa",
+        .mustache_version = "alpha",
     },
     .features = .{
         .{ .name = "interpolation", .condition = "done" },
@@ -37,8 +37,8 @@ var ctx = .{
 
 pub fn main() anyerror!void {
     try renderFromString();
-    try renderFromCachedTemplate();
-    try renderFromFile();
+    //try renderFromCachedTemplate();
+    //try renderFromFile();
 }
 
 ///
