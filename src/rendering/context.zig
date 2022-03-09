@@ -5,6 +5,9 @@ const trait = std.meta.trait;
 
 const assert = std.debug.assert;
 
+const mustache = @import("../mustache.zig");
+const Element = mustache.Element;
+
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
 
@@ -390,6 +393,58 @@ const Comptime = struct {
                 } else {
                     return if (depth == .Root) .NotFoundInContext else .ChainBroken;
                 }
+            }
+
+            inline fn seekFunction(
+                depth: Depth,
+                comptime TValue: type,
+                action_param: anytype,
+                out_writer: anytype,
+                data: anytype,
+                path: []const u8,
+                path_iterator: *std.mem.TokenIterator(u8),
+                index: ?usize,
+            ) TError!Result {
+
+                _ = depth;
+                _ = action_param;
+                _ = out_writer;
+                _ = data;
+                _ = path;
+                _ = path_iterator;
+                _ = index;
+
+                // Lambdas supported signatures
+                // Functions that accepts a muttable *T can only be called from a reference
+
+                const lambda_signatures = .{
+                    fn () void,
+                    fn (content: []const u8) void,
+                    fn (elements: []const Element) void,
+                    fn (allocator: Allocator) void,
+                    fn (self: TValue) void,
+                    fn (self: TValue, content: []const u8) void,
+                    fn (self: TValue, elements: []const Element) void,
+                    fn (self: TValue, allocator: Allocator) void,
+                    fn (self: TValue, allocator: Allocator, content: []const u8) void,
+                    fn (self: TValue, allocator: Allocator, elements: []const Element) void,
+                    fn (self: *const TValue) void,
+                    fn (self: *const TValue, content: []const u8) void,
+                    fn (self: *const TValue, elements: []const Element) void,
+                    fn (self: *const TValue, allocator: Allocator) void,
+                    fn (self: *const TValue, allocator: Allocator, content: []const u8) void,
+                    fn (self: *const TValue, allocator: Allocator, elements: []const Element) void,
+                    fn (self: *TValue) void,
+                    fn (self: *TValue, content: []const u8) void,
+                    fn (self: *TValue, elements: []const Element) void,
+                    fn (self: *TValue, allocator: Allocator) void,
+                    fn (self: *TValue, allocator: Allocator, content: []const u8) void,
+                    fn (self: *TValue, allocator: Allocator, elements: []const Element) void,
+                };
+
+                _ = lambda_signatures;
+
+                @panic("not implemented");
             }
 
             inline fn iterateAt(

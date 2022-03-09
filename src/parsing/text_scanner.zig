@@ -127,10 +127,9 @@ pub fn TextScanner(comptime source: TextSource) type {
                         }
 
                         if (self.matchTagMark(expected_mark)) |mark| {
-
                             self.state = .{ .ExpectingMark = if (expected_mark == .Starting) .Ending else .Starting };
                             increment = mark.delimiter_len;
-                            
+
                             const tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null;
                             return TextBlock{
                                 .event = .{ .Mark = mark },
@@ -144,7 +143,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                         }
 
                         if (expected_mark == .Starting) {
-                            
+
                             // We just need to keep track of trimming on the text outside tags
                             // The text inside, like "{{blahblah}}"" will never be trimmed
                             trimmer.move();
@@ -383,7 +382,7 @@ test "EOF" {
     try testing.expect(part_3.?.tail == null);
 
     var part_4 = try reader.next(allocator);
-    try testing.expect(part_4 == null);    
+    try testing.expect(part_4 == null);
 }
 
 test "EOF custom tags" {
@@ -428,5 +427,4 @@ test "EOF custom tags" {
 
     var part_4 = try reader.next(allocator);
     try testing.expect(part_4 == null);
-
 }
