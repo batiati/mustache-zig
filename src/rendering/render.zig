@@ -244,16 +244,16 @@ const tests = struct {
 
             var data = .{ .emoji = "👈" };
             try expectRender(template_text, data, expected);
-        }          
+        }
 
         // UTF-8 chars.
-        test "Basic Interpolation - unicode"{
+        test "Basic Interpolation - unicode" {
             const template_text = "|mustache|{{arabic}}|{{japanese}}|{{russian}}|{{chinese}}|";
             const expected = "|mustache|شوارب|口ひげ|усы|胡子|";
 
-            var data = .{ .arabic = "شوارب", .japanese="口ひげ", .russian="усы", .chinese="胡子" };
+            var data = .{ .arabic = "شوارب", .japanese = "口ひげ", .russian = "усы", .chinese = "胡子" };
             try expectRender(template_text, data, expected);
-        }           
+        }
 
         // Basic interpolation should be HTML escaped.
         test "HTML Escaping" {
@@ -1869,6 +1869,6 @@ const tests = struct {
 
             var data = .{};
             try expectRender(template_text, data, expected);
-        }      
+        }
     };
 };

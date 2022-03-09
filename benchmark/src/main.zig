@@ -87,16 +87,18 @@ fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comp
     var data = try loadData(TBinding, allocator, json);
     defer data.free(allocator);
 
+    var total_bytes: usize = 0;
     var repeat: u32 = 0;
     const start = std.time.nanoTimestamp();
     while (repeat < TIMES) : (repeat += 1) {
         const result = try mustache.renderAllocCached(allocator, template, data);
+        total_bytes += result.len;
         allocator.free(result);
     }
     const end = std.time.nanoTimestamp();
 
     const ellapsed = end - start;
-    printSummary(caption, ellapsed);
+    printSummary(caption, ellapsed, total_bytes);
 }
 
 fn runTemplateNotParsed(allocator: Allocator, comptime caption: []const u8, comptime TBinding: type, comptime json: []const u8, comptime template_text: []const u8) !void {
@@ -104,23 +106,28 @@ fn runTemplateNotParsed(allocator: Allocator, comptime caption: []const u8, comp
     var data = try loadData(TBinding, allocator, json);
     defer data.free(allocator);
 
+    var total_bytes: usize = 0;
     var repeat: u32 = 0;
     const start = std.time.nanoTimestamp();
     while (repeat < TIMES) : (repeat += 1) {
         const result = try mustache.renderAllocFromString(allocator, template_text, data);
+        total_bytes += result.len;
         allocator.free(result);
     }
     const end = std.time.nanoTimestamp();
 
     const ellapsed = end - start;
-    printSummary(caption, ellapsed);
+    printSummary(caption, ellapsed, total_bytes);
 }
 
-fn printSummary(caption: []const u8, ellapsed: i128) void {
+fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize) void {
     std.debug.print("\n{s}\n", .{caption});
-    std.debug.print("Total time {d:.3}ms\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_s});
-    std.debug.print("Total per item {d:.5}ms\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_ms / TIMES});
-    std.debug.print("Ops per second {d:.3}\n", .{TIMES / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
+    std.debug.print("Total time {d:.3}s\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_s});
+    std.debug.print("{d:.0} ops/s\n", .{TIMES / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
+    std.debug.print("{d:.0} ns/iter\n", .{@intToFloat(f64, ellapsed) / TIMES});
+    std.debug.print("{d:.0} MB/s\n", .{(@intToFloat(f64,total_bytes) / 1024 / 1024) / (@intToFloat(f64, ellapsed) / std.time.ns_per_s) });
+
+    
 }
 
 fn parseTemplate(allocator: Allocator, template_text: []const u8) mustache.CachedTemplate {
