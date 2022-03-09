@@ -7,3 +7,5 @@ samples/src/zig-cache
 benchmark/zig-cache
 benchmark/zig-out
 benchmark/src/zig-cache
+codecov
+kcov-output/

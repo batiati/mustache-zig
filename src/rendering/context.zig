@@ -405,7 +405,6 @@ const Comptime = struct {
                 path_iterator: *std.mem.TokenIterator(u8),
                 index: ?usize,
             ) TError!Result {
-
                 _ = depth;
                 _ = action_param;
                 _ = out_writer;

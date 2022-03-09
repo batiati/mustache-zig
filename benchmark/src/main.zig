@@ -3,8 +3,7 @@ const Allocator = std.mem.Allocator;
 const mustache = @import("mustache");
 
 pub fn main() anyerror!void {
-
-    std.debug.print("Benchmark\n{s}\n", .{ "https://github.com/batiati/mustache_benchmark" });
+    std.debug.print("Benchmark\n{s}\n", .{"https://github.com/batiati/mustache_benchmark"});
     std.debug.print("=============================\n\n", .{});
     try runTemplate("Template 1", Binding1, "../data/template1.html", "../data/bindings1.json");
     try runTemplate("Template 2", Binding2, "../data/template2.html", "../data/bindings2.json");
@@ -58,23 +57,23 @@ const Binding3 = struct {
         allocator.free(self.name);
         allocator.free(self.company);
         for (self.repo) |item| {
-            allocator.free(item.name);    
+            allocator.free(item.name);
         }
 
         for (self.repo2) |item| {
-            allocator.free(item.name);    
+            allocator.free(item.name);
         }
 
         allocator.free(self.repo);
         allocator.free(self.repo2);
-    }    
+    }
 };
 
 fn runTemplate(comptime caption: []const u8, comptime TBinding: type, comptime template: []const u8, comptime json: []const u8) !void {
     const template_text = @embedFile(template);
 
     const allocator = std.heap.c_allocator;
-    
+
     var cached_template = parseTemplate(allocator, template_text);
     defer cached_template.free(allocator);
 
@@ -83,7 +82,6 @@ fn runTemplate(comptime caption: []const u8, comptime TBinding: type, comptime t
 }
 
 fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comptime TBinding: type, comptime json: []const u8, template: mustache.CachedTemplate) !void {
-
     var data = try loadData(TBinding, allocator, json);
     defer data.free(allocator);
 
@@ -102,7 +100,6 @@ fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comp
 }
 
 fn runTemplateNotParsed(allocator: Allocator, comptime caption: []const u8, comptime TBinding: type, comptime json: []const u8, comptime template_text: []const u8) !void {
-
     var data = try loadData(TBinding, allocator, json);
     defer data.free(allocator);
 
@@ -125,9 +122,7 @@ fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize) void {
     std.debug.print("Total time {d:.3}s\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_s});
     std.debug.print("{d:.0} ops/s\n", .{TIMES / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
     std.debug.print("{d:.0} ns/iter\n", .{@intToFloat(f64, ellapsed) / TIMES});
-    std.debug.print("{d:.0} MB/s\n", .{(@intToFloat(f64,total_bytes) / 1024 / 1024) / (@intToFloat(f64, ellapsed) / std.time.ns_per_s) });
-
-    
+    std.debug.print("{d:.0} MB/s\n", .{(@intToFloat(f64, total_bytes) / 1024 / 1024) / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
 }
 
 fn parseTemplate(allocator: Allocator, template_text: []const u8) mustache.CachedTemplate {
