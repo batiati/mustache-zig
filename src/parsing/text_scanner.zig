@@ -27,6 +27,10 @@ pub const TextSource = enum { String, File };
 pub fn TextScanner(comptime source: TextSource) type {
     return struct {
         const Self = @This();
+        const State = union(enum) {
+            Finished,
+            ExpectingMark: MarkType,
+        };
 
         reader: if (source == .File) *FileReader else void,
         ref_counter: if (source == .File) RefCounter else void = if (source == .File) .{} else {},
@@ -34,7 +38,7 @@ pub fn TextScanner(comptime source: TextSource) type {
         content: []const u8 = &.{},
         index: usize = 0,
         block_index: usize = 0,
-        expected_mark: MarkType = .Starting,
+        state: State = .{ .ExpectingMark = .Starting },
         lin: u32 = 1,
         col: u32 = 1,
         delimiters: Delimiters = undefined,
@@ -91,39 +95,68 @@ pub fn TextScanner(comptime source: TextSource) type {
         ///
         /// Reads until the next delimiter mark or EOF
         pub fn next(self: *Self, allocator: Allocator) !?TextBlock {
-            self.block_index = self.index;
-            var trimmer = Trimmer(source){ .text_scanner = self };
+            switch (self.state) {
+                .Finished => return null,
+                .ExpectingMark => |expected_mark| {
+                    self.block_index = self.index;
+                    var trimmer = Trimmer(source){ .text_scanner = self };
 
-            while (self.index < self.content.len or
-                (source == .File and !self.reader.finished()))
-            {
-                if (source == .File) {
-                    // Request a new slice if near to the end
-                    if (self.content.len == 0 or
-                        self.index + self.delimiter_max_size + 1 >= self.content.len)
+                    while (self.index < self.content.len or
+                        (source == .File and !self.reader.finished()))
                     {
-                        try self.requestContent(allocator);
+                        if (source == .File) {
+                            // Request a new slice if near to the end
+                            if (self.content.len == 0 or
+                                self.index + self.delimiter_max_size + 1 >= self.content.len)
+                            {
+                                try self.requestContent(allocator);
+                            }
+                        }
+
+                        // Increment the index on defer
+                        var increment: u32 = 1;
+                        defer {
+                            if (self.content[self.index] == '\n') {
+                                self.lin += 1;
+                                self.col = 1;
+                            } else {
+                                self.col += increment;
+                            }
+
+                            self.index += increment;
+                        }
+
+                        if (self.matchTagMark(expected_mark)) |mark| {
+
+                            self.state = .{ .ExpectingMark = if (expected_mark == .Starting) .Ending else .Starting };
+                            increment = mark.delimiter_len;
+                            
+                            const tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null;
+                            return TextBlock{
+                                .event = .{ .Mark = mark },
+                                .tail = tail,
+                                .ref_counter = if (source == .File and tail != null) self.ref_counter.ref() else .{},
+                                .lin = self.lin,
+                                .col = self.col,
+                                .left_trimming = trimmer.getLeftTrimmingIndex(),
+                                .right_trimming = trimmer.getRightTrimmingIndex(),
+                            };
+                        }
+
+                        if (expected_mark == .Starting) {
+                            
+                            // We just need to keep track of trimming on the text outside tags
+                            // The text inside, like "{{blahblah}}"" will never be trimmed
+                            trimmer.move();
+                        }
                     }
-                }
 
-                // Increment the index on defer
-                var increment: u32 = 1;
-                defer {
-                    if (self.content[self.index] == '\n') {
-                        self.lin += 1;
-                        self.col = 1;
-                    } else {
-                        self.col += increment;
-                    }
+                    // EOF reached, no more parts left
+                    self.state = .Finished;
 
-                    self.index += increment;
-                }
-
-                if (self.matchTagMark()) |mark| {
-                    const tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null;
-
-                    const block = TextBlock{
-                        .event = .{ .Mark = mark },
+                    const tail = if (self.block_index < self.content.len) self.content[self.block_index..] else null;
+                    return TextBlock{
+                        .event = .Eof,
                         .tail = tail,
                         .ref_counter = if (source == .File and tail != null) self.ref_counter.ref() else .{},
                         .lin = self.lin,
@@ -131,64 +164,31 @@ pub fn TextScanner(comptime source: TextSource) type {
                         .left_trimming = trimmer.getLeftTrimmingIndex(),
                         .right_trimming = trimmer.getRightTrimmingIndex(),
                     };
-
-                    increment = mark.delimiter_len;
-
-                    return block;
-                }
-
-                trimmer.move();
-
-                if (self.index == self.content.len - 1) {
-                    return TextBlock{
-                        .event = .Eof,
-                        .tail = self.content[self.block_index..],
-                        .ref_counter = if (source == .File) self.ref_counter.ref() else .{},
-                        .lin = self.lin,
-                        .col = self.col,
-                        .left_trimming = trimmer.getLeftTrimmingIndex(),
-                        .right_trimming = trimmer.getRightTrimmingIndex(),
-                    };
-                }
+                },
             }
-
-            // No more parts
-            return null;
         }
 
-        fn matchTagMark(self: *Self) ?Mark {
+        fn matchTagMark(self: *Self, expected_mark: MarkType) ?Mark {
             const slice = self.content[self.index..];
+            return switch (expected_mark) {
+                .Starting => matchTagMarkType(.Starting, slice, self.delimiters.starting_delimiter),
+                .Ending => matchTagMarkType(.Ending, slice, self.delimiters.ending_delimiter),
+            };
+        }
 
-            switch (self.expected_mark) {
-                .Starting => {
-                    const match = std.mem.startsWith(u8, slice, self.delimiters.starting_delimiter);
-                    if (match) {
-                        self.expected_mark = .Ending;
-                        const is_triple_mustache = slice.len > self.delimiters.starting_delimiter.len and slice[self.delimiters.starting_delimiter.len] == '{';
+        inline fn matchTagMarkType(comptime mark_type: MarkType, slice: []const u8, delimiter: []const u8) ?Mark {
+            const match = std.mem.startsWith(u8, slice, delimiter);
+            if (match) {
+                const is_triple_mustache = slice.len > delimiter.len and slice[delimiter.len] == if (mark_type == .Starting) '{' else '}';
 
-                        return Mark{
-                            .mark_type = .Starting,
-                            .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
-                            .delimiter_len = @intCast(u32, if (is_triple_mustache) self.delimiters.starting_delimiter.len + 1 else self.delimiters.starting_delimiter.len),
-                        };
-                    }
-                },
-                .Ending => {
-                    const match = std.mem.startsWith(u8, slice, self.delimiters.ending_delimiter);
-                    if (match) {
-                        self.expected_mark = .Starting;
-                        const is_triple_mustache = slice.len > self.delimiters.ending_delimiter.len and slice[self.delimiters.ending_delimiter.len] == '}';
-
-                        return Mark{
-                            .mark_type = .Ending,
-                            .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
-                            .delimiter_len = @intCast(u32, if (is_triple_mustache) self.delimiters.ending_delimiter.len + 1 else self.delimiters.ending_delimiter.len),
-                        };
-                    }
-                },
+                return Mark{
+                    .mark_type = mark_type,
+                    .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
+                    .delimiter_len = @intCast(u32, if (is_triple_mustache) delimiter.len + 1 else delimiter.len),
+                };
+            } else {
+                return null;
             }
-
-            return null;
         }
     };
 }
@@ -262,7 +262,7 @@ test "basic tests" {
     try testing.expectEqual(Event.Eof, part_5.?.event);
     try testing.expectEqualStrings("Until eof", part_5.?.tail.?);
     try testing.expectEqual(@as(usize, 2), part_5.?.lin);
-    try testing.expectEqual(@as(usize, 26), part_5.?.col);
+    try testing.expectEqual(@as(usize, 27), part_5.?.col);
 
     var part_6 = try reader.next(allocator);
     try testing.expect(part_6 == null);
@@ -336,7 +336,7 @@ test "custom tags" {
     try testing.expectEqual(Event.Eof, part_5.?.event);
     try testing.expectEqualStrings("Until eof", part_5.?.tail.?);
     try testing.expectEqual(@as(usize, 2), part_5.?.lin);
-    try testing.expectEqual(@as(usize, 22), part_5.?.col);
+    try testing.expectEqual(@as(usize, 23), part_5.?.col);
 
     var part_6 = try reader.next(allocator);
     try testing.expect(part_6 == null);
@@ -377,7 +377,13 @@ test "EOF" {
     try testing.expectEqual(@as(usize, 7), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
-    try testing.expect(part_3 == null);
+    try testing.expect(part_3 != null);
+    defer part_3.?.deinit(allocator);
+    try testing.expectEqual(Event.Eof, part_3.?.event);
+    try testing.expect(part_3.?.tail == null);
+
+    var part_4 = try reader.next(allocator);
+    try testing.expect(part_4 == null);    
 }
 
 test "EOF custom tags" {
@@ -415,5 +421,12 @@ test "EOF custom tags" {
     try testing.expectEqual(@as(usize, 6), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
-    try testing.expect(part_3 == null);
+    defer part_3.?.deinit(allocator);
+    try testing.expect(part_3 != null);
+    try testing.expectEqual(Event.Eof, part_3.?.event);
+    try testing.expect(part_3.?.tail == null);
+
+    var part_4 = try reader.next(allocator);
+    try testing.expect(part_4 == null);
+
 }
