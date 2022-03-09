@@ -179,7 +179,8 @@ fn Render(comptime Writer: type, comptime Data: type) type {
 }
 
 test {
-    testing.refAllDecls(@This());
+    _ = tests;
+    _ = context;
 }
 
 const tests = struct {

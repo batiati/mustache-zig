@@ -490,7 +490,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
 }
 
 test {
-    std.testing.refAllDecls(@This());
+    _ = testing.refAllDecls(@This());
 }
 
 const StreamedParser = Parser(.{ .source = .String, .owns_string = true, .output = .Streamed });

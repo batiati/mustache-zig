@@ -454,7 +454,8 @@ pub fn Template(comptime options: TemplateOptions) type {
 }
 
 test {
-    std.testing.refAllDecls(@This());
+    _ = tests;
+    _ = parsing;
 }
 
 const tests = struct {

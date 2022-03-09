@@ -26,5 +26,6 @@ pub const renderFromFile = rendering.renderFromFile;
 pub const renderAllocFromString = rendering.renderAllocFromString;
 
 test {
-    std.testing.refAllDecls(@This());
+    _ = template;
+    _ = rendering;
 }
