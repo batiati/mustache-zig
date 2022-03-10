@@ -9,38 +9,69 @@ Mustache-Zig is an implementation of the [{{mustache}} template system](https://
 
 # ! Under development !
 
-## Samples
+## Features
 
-Render from strings, files and cached templates.
-See the [source code](https://github.com/batiati/mustache-zig/tree/master/samples) for more details.
+- [X] Comments `{{! Mustache is awesome }}`.
+- [X] Custom delimiters `{{=[ ]=}}`.
+- [X] Rendering common types, such as slices, arrays, tuples, enums, bools, optionals, pointers, integers and floats into `{{variables}`.
+- [X] Unescaped interpolation with `{{{tripple-mustache}}}` or `{{&ampersant}}`.
+- [X] Rendering sections `{{#foo}} ... {{/foo}}`.
+- [X] Section iterator over slices, arrays and tuples `{{slice}} ... {{/slice}}`
+- [X] Rendering inverse sections `{{^foo}} ... {{/foo}}`.
+- [ ] Rendering partials `{{>file.html}}`.
+- [ ] Rendering parents and blocks `{{<file.html}}` and `{{$block}}`.
 
 ## Full spec compliant
 
-- Supports most of elements from [mustache spec](https://github.com/mustache/spec) with all tests passing ✔️.
++ All implemented features passes all the tests from [mustache spec](https://github.com/mustache/spec).
 
-delimiters: `{{=[]=}}`
+## Examples
 
-interpolation: `{{name}}`
+Render from strings, files and pre-loaded templates.
+See the [source code](https://github.com/batiati/mustache-zig/blob/master/samples/src/main.zig) for more details.
 
-unescaped interpolation: `{{&name}}` and `{{{name}}}`
+```Zig
 
-sections: `{{#items}}` and `{{/items}}`
+const std = @import("std");
+const mustache = @import("mustache");
 
-inverted sections: `{{^finished}}` and `{{/finished}}`
+pub fn main() !void {
+    const template =
+        \\Hello {{name}} from Zig
+        \\Supported features:
+        \\{{#features}}
+        \\  - {{name}}
+        \\{{/features}}
+    ;
 
-comments: `{{! blah blah }}`
+    var data = .{
+        .name = "friends",
+        .features = .{
+            .{ .name = "interpolation" },
+            .{ .name = "sections" },
+            .{ .name = "delimiters" },
+            .{ .name = "partials" },
+        },
+    };
 
+    const allocator = std.testing.allocator;
+    const result = try mustache.renderAllocFromString(allocator, template, data);
+    defer allocator.free(result);
 
-- Partials and inheritance comming soon ...
+    try std.testing.expectEqualStrings(
+        \\Hello friends from Zig
+        \\Supported features:
+        \\  - interpolation
+        \\  - sections
+        \\  - delimiters
+        \\  - partials
+        \\
+    , result);
+}
 
-partials: `{{>partial}}`
+```
 
-parent: `{{<parent}}`
-
-blocks: `{{$block}}`
-
-
-## Designed for low memory consumption.
+## Benchmarks.
 
 Mustache templates are well known for HTML templating, but it's useful to render any kind of dynamic document, and potentially load templates from untrusted or user-defined sources.
 
