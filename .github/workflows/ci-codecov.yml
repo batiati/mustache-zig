@@ -15,9 +15,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Build and tun the ci-codecov ci-image
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       run: |
         export tag=ci-codecov:$(date +%s)
         docker build . --file ci/Dockerfile --tag $tag && \
-        docker run --env CODECOV_TOKEN=ae3a67b2-a610-4f81-acd5-1a617c4b10d1 --security-opt seccomp=unconfined -v $(pwd):/source $tag
+        docker run --security-opt seccomp=unconfined -v $(pwd):/source $tag
 
       
