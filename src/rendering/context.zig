@@ -342,7 +342,7 @@ const Comptime = struct {
 
                 switch (typeInfo) {
                     .Struct => {
-                        return try seekField(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
+                        return try findFieldPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
                     },
                     .Pointer => |info| switch (info.size) {
                         .One => return try recursiveFind(depth, info.child, action_param, out_writer, data, path, path_iterator, index),
@@ -362,7 +362,7 @@ const Comptime = struct {
                             return try recursiveFind(depth, info.child, action_param, out_writer, value, path, path_iterator, index);
                         }
                     },
-                    .Array => {
+                    .Array, .Vector => {
 
                         //Slice supports the "len" field,
                         if (std.mem.eql(u8, "len", path)) {
@@ -375,7 +375,7 @@ const Comptime = struct {
                 return if (depth == .Root) .NotFoundInContext else .ChainBroken;
             }
 
-            inline fn seekField(
+            inline fn findFieldPath(
                 depth: Depth,
                 comptime TValue: type,
                 action_param: anytype,
@@ -391,11 +391,11 @@ const Comptime = struct {
                         return try find(.Leaf, action_param, out_writer, @field(data, field.name), path_iterator, index);
                     }
                 } else {
-                    return try seekFunction(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
+                    return try findLambdaPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
                 }
             }
 
-            inline fn seekFunction(
+            inline fn findLambdaPath(
                 depth: Depth,
                 comptime TValue: type,
                 action_param: anytype,
@@ -410,7 +410,7 @@ const Comptime = struct {
                         switch (decl.data) {
                             .Fn => {
                                 const bound_fn = @field(TValue, decl.name);
-                                return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, bound_fn, .{});
+                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, bound_fn, .{});
                             },
                             else => {},
                         }
@@ -420,9 +420,7 @@ const Comptime = struct {
                 }
             }
 
-            inline fn invoke(
-                depth: Depth,
-                comptime TValue: type,
+            inline fn invokeLambda(
                 action_param: anytype,
                 out_writer: anytype,
                 data: anytype,
@@ -438,11 +436,22 @@ const Comptime = struct {
                     else => @compileError("Fn expected"),
                 };
 
-                if (fnType.args.len == 0) {
-                    comptime assert(args.len == 0);
+                if (fnType.args.len == args.len) {
 
-                    // Lambdas can receive zero arguments
-                    return try find(.Leaf, action_param, out_writer, lambda(), path_iterator, index);
+                    const has_error = @typeInfo(fnType.return_type.?) == .ErrorUnion;
+
+                    return try find(
+                        .Leaf,
+                        action_param,
+                        out_writer,
+                        if (has_error)
+                            // Errors are ignored and will interpolate as a empty string
+                            @call(.{}, lambda, args) catch return .ChainBroken
+                        else
+                            @call(.{}, lambda, args),
+                        path_iterator,
+                        index,
+                    );
                 } else {
                     comptime assert(args.len < fnType.args.len);
 
@@ -452,8 +461,6 @@ const Comptime = struct {
                         // - self: TValue, *TValue or *const TValue
                         // - allocator: Allocator
                         // - content: []const u8
-
-                        // TODO: Expected return values and errors
 
                         if (fnArg == Allocator or fnArg == []const u8) {
                             const new_args = blk: {
@@ -466,11 +473,7 @@ const Comptime = struct {
                                 }
                             };
 
-                            if (new_args.len == fnType.args.len) {
-                                return try find(.Leaf, action_param, out_writer, @call(.{}, lambda, new_args), path_iterator, index);
-                            } else {
-                                return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, new_args);
-                            }
+                            return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, new_args);
                         } else if (args.len == 0) {
 
                             // Self is only expected on the first argument
@@ -481,13 +484,11 @@ const Comptime = struct {
                                     switch (info.size) {
                                         .One => {
                                             if (info.child == fnArg) {
+
                                                 // Context is a pointer, but the parameter is a value
                                                 // fn (self TValue ...) called from a *TValue or *const TValue
-                                                if (fnType.args.len == 1) {
-                                                    return try find(.Leaf, action_param, out_writer, lambda(data.*), path_iterator, index);
-                                                } else {
-                                                    return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, .{data.*});
-                                                }
+
+                                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, .{data.*});
                                             } else {
                                                 switch (@typeInfo(fnArg)) {
                                                     .Pointer => |arg_info| {
@@ -498,11 +499,8 @@ const Comptime = struct {
                                                                 // fn (self *TValue ...) called from a *TValue
                                                                 // or
                                                                 // fn (self const* TValue ...) called from a *const TValue or *TValue
-                                                                if (fnType.args.len == 1) {
-                                                                    return try find(.Leaf, action_param, out_writer, lambda(data), path_iterator, index);
-                                                                } else {
-                                                                    return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, .{data});
-                                                                }
+
+                                                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, .{data});
                                                             }
                                                         }
                                                     },
@@ -519,11 +517,8 @@ const Comptime = struct {
                                             if (TData == arg_info.child and arg_info.is_const == true) {
 
                                                 // fn (self const* TValue ...)
-                                                if (fnType.args.len == 1) {
-                                                    return try find(.Leaf, action_param, out_writer, lambda(&data), path_iterator, index);
-                                                } else {
-                                                    return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, .{&data});
-                                                }
+
+                                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, .{&data});
                                             }
                                         },
                                         else => {
@@ -536,11 +531,7 @@ const Comptime = struct {
                                                 // or
                                                 // fn (self const* TValue ...) called from a *const TValue
 
-                                                if (fnType.args.len == 1) {
-                                                    return try find(.Leaf, action_param, out_writer, lambda(data), path_iterator, index);
-                                                } else {
-                                                    return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, .{data});
-                                                }
+                                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, .{data});
                                             }
                                         },
                                     }
@@ -550,7 +541,7 @@ const Comptime = struct {
                     }
                 }
 
-                return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+                return .ChainBroken;
             }
 
             inline fn iterateAt(
@@ -625,6 +616,13 @@ const Comptime = struct {
                             else
                                 .IteratorConsumed;
                         }
+                    },
+
+                    .Vector => {
+                        return if (index < data.len)
+                            Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                        else
+                            .IteratorConsumed;
                     },
 
                     .Optional => {
@@ -1197,6 +1195,14 @@ const struct_tests = struct {
             _ = allocator;
             _ = content;
             return 102;
+        }
+
+        pub fn mayFailStatic() error{Unexpected}!u32 {
+            return 200;
+        }
+
+        pub fn willFailStatic() error{Expected}!u32 {
+            return error.Expected;
         }
 
         pub fn anythingElse(int: i32) u32 {
@@ -1943,6 +1949,27 @@ const struct_tests = struct {
 
         try write(writer, person, "indication.selfAllocatorAndContent");
         try testing.expectEqualStrings("102", list.items);
+
+        list.clearAndFree();
+    }
+
+    test "Lambda - Write invalid functions" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var writer = list.writer();
+
+        try write(writer, person, "mayFailStatic");
+        try testing.expectEqualStrings("200", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "willFailStatic");
+        try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
     }
