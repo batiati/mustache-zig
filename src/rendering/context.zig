@@ -391,7 +391,7 @@ const Comptime = struct {
                         return try find(.Leaf, action_param, out_writer, @field(data, field.name), path_iterator, index);
                     }
                 } else {
-                    return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+                    return try seekFunction(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
                 }
             }
 
@@ -405,45 +405,152 @@ const Comptime = struct {
                 path_iterator: *std.mem.TokenIterator(u8),
                 index: ?usize,
             ) TError!Result {
-                _ = depth;
-                _ = action_param;
-                _ = out_writer;
-                _ = data;
-                _ = path;
-                _ = path_iterator;
-                _ = index;
+                inline for (std.meta.declarations(TValue)) |decl| {
+                    if (std.mem.eql(u8, path, decl.name)) {
+                        switch (decl.data) {
+                            .Fn => {
+                                const bound_fn = @field(TValue, decl.name);
+                                return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, bound_fn, .{});
+                            },
+                            else => {},
+                        }
+                    }
+                } else {
+                    return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+                }
+            }
 
-                // Lambdas supported signatures
-                // Functions that accepts a muttable *T can only be called from a reference
-
-                const lambda_signatures = .{
-                    fn () void,
-                    fn (content: []const u8) void,
-                    fn (elements: []const Element) void,
-                    fn (allocator: Allocator) void,
-                    fn (self: TValue) void,
-                    fn (self: TValue, content: []const u8) void,
-                    fn (self: TValue, elements: []const Element) void,
-                    fn (self: TValue, allocator: Allocator) void,
-                    fn (self: TValue, allocator: Allocator, content: []const u8) void,
-                    fn (self: TValue, allocator: Allocator, elements: []const Element) void,
-                    fn (self: *const TValue) void,
-                    fn (self: *const TValue, content: []const u8) void,
-                    fn (self: *const TValue, elements: []const Element) void,
-                    fn (self: *const TValue, allocator: Allocator) void,
-                    fn (self: *const TValue, allocator: Allocator, content: []const u8) void,
-                    fn (self: *const TValue, allocator: Allocator, elements: []const Element) void,
-                    fn (self: *TValue) void,
-                    fn (self: *TValue, content: []const u8) void,
-                    fn (self: *TValue, elements: []const Element) void,
-                    fn (self: *TValue, allocator: Allocator) void,
-                    fn (self: *TValue, allocator: Allocator, content: []const u8) void,
-                    fn (self: *TValue, allocator: Allocator, elements: []const Element) void,
+            inline fn invoke(
+                depth: Depth,
+                comptime TValue: type,
+                action_param: anytype,
+                out_writer: anytype,
+                data: anytype,
+                path: []const u8,
+                path_iterator: *std.mem.TokenIterator(u8),
+                index: ?usize,
+                lambda: anytype,
+                args: anytype,
+            ) TError!Result {
+                const TData = @TypeOf(data);
+                const fnType = switch (@typeInfo(@TypeOf(lambda))) {
+                    .Fn => |info| info,
+                    else => @compileError("Fn expected"),
                 };
 
-                _ = lambda_signatures;
+                if (fnType.args.len == 0) {
+                    comptime assert(args.len == 0);
 
-                @panic("not implemented");
+                    // Lambdas can receive zero arguments
+                    return try find(.Leaf, action_param, out_writer, lambda(), path_iterator, index);
+                } else {
+                    comptime assert(args.len < fnType.args.len);
+
+                    if (fnType.args[args.len].arg_type) |fnArg| {
+
+                        // Lambdas can receive the following arguments:
+                        // - self: TValue, *TValue or *const TValue
+                        // - allocator: Allocator
+                        // - content: []const u8
+
+                        // TODO: Expected return values and errors
+
+                        if (fnArg == Allocator or fnArg == []const u8) {
+                            const new_args = blk: {
+                                if (fnArg == Allocator) {
+                                    const dummy_allocator: Allocator = undefined; //TODO
+                                    break :blk args ++ .{dummy_allocator};
+                                } else {
+                                    const dummy_context: []const u8 = "TODO!";
+                                    break :blk args ++ .{dummy_context};
+                                }
+                            };
+
+                            if (new_args.len == fnType.args.len) {
+                                return try find(.Leaf, action_param, out_writer, @call(.{}, lambda, new_args), path_iterator, index);
+                            } else {
+                                return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, new_args);
+                            }
+                        } else if (args.len == 0) {
+
+                            // Self is only expected on the first argument
+                            // Any other type isn't expected.
+
+                            switch (@typeInfo(TData)) {
+                                .Pointer => |info| {
+                                    switch (info.size) {
+                                        .One => {
+                                            if (info.child == fnArg) {
+                                                // Context is a pointer, but the parameter is a value
+                                                // fn (self TValue ...) called from a *TValue or *const TValue
+                                                if (fnType.args.len == 1) {
+                                                    return try find(.Leaf, action_param, out_writer, lambda(data.*), path_iterator, index);
+                                                } else {
+                                                    return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, .{data.*});
+                                                }
+                                            } else {
+                                                switch (@typeInfo(fnArg)) {
+                                                    .Pointer => |arg_info| {
+                                                        if (info.child == arg_info.child) {
+                                                            if (arg_info.is_const == true or info.is_const == false) {
+
+                                                                // Both context and parameter are pointers
+                                                                // fn (self *TValue ...) called from a *TValue
+                                                                // or
+                                                                // fn (self const* TValue ...) called from a *const TValue or *TValue
+                                                                if (fnType.args.len == 1) {
+                                                                    return try find(.Leaf, action_param, out_writer, lambda(data), path_iterator, index);
+                                                                } else {
+                                                                    return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, .{data});
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    else => {},
+                                                }
+                                            }
+                                        },
+                                        else => {},
+                                    }
+                                },
+                                else => {
+                                    switch (@typeInfo(fnArg)) {
+                                        .Pointer => |arg_info| {
+                                            if (TData == arg_info.child and arg_info.is_const == true) {
+
+                                                // fn (self const* TValue ...)
+                                                if (fnType.args.len == 1) {
+                                                    return try find(.Leaf, action_param, out_writer, lambda(&data), path_iterator, index);
+                                                } else {
+                                                    return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, .{&data});
+                                                }
+                                            }
+                                        },
+                                        else => {
+                                            if (TData == fnArg) {
+
+                                                // Both context and parameter are the same type:''
+                                                // fn (self TValue ...) called from a TValue
+                                                // or
+                                                // fn (self *TValue ...) called from a *TValue
+                                                // or
+                                                // fn (self const* TValue ...) called from a *const TValue
+
+                                                if (fnType.args.len == 1) {
+                                                    return try find(.Leaf, action_param, out_writer, lambda(data), path_iterator, index);
+                                                } else {
+                                                    return try invoke(depth, TValue, action_param, out_writer, data, path, path_iterator, index, lambda, .{data});
+                                                }
+                                            }
+                                        },
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+
+                return if (depth == .Root) .NotFoundInContext else .ChainBroken;
             }
 
             inline fn iterateAt(
@@ -995,6 +1102,9 @@ const struct_tests = struct {
     };
 
     const Person = struct {
+
+        // Fields
+
         id: u32,
         name: []const u8,
         address: struct {
@@ -1015,58 +1125,141 @@ const struct_tests = struct {
         indication: ?*Person,
         active: bool,
         additional_information: ?[]const u8,
+        counter: usize = 0,
+        buffer: [32]u8 = undefined,
+
+        // Lambdas
+
+        pub fn staticValue() u32 {
+            return 1;
+        }
+
+        pub fn staticString() []const u8 {
+            return "this is static";
+        }
+
+        pub fn selfValue(self: Person) usize {
+            return self.name.len;
+        }
+
+        pub fn selfString(self: Person) []const u8 {
+            return self.name;
+        }
+
+        pub fn selfConstPtrValue(self: *const Person) usize {
+            return self.name.len;
+        }
+
+        pub fn selfConstPtrString(self: *const Person) []const u8 {
+            return self.name;
+        }
+
+        pub fn selfMutPtrValue(self: *Person) usize {
+            self.counter += 1;
+            return self.counter;
+        }
+
+        pub fn selfMutPtrString(self: *Person) []const u8 {
+            const size = std.fmt.formatIntBuf(&self.buffer, self.counter, 10, .lower, .{});
+            return self.buffer[0..size];
+        }
+
+        pub fn staticAllocator(allocator: Allocator) u32 {
+            _ = allocator;
+            return 100;
+        }
+
+        pub fn staticContent(content: []const u8) usize {
+            _ = content;
+            return 101;
+        }
+
+        pub fn staticAllocatorAndContent(allocator: Allocator, content: []const u8) u32 {
+            _ = allocator;
+            _ = content;
+            return 102;
+        }
+
+        pub fn selfAllocator(self: Person, allocator: Allocator) u32 {
+            _ = self;
+            _ = allocator;
+            return 100;
+        }
+
+        pub fn selfContent(self: Person, content: []const u8) u32 {
+            _ = self;
+            _ = content;
+            return 101;
+        }
+
+        pub fn selfAllocatorAndContent(self: Person, allocator: Allocator, content: []const u8) u32 {
+            _ = self;
+            _ = allocator;
+            _ = content;
+            return 102;
+        }
+
+        pub fn anythingElse(int: i32) u32 {
+            _ = int;
+            return 42;
+        }
     };
 
-    var person_1 = Person{
-        .id = 1,
-        .name = "John Doe",
-        .address = .{
-            .street = "far away street",
-            .region = .EU,
-            .zip = 99450,
-            .contacts = .{
-                .phone = "555-9090",
-                .email = "jdoe@none.com",
+    fn getPerson() Person {
+        var person_1 = testing.allocator.create(Person) catch unreachable;
+        person_1.* = Person{
+            .id = 1,
+            .name = "John Doe",
+            .address = .{
+                .street = "far away street",
+                .region = .EU,
+                .zip = 99450,
+                .contacts = .{
+                    .phone = "555-9090",
+                    .email = "jdoe@none.com",
+                },
+                .coordinates = .{
+                    .lon = 41.40338,
+                    .lat = 2.17403,
+                },
             },
-            .coordinates = .{
-                .lon = 41.40338,
-                .lat = 2.17403,
+            .items = &[_]Item{
+                .{ .name = "just one item", .value = 0.01 },
             },
-        },
-        .items = &[_]Item{
-            .{ .name = "just one item", .value = 0.01 },
-        },
-        .salary = 75.00,
-        .indication = null,
-        .active = false,
-        .additional_information = null,
-    };
+            .salary = 75.00,
+            .indication = null,
+            .active = false,
+            .additional_information = null,
+        };
 
-    var person_2 = Person{
-        .id = 2,
-        .name = "Someone Jr",
-        .address = .{
-            .street = "nearby",
-            .region = .RoW,
-            .zip = 333900,
-            .contacts = .{
-                .phone = "555-9191",
-                .email = "smjr@herewego.com",
+        var person_2 = Person{
+            .id = 2,
+            .name = "Someone Jr",
+            .address = .{
+                .street = "nearby",
+                .region = .RoW,
+                .zip = 333900,
+                .contacts = .{
+                    .phone = "555-9191",
+                    .email = "smjr@herewego.com",
+                },
+                .coordinates = .{
+                    .lon = 38.71471,
+                    .lat = -9.13872,
+                },
             },
-            .coordinates = .{
-                .lon = 38.71471,
-                .lat = -9.13872,
+            .items = &[_]Item{
+                .{ .name = "item 1", .value = 100 },
+                .{ .name = "item 2", .value = 200 },
             },
-        },
-        .items = &[_]Item{
-            .{ .name = "item 1", .value = 100 },
-            .{ .name = "item 2", .value = 200 },
-        },
-        .salary = 140.00,
-        .indication = &person_1,
-        .active = true,
-        .additional_information = "someone was here",
-    };
+            .salary = 140.00,
+            .indication = person_1,
+            .active = true,
+            .additional_information = "someone was here",
+        };
+
+        return person_2;
+    }
 
     fn write(out_writer: anytype, data: anytype, path: []const u8) anyerror!void {
         const allocator = testing.allocator;
@@ -1082,40 +1275,43 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person_2, "id");
+        try write(writer, person, "id");
         try testing.expectEqualStrings("2", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person_2, "id");
+        try write(writer, &person, "id");
         try testing.expectEqualStrings("2", list.items);
 
         list.clearAndFree();
 
         // Nested access
-        try write(writer, person_2, "address.zip");
+        try write(writer, person, "address.zip");
         try testing.expectEqualStrings("333900", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person_2, "indication.address.zip");
+        try write(writer, person, "indication.address.zip");
         try testing.expectEqualStrings("99450", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person_2, "address.zip");
+        try write(writer, &person, "address.zip");
         try testing.expectEqualStrings("333900", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person_2, "indication.address.zip");
+        try write(writer, &person, "indication.address.zip");
         try testing.expectEqualStrings("99450", list.items);
     }
 
@@ -1124,52 +1320,55 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person_2, "salary");
+        try write(writer, person, "salary");
         try testing.expectEqualStrings("140", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person_2, "salary");
+        try write(writer, &person, "salary");
         try testing.expectEqualStrings("140", list.items);
 
         list.clearAndFree();
 
         // Nested access
-        try write(writer, person_2, "address.coordinates.lon");
+        try write(writer, person, "address.coordinates.lon");
         try testing.expectEqualStrings("38.71471", list.items);
 
         list.clearAndFree();
 
         // Negative values
-        try write(writer, person_2, "address.coordinates.lat");
+        try write(writer, person, "address.coordinates.lat");
         try testing.expectEqualStrings("-9.13872", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person_2, "indication.address.coordinates.lon");
+        try write(writer, person, "indication.address.coordinates.lon");
         try testing.expectEqualStrings("41.40338", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person_2, "address.coordinates.lon");
+        try write(writer, &person, "address.coordinates.lon");
         try testing.expectEqualStrings("38.71471", list.items);
 
         list.clearAndFree();
 
         // Negative Ref values
-        try write(writer, &person_2, "address.coordinates.lat");
+        try write(writer, &person, "address.coordinates.lat");
         try testing.expectEqualStrings("-9.13872", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person_2, "indication.address.coordinates.lon");
+        try write(writer, &person, "indication.address.coordinates.lon");
         try testing.expectEqualStrings("41.40338", list.items);
     }
 
@@ -1178,52 +1377,55 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person_2, "name");
+        try write(writer, person, "name");
         try testing.expectEqualStrings("Someone Jr", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person_2, "name");
+        try write(writer, &person, "name");
         try testing.expectEqualStrings("Someone Jr", list.items);
 
         list.clearAndFree();
 
         // Direct Len access
-        try write(writer, person_2, "name.len");
+        try write(writer, person, "name.len");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Direct Ref Len access
-        try write(writer, &person_2, "name.len");
+        try write(writer, &person, "name.len");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Nested access
-        try write(writer, person_2, "address.street");
+        try write(writer, person, "address.street");
         try testing.expectEqualStrings("nearby", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person_2, "indication.address.street");
+        try write(writer, person, "indication.address.street");
         try testing.expectEqualStrings("far away street", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person_2, "address.street");
+        try write(writer, &person, "address.street");
         try testing.expectEqualStrings("nearby", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, &person_2, "indication.address.street");
+        try write(writer, &person, "indication.address.street");
         try testing.expectEqualStrings("far away street", list.items);
     }
 
@@ -1232,28 +1434,31 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person_2, "address.region");
+        try write(writer, person, "address.region");
         try testing.expectEqualStrings("RoW", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person_2, "address.region");
+        try write(writer, &person, "address.region");
         try testing.expectEqualStrings("RoW", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person_2, "indication.address.region");
+        try write(writer, person, "indication.address.region");
         try testing.expectEqualStrings("EU", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person_2, "indication.address.region");
+        try write(writer, &person, "indication.address.region");
         try testing.expectEqualStrings("EU", list.items);
     }
 
@@ -1262,28 +1467,31 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person_2, "active");
+        try write(writer, person, "active");
         try testing.expectEqualStrings("true", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person_2, "active");
+        try write(writer, &person, "active");
         try testing.expectEqualStrings("true", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person_2, "indication.active");
+        try write(writer, person, "indication.active");
         try testing.expectEqualStrings("false", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person_2, "indication.active");
+        try write(writer, &person, "indication.active");
         try testing.expectEqualStrings("false", list.items);
     }
 
@@ -1292,40 +1500,43 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person_2, "additional_information");
+        try write(writer, person, "additional_information");
         try testing.expectEqualStrings("someone was here", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person_2, "additional_information");
+        try write(writer, &person, "additional_information");
         try testing.expectEqualStrings("someone was here", list.items);
 
         list.clearAndFree();
 
         // Null Accress
-        try write(writer, person_1, "additional_information");
+        try write(writer, person.indication, "additional_information");
         try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
 
         // Null Ref Accress
-        try write(writer, &person_1, "additional_information");
+        try write(writer, person.indication, "additional_information");
         try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person_2, "indication.additional_information");
+        try write(writer, person, "indication.additional_information");
         try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person_2, "indication.additional_information");
+        try write(writer, &person, "indication.additional_information");
         try testing.expectEqualStrings("", list.items);
     }
 
@@ -1334,23 +1545,423 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person_1, "wrong_name");
+        try write(writer, person, "wrong_name");
         try testing.expectEqualStrings("", list.items);
 
         // Nested access
-        try write(writer, person_1, "name.wrong_name");
+        try write(writer, person, "name.wrong_name");
         try testing.expectEqualStrings("", list.items);
 
         // Direct Ref access
-        try write(writer, &person_1, "wrong_name");
+        try write(writer, &person, "wrong_name");
         try testing.expectEqualStrings("", list.items);
 
         // Nested Ref access
-        try write(writer, &person_1, "name.wrong_name");
+        try write(writer, &person, "name.wrong_name");
         try testing.expectEqualStrings("", list.items);
+    }
+
+    test "Lambda - Write static" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var writer = list.writer();
+
+        // Direct access
+        try write(writer, person, "staticValue");
+        try testing.expectEqualStrings("1", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "staticString");
+        try testing.expectEqualStrings("this is static", list.items);
+
+        list.clearAndFree();
+
+        // Ref access
+        try write(writer, &person, "staticValue");
+        try testing.expectEqualStrings("1", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, &person, "staticString");
+        try testing.expectEqualStrings("this is static", list.items);
+
+        list.clearAndFree();
+
+        // Nested pointer access
+        try write(writer, person, "indication.staticValue");
+        try testing.expectEqualStrings("1", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "indication.staticString");
+        try testing.expectEqualStrings("this is static", list.items);
+
+        list.clearAndFree();
+
+        // Nested Ref access
+        try write(writer, &person, "staticValue");
+        try testing.expectEqualStrings("1", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, &person, "staticString");
+        try testing.expectEqualStrings("this is static", list.items);
+
+        list.clearAndFree();
+
+        // Nested Ref pointer access
+        try write(writer, &person, "indication.staticValue");
+        try testing.expectEqualStrings("1", list.items);
+
+        list.clearAndFree();
+    }
+
+    test "Lambda - Write self" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var writer = list.writer();
+
+        // Direct access
+        try write(writer, person, "selfValue");
+        try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "selfString");
+        try testing.expectEqualStrings(person.name, list.items);
+
+        list.clearAndFree();
+
+        // Ref access
+        try write(writer, &person, "selfValue");
+        try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, &person, "selfString");
+        try testing.expectEqualStrings(person.name, list.items);
+
+        list.clearAndFree();
+
+        // Nested pointer access
+        try write(writer, person, "indication.selfValue");
+        try testing.expectEqualStrings("8", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "indication.selfString");
+        try testing.expectEqualStrings(person.indication.?.name, list.items);
+
+        list.clearAndFree();
+
+        // Nested Ref access
+        try write(writer, &person, "selfValue");
+        try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, &person, "selfString");
+        try testing.expectEqualStrings(person.name, list.items);
+
+        list.clearAndFree();
+
+        // Nested Ref pointer access
+        try write(writer, &person, "indication.selfValue");
+        try testing.expectEqualStrings("8", list.items);
+
+        list.clearAndFree();
+    }
+
+    test "Lambda - Write selfConstPtr" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var writer = list.writer();
+
+        // Direct access
+        try write(writer, person, "selfConstPtrValue");
+        try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "selfConstPtrString");
+        try testing.expectEqualStrings(person.name, list.items);
+
+        list.clearAndFree();
+
+        // Ref access
+        try write(writer, &person, "selfConstPtrValue");
+        try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, &person, "selfConstPtrString");
+        try testing.expectEqualStrings(person.name, list.items);
+
+        list.clearAndFree();
+
+        // Nested pointer access
+        try write(writer, person, "indication.selfConstPtrValue");
+        try testing.expectEqualStrings("8", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "indication.selfConstPtrString");
+        try testing.expectEqualStrings(person.indication.?.name, list.items);
+
+        list.clearAndFree();
+
+        // Nested Ref access
+        try write(writer, &person, "selfConstPtrValue");
+        try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, &person, "selfConstPtrString");
+        try testing.expectEqualStrings(person.name, list.items);
+
+        list.clearAndFree();
+
+        // Nested Ref pointer access
+        try write(writer, &person, "indication.selfConstPtrValue");
+        try testing.expectEqualStrings("8", list.items);
+
+        list.clearAndFree();
+    }
+
+    test "Lambda - Write selfMutPtr" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var writer = list.writer();
+
+        {
+            var person = getPerson();
+            defer if (person.indication) |indication| allocator.destroy(indication);
+
+            // Cannot be called from a context by value
+            try write(writer, person, "selfMutPtrValue");
+            try testing.expectEqualStrings("", list.items);
+
+            list.clearAndFree();
+
+            try write(writer, person, "selfMutPtrString");
+            try testing.expectEqualStrings("", list.items);
+
+            list.clearAndFree();
+
+            // Mutable pointer
+            try write(writer, person, "indication.selfMutPtrValue");
+            try testing.expectEqualStrings("1", list.items);
+            try testing.expect(person.indication.?.counter == 1);
+
+            list.clearAndFree();
+
+            try write(writer, person, "indication.selfMutPtrString");
+            try testing.expectEqualStrings("1", list.items);
+
+            list.clearAndFree();
+
+            try write(writer, person, "indication.selfMutPtrValue");
+            try testing.expectEqualStrings("2", list.items);
+            try testing.expect(person.indication.?.counter == 2);
+
+            list.clearAndFree();
+
+            try write(writer, person, "indication.selfMutPtrString");
+            try testing.expectEqualStrings("2", list.items);
+
+            list.clearAndFree();
+        }
+
+        {
+            var person = getPerson();
+            defer if (person.indication) |indication| allocator.destroy(indication);
+
+            // Cannot be called from a context const
+            const const_person_ptr: *const Person = &person;
+            try write(writer, const_person_ptr, "selfMutPtrValue");
+            try testing.expectEqualStrings("", list.items);
+
+            list.clearAndFree();
+
+            try write(writer, const_person_ptr, "selfMutPtrString");
+            try testing.expectEqualStrings("", list.items);
+
+            list.clearAndFree();
+        }
+
+        {
+            var person = getPerson();
+            defer if (person.indication) |indication| allocator.destroy(indication);
+
+            // Ref access
+            try write(writer, &person, "selfMutPtrValue");
+            try testing.expectEqualStrings("1", list.items);
+
+            list.clearAndFree();
+
+            try write(writer, &person, "selfMutPtrString");
+            try testing.expectEqualStrings("1", list.items);
+
+            list.clearAndFree();
+
+            try write(writer, &person, "selfMutPtrValue");
+            try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
+
+            list.clearAndFree();
+
+            try write(writer, &person, "selfMutPtrString");
+            try testing.expectEqualStrings("2", list.items);
+
+            list.clearAndFree();
+
+            // Nested pointer access
+            try write(writer, &person, "indication.selfMutPtrValue");
+            try testing.expectEqualStrings("1", list.items);
+
+            list.clearAndFree();
+
+            try write(writer, &person, "indication.selfMutPtrString");
+            try testing.expectEqualStrings("1", list.items);
+
+            list.clearAndFree();
+
+            try write(writer, &person, "indication.selfMutPtrValue");
+            try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
+
+            list.clearAndFree();
+
+            try write(writer, &person, "indication.selfMutPtrString");
+            try testing.expectEqualStrings("2", list.items);
+
+            list.clearAndFree();
+        }
+    }
+
+    test "Lambda - Write static arguments" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var writer = list.writer();
+
+        // Direct access
+        try write(writer, person, "staticAllocator");
+        try testing.expectEqualStrings("100", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "staticContent");
+        try testing.expectEqualStrings("101", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "staticAllocatorAndContent");
+        try testing.expectEqualStrings("102", list.items);
+
+        list.clearAndFree();
+    }
+
+    test "Lambda - Write self arguments" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var writer = list.writer();
+
+        // Direct access
+        try write(writer, person, "selfAllocator");
+        try testing.expectEqualStrings("100", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "selfContent");
+        try testing.expectEqualStrings("101", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "selfAllocatorAndContent");
+        try testing.expectEqualStrings("102", list.items);
+
+        list.clearAndFree();
+
+        // Ref access
+        try write(writer, &person, "selfAllocator");
+        try testing.expectEqualStrings("100", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, &person, "selfContent");
+        try testing.expectEqualStrings("101", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, &person, "selfAllocatorAndContent");
+        try testing.expectEqualStrings("102", list.items);
+
+        list.clearAndFree();
+
+        // Nested pointer access
+        try write(writer, person, "indication.selfAllocator");
+        try testing.expectEqualStrings("100", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "indication.selfContent");
+        try testing.expectEqualStrings("101", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "indication.selfAllocatorAndContent");
+        try testing.expectEqualStrings("102", list.items);
+
+        list.clearAndFree();
+    }
+
+    test "Lambda - Write invalid functions" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var writer = list.writer();
+
+        // Unexpected arguments
+        try write(writer, person, "anythingElse");
+        try testing.expectEqualStrings("", list.items);
+
+        list.clearAndFree();
     }
 
     test "Navigation" {
@@ -1358,11 +1969,14 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Person
 
-        var person_ctx = try getContext(allocator, writer, person_2);
+        var person_ctx = try getContext(allocator, writer, person);
         defer person_ctx.deinit(allocator);
 
         list.clearAndFree();
@@ -1412,11 +2026,14 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Person
 
-        var person_ctx = try getContext(allocator, writer, &person_2);
+        var person_ctx = try getContext(allocator, writer, &person);
         defer person_ctx.deinit(allocator);
 
         list.clearAndFree();
@@ -1480,7 +2097,10 @@ const struct_tests = struct {
         const allocator = testing.allocator;
 
         // Person
-        var person_ctx = try getContext(allocator, std.io.null_writer, person_2);
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var person_ctx = try getContext(allocator, std.io.null_writer, person);
         defer person_ctx.deinit(allocator);
 
         // Person.address
@@ -1528,10 +2148,13 @@ const struct_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
         var writer = list.writer();
 
         // Person
-        var ctx = try getContext(allocator, writer, person_2);
+        var ctx = try getContext(allocator, writer, person);
         defer ctx.deinit(allocator);
 
         var iterator = switch (ctx.iterator("items")) {
@@ -1572,7 +2195,10 @@ const struct_tests = struct {
         const allocator = testing.allocator;
 
         // Person
-        var ctx = try getContext(allocator, std.io.null_writer, person_2);
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var ctx = try getContext(allocator, std.io.null_writer, person);
         defer ctx.deinit(allocator);
 
         {
@@ -1614,7 +2240,10 @@ const struct_tests = struct {
         const allocator = testing.allocator;
 
         // Person
-        var ctx = try getContext(allocator, std.io.null_writer, person_2);
+        var person = getPerson();
+        defer if (person.indication) |indication| allocator.destroy(indication);
+
+        var ctx = try getContext(allocator, std.io.null_writer, person);
         defer ctx.deinit(allocator);
 
         {
