@@ -20,6 +20,6 @@ jobs:
       run: |
         export tag=ci-codecov:$(date +%s)
         docker build . --file ci/Dockerfile --tag $tag && \
-        docker run --security-opt seccomp=unconfined -v $(pwd):/source $tag
+        docker run --env CODECOV_TOKEN=$CODECOV_TOKEN --security-opt seccomp=unconfined -v $(pwd):/source $tag
 
       
