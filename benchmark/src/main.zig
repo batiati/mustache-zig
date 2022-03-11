@@ -81,7 +81,7 @@ fn runTemplate(comptime caption: []const u8, comptime TBinding: type, comptime t
     try runTemplateNotParsed(allocator, caption ++ " - not parsed", TBinding, json, template_text);
 }
 
-fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comptime TBinding: type, comptime json: []const u8, template: mustache.CachedTemplate) !void {
+fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comptime TBinding: type, comptime json: []const u8, template: mustache.Template) !void {
     var data = try loadData(TBinding, allocator, json);
     defer data.free(allocator);
 
@@ -125,7 +125,7 @@ fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize) void {
     std.debug.print("{d:.0} MB/s\n", .{(@intToFloat(f64, total_bytes) / 1024 / 1024) / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
 }
 
-fn parseTemplate(allocator: Allocator, template_text: []const u8) mustache.CachedTemplate {
+fn parseTemplate(allocator: Allocator, template_text: []const u8) mustache.Template {
     return switch (mustache.parseTemplate(allocator, template_text, .{}, false) catch unreachable) {
         .ParseError => |last_error| {
             std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(last_error.error_code), last_error.lin, last_error.col });

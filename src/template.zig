@@ -229,18 +229,18 @@ pub const Element = union(enum) {
     }
 };
 
-pub const CachedTemplate = struct {
+pub const Template = struct {
     elements: []const Element,
     owns_string: bool,
 
-    pub fn free(self: *CachedTemplate, allocator: Allocator) void {
+    pub fn free(self: *Template, allocator: Allocator) void {
         Element.freeMany(allocator, self.owns_string, self.elements);
     }
 };
 
 const ParseTemplateResult = union(enum) {
     ParseError: LastError,
-    Success: CachedTemplate,
+    Success: Template,
 };
 
 /// Parses a string and returns an union containing either a ParseError or the CachedTemplate
@@ -280,7 +280,7 @@ inline fn parse(
         .owns_string = owns_string,
     };
 
-    var template = Template(options){
+    var template = TemplateLoader(options){
         .allocator = allocator,
         .delimiters = delimiters,
     };
@@ -304,7 +304,7 @@ pub const TemplateOptions = struct {
     owns_string: bool = true,
 };
 
-pub fn Template(comptime options: TemplateOptions) type {
+pub fn TemplateLoader(comptime options: TemplateOptions) type {
     const FileCachedParser = parsing.Parser(.{
         .source = .File,
         .owns_string = options.owns_string,
@@ -468,10 +468,10 @@ const tests = struct {
         _ = partials;
     }
 
-    pub fn getTemplate(template_text: []const u8) !Template(.{}) {
+    pub fn getTemplate(template_text: []const u8) !TemplateLoader(.{}) {
         const allocator = testing.allocator;
 
-        var template = Template(.{}){
+        var template = TemplateLoader(.{}){
             .allocator = allocator,
         };
         errdefer template.deinit();
@@ -2213,7 +2213,7 @@ const tests = struct {
 
         const allocator = testing.allocator;
 
-        var template = Template(.{}){
+        var template = TemplateLoader(.{}){
             .allocator = allocator,
         };
         defer template.deinit();
@@ -2298,7 +2298,7 @@ const tests = struct {
 
         // Read from a file, assuring that this text should read four times from the buffer
         const read_buffer_size = (template_text.len / 4);
-        var template = Template(.{ .read_buffer_size = read_buffer_size }){
+        var template = TemplateLoader(.{ .read_buffer_size = read_buffer_size }){
             .allocator = allocator,
         };
         defer template.deinit();
@@ -2400,7 +2400,7 @@ const tests = struct {
 
         // Strings are not ownned by the template,
         // Use this option when creating templates from a static string or when rendering direct to a stream
-        const RefStringsTemplate = Template(.{
+        const RefStringsTemplate = TemplateLoader(.{
             .owns_string = false,
         });
 

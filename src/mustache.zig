@@ -14,7 +14,7 @@ pub const Section = template.Section;
 pub const Partial = template.Partial;
 pub const Parent = template.Parent;
 pub const Block = template.Block;
-pub const CachedTemplate = template.CachedTemplate;
+pub const Template = template.Template;
 
 pub const parseTemplate = template.parseTemplate;
 pub const parseTemplateFromFile = template.parseTemplateFromFile;

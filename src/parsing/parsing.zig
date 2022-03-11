@@ -12,7 +12,7 @@ const Block = mustache.Block;
 const LastError = mustache.LastError;
 const ParseError = mustache.ParseError;
 
-const Template = @import("../template.zig").Template;
+const TemplateLoader = @import("../template.zig").TemplateLoader;
 
 const mem = @import("../mem.zig");
 const EpochArena = mem.EpochArena;

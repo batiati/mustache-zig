@@ -7,9 +7,9 @@ const mustache = @import("../mustache.zig");
 const Element = mustache.Element;
 const Section = mustache.Section;
 const ParseError = mustache.ParseError;
-const CachedTemplate = mustache.CachedTemplate;
+const Template = mustache.Template;
 
-const Template = @import("../template.zig").Template;
+const TemplateLoader = @import("../template.zig").TemplateLoader;
 
 const context = @import("context.zig");
 const Context = context.Context;
@@ -17,7 +17,7 @@ const Escape = context.Escape;
 
 const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 
-pub fn renderAllocCached(allocator: Allocator, cached_template: CachedTemplate, data: anytype) Allocator.Error![]const u8 {
+pub fn renderAllocCached(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
     errdefer builder.deinit();
 
@@ -26,7 +26,7 @@ pub fn renderAllocCached(allocator: Allocator, cached_template: CachedTemplate, 
     return builder.toOwnedSlice();
 }
 
-pub fn renderCached(allocator: Allocator, cached_template: CachedTemplate, data: anytype, out_writer: anytype) (Allocator.Error || @TypeOf(out_writer).Error)!void {
+pub fn renderCached(allocator: Allocator, cached_template: Template, data: anytype, out_writer: anytype) (Allocator.Error || @TypeOf(out_writer).Error)!void {
     var render = getRender(allocator, out_writer, data);
     try render.render(cached_template.elements);
 }
@@ -41,7 +41,7 @@ pub fn renderAllocFromString(allocator: Allocator, template_text: []const u8, da
 }
 
 pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || @TypeOf(out_writer).Error)!void {
-    var template = Template(.{ .owns_string = false }){
+    var template = TemplateLoader(.{ .owns_string = false }){
         .allocator = allocator,
     };
     errdefer template.deinit();
@@ -51,7 +51,7 @@ pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: a
 }
 
 pub fn renderFromFile(allocator: Allocator, absolute_template_path: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(out_writer).Error)!void {
-    var template = Template(.{ .owns_string = false }){
+    var template = TemplateLoader(.{ .owns_string = false }){
         .allocator = allocator,
     };
     errdefer template.deinit();
