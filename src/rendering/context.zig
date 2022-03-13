@@ -11,7 +11,8 @@ const Element = mustache.Element;
 
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
-const Comptime = @import("Comptime.zig");
+
+const invoker = @import("invoker.zig");
 
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
@@ -200,21 +201,21 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return try Comptime.get(allocator, self.writer, self.data, &path_iterator, index);
+            return try invoker.get(allocator, self.writer, self.data, &path_iterator, index);
         }
 
         fn check(ctx: *anyopaque, path: []const u8, index: usize) PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return Comptime.check(self.data, &path_iterator, index);
+            return invoker.check(self.data, &path_iterator, index);
         }
 
         fn write(ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return try Comptime.write(self.writer, self.data, &path_iterator, escape);
+            return try invoker.write(self.writer, self.data, &path_iterator, escape);
         }
 
         fn deinit(ctx: *anyopaque, allocator: Allocator) void {
@@ -231,7 +232,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
 }
 
 test {
-    _ = Comptime;
+    _ = invoker;
     _ = lambda;
     _ = struct_tests;
 }
