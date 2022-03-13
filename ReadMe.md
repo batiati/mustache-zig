@@ -1,10 +1,10 @@
 # MUSTACHE-ZIG
+# [{{mustache}}](https://mustache.github.io/) templates for [Zig](https://ziglang.org/).
+
 [![made with Zig](https://img.shields.io/badge/made%20with%20%E2%9D%A4%20-Zig-orange)](https://ziglang.org/)
 [![Docker Image CI](https://github.com/batiati/mustache-zig/actions/workflows/ci-codecov.yml/badge.svg)](https://github.com/batiati/mustache-zig/actions/workflows/ci-codecov.yml)
 [![codecov](https://codecov.io/gh/batiati/mustache-zig/branch/master/graph/badge.svg)](https://codecov.io/gh/batiati/mustache-zig)
 [![license mit](https://img.shields.io/github/license/batiati/mustache-zig)](https://github.com/batiati/mustache-zig/blob/master/LICENSE.txt)
-
-Mustache-Zig is an implementation of the [{{mustache}} template system](https://mustache.github.io/) for [Zig](https://ziglang.org/).
 
 ![logo](mustache.png)
 
@@ -12,15 +12,16 @@ Mustache-Zig is an implementation of the [{{mustache}} template system](https://
 
 ## Features
 
-- [X] Comments `{{! Mustache is awesome }}`.
-- [X] Custom delimiters `{{=[ ]=}}`.
-- [X] Rendering common types, such as slices, arrays, tuples, enums, bools, optionals, pointers, integers and floats into `{{variables}`.
-- [X] Unescaped interpolation with `{{{tripple-mustache}}}` or `{{&ampersant}}`.
-- [X] Rendering sections `{{#foo}} ... {{/foo}}`.
-- [X] Section iterator over slices, arrays and tuples `{{slice}} ... {{/slice}}`
-- [X] Rendering inverse sections `{{^foo}} ... {{/foo}}`.
-- [ ] Rendering partials `{{>file.html}}`.
-- [ ] Rendering parents and blocks `{{<file.html}}` and `{{$block}}`.
+- [X] [Comments](https://github.com/mustache/spec/blob/master/specs/comments.yml) `{{! Mustache is awesome }}`.
+- [X] Custom [delimiters](https://github.com/mustache/spec/blob/master/specs/delimiters.yml) `{{=[ ]=}}`.
+- [X] [Interpolation](https://github.com/mustache/spec/blob/master/specs/interpolation.yml) of common types, such as strings, enums, bools, optionals, pointers, integers and floats into `{{variables}`.
+- [X] [Unescaped interpolation](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/interpolation.yml#L52) with `{{{tripple-mustache}}}` or `{{&ampersant}}`.
+- [X] Rendering [sections](https://github.com/mustache/spec/blob/master/specs/sections.yml) `{{#foo}} ... {{/foo}}`.
+- [X] [Section iterator](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/sections.yml#L133) over slices, arrays and tuples `{{slice}} ... {{/slice}}`.
+- [X] Rendering [inverted sections](https://github.com/mustache/spec/blob/master/specs/inverted.yml) `{{^foo}} ... {{/foo}}`.
+- [ ] [Lambdas](https://github.com/mustache/spec/blob/master/specs/~lambdas.yml) expansion.
+- [ ] Rendering [partials](https://github.com/mustache/spec/blob/master/specs/partials.yml) `{{>file.html}}`.
+- [ ] Rendering [parents and blocks](https://github.com/mustache/spec/blob/master/specs/~inheritance.yml) `{{<file.html}}` and `{{$block}}`.
 
 ## Full spec compliant
 
