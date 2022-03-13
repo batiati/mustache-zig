@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const testing = std.testing;
+const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
 const Element = mustache.Element;
@@ -141,7 +142,8 @@ fn Render(comptime Writer: type, comptime Data: type) type {
 
                     .Lambda => {
                         // Expand the lambda against the current context and break the loop
-                        _ = try current.ctx.expandLambda(self.allocator, stack, path, escape);
+                        const expand_result = try current.ctx.expandLambda(self.allocator, stack, path, escape);
+                        assert(expand_result == .Lambda);
                         break;
                     },
 
