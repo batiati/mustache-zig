@@ -42,9 +42,14 @@ pub fn PathResolution(comptime Payload: type) type {
         IteratorConsumed,
 
         ///
-        /// The path could be resolved against the current context
+        /// The lambda could be resolved against the current context, 
+        /// The payload is the result returned by "action_fn"        
+        Lambda: Payload,
+
+        ///
+        /// The field could be resolved against the current context
         /// The payload is the result returned by "action_fn"
-        Resolved: Payload,
+        Field: Payload,
     };
 }
 
@@ -62,14 +67,20 @@ pub fn Context(comptime Writer: type) type {
     return struct {
         const Self = @This();
 
+        pub const ContextStack = struct {
+            parent: ?*@This(),
+            ctx: Self,
+        };
+
         ptr: *anyopaque,
         vtable: *const VTable,
 
         pub const VTable = struct {
-            get: fn (ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!PathResolution(Self),
-            write: fn (ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void),
-            check: fn (ctx: *anyopaque, path: []const u8, index: usize) PathResolution(void),
-            deinit: fn (ctx: *anyopaque, allocator: Allocator) void,
+            get: fn (*anyopaque, Allocator, []const u8, ?usize) Allocator.Error!PathResolution(Self),
+            interpolate: fn (*anyopaque, []const u8, Escape) Writer.Error!PathResolution(void),
+            expandLambda: fn (*anyopaque, Allocator, *const ContextStack, []const u8, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
+            check: fn (*anyopaque, []const u8, usize) PathResolution(void),
+            deinit: fn (*anyopaque, Allocator) void,
         };
 
         pub const Iterator = struct {
@@ -89,7 +100,7 @@ pub fn Context(comptime Writer: type) type {
                     );
 
                     return switch (result) {
-                        .Resolved => true,
+                        .Field => true,
                         .IteratorConsumed => false,
                         else => {
                             assert(false);
@@ -113,7 +124,7 @@ pub fn Context(comptime Writer: type) type {
 
                     // Keeping the iterator pattern
                     switch (result) {
-                        .Resolved => |found| return found,
+                        .Field => |found| return found,
                         .IteratorConsumed => {
                             self.finished = true;
                             return null;
@@ -135,12 +146,15 @@ pub fn Context(comptime Writer: type) type {
             const result = self.vtable.check(self.ptr, path, 0);
 
             return switch (result) {
-                .Resolved, .IteratorConsumed => .{
-                    .Resolved = .{
+                .Field,
+                .Lambda,
+                .IteratorConsumed,
+                => .{
+                    .Field = .{
                         .context = self,
                         .path = path,
                         .current = 0,
-                        .finished = result == .IteratorConsumed,
+                        .finished = result != .Field,
                     },
                 },
 
@@ -149,8 +163,12 @@ pub fn Context(comptime Writer: type) type {
             };
         }
 
-        pub inline fn write(self: Self, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
-            return try self.vtable.write(self.ptr, path, escape);
+        pub inline fn interpolate(self: Self, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
+            return try self.vtable.interpolate(self.ptr, path, escape);
+        }
+
+        pub inline fn expandLambda(self: Self, allocator: Allocator, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            return try self.vtable.expandLambda(self.ptr, allocator, stack, path, escape);
         }
 
         pub inline fn deinit(self: Self, allocator: Allocator) void {
@@ -162,11 +180,13 @@ pub fn Context(comptime Writer: type) type {
 fn ContextImpl(comptime Writer: type, comptime Data: type) type {
     return struct {
         const ContextInterface = Context(Writer);
+        const ContextStack = ContextInterface.ContextStack;
 
         const vtable = ContextInterface.VTable{
             .get = get,
             .check = check,
-            .write = write,
+            .interpolate = interpolate,
+            .expandLambda = expandLambda,
             .deinit = deinit,
         };
 
@@ -211,11 +231,29 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             return invoker.check(self.data, &path_iterator, index);
         }
 
-        fn write(ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
+        fn interpolate(ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return try invoker.write(self.writer, self.data, &path_iterator, escape);
+            return try invoker.interpolate(self.writer, self.data, &path_iterator, escape);
+        }
+
+        fn expandLambda(ctx: *anyopaque, allocator: Allocator, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            var self = getSelf(ctx);
+
+            // TODO:
+            const tag_contents = "";
+            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
+
+            return try invoker.expandLambda(
+                allocator,
+                self.writer,
+                self.data,
+                stack,
+                tag_contents,
+                escape,
+                &path_iterator,
+            );
         }
 
         fn deinit(ctx: *anyopaque, allocator: Allocator) void {
@@ -374,13 +412,23 @@ const struct_tests = struct {
         return person_2;
     }
 
-    fn write(out_writer: anytype, data: anytype, path: []const u8) anyerror!void {
+    fn interpolate(out_writer: anytype, data: anytype, path: []const u8) anyerror!void {
         const allocator = testing.allocator;
 
         var ctx = try getContext(allocator, out_writer, data);
         defer ctx.deinit(allocator);
 
-        _ = try ctx.write(path, .Unescaped);
+        switch (try ctx.interpolate(path, .Unescaped)) {
+            .Lambda => {
+                var stack = @TypeOf(ctx).ContextStack{
+                    .parent = null,
+                    .ctx = ctx,
+                };
+
+                _ = try ctx.expandLambda(allocator, &stack, path, .Unescaped);
+            },
+            else => {},
+        }
     }
 
     test "Write Int" {
@@ -394,37 +442,37 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "id");
+        try interpolate(writer, person, "id");
         try testing.expectEqualStrings("2", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "id");
+        try interpolate(writer, &person, "id");
         try testing.expectEqualStrings("2", list.items);
 
         list.clearAndFree();
 
         // Nested access
-        try write(writer, person, "address.zip");
+        try interpolate(writer, person, "address.zip");
         try testing.expectEqualStrings("333900", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.address.zip");
+        try interpolate(writer, person, "indication.address.zip");
         try testing.expectEqualStrings("99450", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person, "address.zip");
+        try interpolate(writer, &person, "address.zip");
         try testing.expectEqualStrings("333900", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person, "indication.address.zip");
+        try interpolate(writer, &person, "indication.address.zip");
         try testing.expectEqualStrings("99450", list.items);
     }
 
@@ -439,49 +487,49 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "salary");
+        try interpolate(writer, person, "salary");
         try testing.expectEqualStrings("140", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "salary");
+        try interpolate(writer, &person, "salary");
         try testing.expectEqualStrings("140", list.items);
 
         list.clearAndFree();
 
         // Nested access
-        try write(writer, person, "address.coordinates.lon");
+        try interpolate(writer, person, "address.coordinates.lon");
         try testing.expectEqualStrings("38.71471", list.items);
 
         list.clearAndFree();
 
         // Negative values
-        try write(writer, person, "address.coordinates.lat");
+        try interpolate(writer, person, "address.coordinates.lat");
         try testing.expectEqualStrings("-9.13872", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.address.coordinates.lon");
+        try interpolate(writer, person, "indication.address.coordinates.lon");
         try testing.expectEqualStrings("41.40338", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person, "address.coordinates.lon");
+        try interpolate(writer, &person, "address.coordinates.lon");
         try testing.expectEqualStrings("38.71471", list.items);
 
         list.clearAndFree();
 
         // Negative Ref values
-        try write(writer, &person, "address.coordinates.lat");
+        try interpolate(writer, &person, "address.coordinates.lat");
         try testing.expectEqualStrings("-9.13872", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person, "indication.address.coordinates.lon");
+        try interpolate(writer, &person, "indication.address.coordinates.lon");
         try testing.expectEqualStrings("41.40338", list.items);
     }
 
@@ -496,49 +544,49 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "name");
+        try interpolate(writer, person, "name");
         try testing.expectEqualStrings("Someone Jr", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "name");
+        try interpolate(writer, &person, "name");
         try testing.expectEqualStrings("Someone Jr", list.items);
 
         list.clearAndFree();
 
         // Direct Len access
-        try write(writer, person, "name.len");
+        try interpolate(writer, person, "name.len");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Direct Ref Len access
-        try write(writer, &person, "name.len");
+        try interpolate(writer, &person, "name.len");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Nested access
-        try write(writer, person, "address.street");
+        try interpolate(writer, person, "address.street");
         try testing.expectEqualStrings("nearby", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.address.street");
+        try interpolate(writer, person, "indication.address.street");
         try testing.expectEqualStrings("far away street", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person, "address.street");
+        try interpolate(writer, &person, "address.street");
         try testing.expectEqualStrings("nearby", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, &person, "indication.address.street");
+        try interpolate(writer, &person, "indication.address.street");
         try testing.expectEqualStrings("far away street", list.items);
     }
 
@@ -553,25 +601,25 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "address.region");
+        try interpolate(writer, person, "address.region");
         try testing.expectEqualStrings("RoW", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "address.region");
+        try interpolate(writer, &person, "address.region");
         try testing.expectEqualStrings("RoW", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.address.region");
+        try interpolate(writer, person, "indication.address.region");
         try testing.expectEqualStrings("EU", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person, "indication.address.region");
+        try interpolate(writer, &person, "indication.address.region");
         try testing.expectEqualStrings("EU", list.items);
     }
 
@@ -586,25 +634,25 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "active");
+        try interpolate(writer, person, "active");
         try testing.expectEqualStrings("true", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "active");
+        try interpolate(writer, &person, "active");
         try testing.expectEqualStrings("true", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.active");
+        try interpolate(writer, person, "indication.active");
         try testing.expectEqualStrings("false", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person, "indication.active");
+        try interpolate(writer, &person, "indication.active");
         try testing.expectEqualStrings("false", list.items);
     }
 
@@ -619,37 +667,37 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "additional_information");
+        try interpolate(writer, person, "additional_information");
         try testing.expectEqualStrings("someone was here", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "additional_information");
+        try interpolate(writer, &person, "additional_information");
         try testing.expectEqualStrings("someone was here", list.items);
 
         list.clearAndFree();
 
         // Null Accress
-        try write(writer, person.indication, "additional_information");
+        try interpolate(writer, person.indication, "additional_information");
         try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
 
         // Null Ref Accress
-        try write(writer, person.indication, "additional_information");
+        try interpolate(writer, person.indication, "additional_information");
         try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.additional_information");
+        try interpolate(writer, person, "indication.additional_information");
         try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person, "indication.additional_information");
+        try interpolate(writer, &person, "indication.additional_information");
         try testing.expectEqualStrings("", list.items);
     }
 
@@ -664,19 +712,19 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "wrong_name");
+        try interpolate(writer, person, "wrong_name");
         try testing.expectEqualStrings("", list.items);
 
         // Nested access
-        try write(writer, person, "name.wrong_name");
+        try interpolate(writer, person, "name.wrong_name");
         try testing.expectEqualStrings("", list.items);
 
         // Direct Ref access
-        try write(writer, &person, "wrong_name");
+        try interpolate(writer, &person, "wrong_name");
         try testing.expectEqualStrings("", list.items);
 
         // Nested Ref access
-        try write(writer, &person, "name.wrong_name");
+        try interpolate(writer, &person, "name.wrong_name");
         try testing.expectEqualStrings("", list.items);
     }
     test "Lambda - staticLambda" {
@@ -690,31 +738,31 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "staticLambda");
+        try interpolate(writer, person, "staticLambda");
         try testing.expectEqualStrings("1", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "staticLambda");
+        try interpolate(writer, &person, "staticLambda");
         try testing.expectEqualStrings("1", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.staticLambda");
+        try interpolate(writer, person, "indication.staticLambda");
         try testing.expectEqualStrings("1", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person, "staticLambda");
+        try interpolate(writer, &person, "staticLambda");
         try testing.expectEqualStrings("1", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person, "indication.staticLambda");
+        try interpolate(writer, &person, "indication.staticLambda");
         try testing.expectEqualStrings("1", list.items);
 
         list.clearAndFree();
@@ -731,31 +779,31 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "selfLambda");
+        try interpolate(writer, person, "selfLambda");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "selfLambda");
+        try interpolate(writer, &person, "selfLambda");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.selfLambda");
+        try interpolate(writer, person, "indication.selfLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person, "selfLambda");
+        try interpolate(writer, &person, "selfLambda");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Nested Ref pointer access
-        try write(writer, &person, "indication.selfLambda");
+        try interpolate(writer, &person, "indication.selfLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
@@ -782,31 +830,31 @@ const struct_tests = struct {
 
         // Const Ref access
 
-        //try write(writer, person_const_ptr, "selfConstPtrLambda");
+        //try interpolate(writer, person_const_ptr, "selfConstPtrLambda");
         //try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Mut Ref access
-        try write(writer, person_ptr, "selfConstPtrLambda");
+        try interpolate(writer, person_ptr, "selfConstPtrLambda");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.selfConstPtrLambda");
+        try interpolate(writer, person, "indication.selfConstPtrLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
 
         // Nested const Ref access
-        try write(writer, person_const_ptr, "indication.selfConstPtrLambda");
+        try interpolate(writer, person_const_ptr, "indication.selfConstPtrLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, person_ptr, "indication.selfConstPtrLambda");
+        try interpolate(writer, person_ptr, "indication.selfConstPtrLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
@@ -824,19 +872,19 @@ const struct_tests = struct {
             defer if (person.indication) |indication| allocator.destroy(indication);
 
             // Cannot be called from a context by value
-            try write(writer, person, "selfMutPtrLambda");
+            try interpolate(writer, person, "selfMutPtrLambda");
             try testing.expectEqualStrings("", list.items);
 
             list.clearAndFree();
 
             // Mutable pointer
-            try write(writer, person, "indication.selfMutPtrLambda");
+            try interpolate(writer, person, "indication.selfMutPtrLambda");
             try testing.expectEqualStrings("1", list.items);
             try testing.expect(person.indication.?.counter == 1);
 
             list.clearAndFree();
 
-            try write(writer, person, "indication.selfMutPtrLambda");
+            try interpolate(writer, person, "indication.selfMutPtrLambda");
             try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
             try testing.expect(person.indication.?.counter == 2);
 
@@ -849,7 +897,7 @@ const struct_tests = struct {
 
             // Cannot be called from a context const
             const const_person_ptr: *const Person = &person;
-            try write(writer, const_person_ptr, "selfMutPtrLambda");
+            try interpolate(writer, const_person_ptr, "selfMutPtrLambda");
             try testing.expectEqualStrings("", list.items);
 
             list.clearAndFree();
@@ -860,26 +908,26 @@ const struct_tests = struct {
             defer if (person.indication) |indication| allocator.destroy(indication);
 
             // Ref access
-            try write(writer, &person, "selfMutPtrLambda");
+            try interpolate(writer, &person, "selfMutPtrLambda");
             try testing.expectEqualStrings("1", list.items);
             try testing.expect(person.counter == 1);
 
             list.clearAndFree();
 
-            try write(writer, &person, "selfMutPtrLambda");
+            try interpolate(writer, &person, "selfMutPtrLambda");
             try testing.expectEqualStrings("2", list.items); //Called again, it's mutable
             try testing.expect(person.counter == 2);
 
             list.clearAndFree();
 
             // Nested pointer access
-            try write(writer, &person, "indication.selfMutPtrLambda");
+            try interpolate(writer, &person, "indication.selfMutPtrLambda");
             try testing.expectEqualStrings("1", list.items);
             try testing.expect(person.indication.?.counter == 1);
 
             list.clearAndFree();
 
-            try write(writer, &person, "indication.selfMutPtrLambda");
+            try interpolate(writer, &person, "indication.selfMutPtrLambda");
             try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
             try testing.expect(person.indication.?.counter == 2);
 
@@ -897,12 +945,12 @@ const struct_tests = struct {
 
         var writer = list.writer();
 
-        try write(writer, person, "willFailStaticLambda");
+        try interpolate(writer, person, "willFailStaticLambda");
         try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
 
-        try write(writer, person, "willFailSelfLambda");
+        try interpolate(writer, person, "willFailSelfLambda");
         try testing.expectEqualStrings("unfinished", list.items);
 
         list.clearAndFree();
@@ -919,7 +967,7 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Unexpected arguments
-        try write(writer, person, "anythingElse");
+        try interpolate(writer, person, "anythingElse");
         try testing.expectEqualStrings("", list.items);
 
         list.clearAndFree();
@@ -942,13 +990,13 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try person_ctx.write("address.street", .Unescaped);
+        _ = try person_ctx.interpolate("address.street", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         // Address
 
         var address_ctx = switch (try person_ctx.get(allocator, "address")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -957,13 +1005,13 @@ const struct_tests = struct {
         defer address_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try address_ctx.write("street", .Unescaped);
+        _ = try address_ctx.interpolate("street", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         // Street
 
         var street_ctx = switch (try address_ctx.get(allocator, "street")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -973,12 +1021,12 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try street_ctx.write("", .Unescaped);
+        _ = try street_ctx.interpolate("", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         list.clearAndFree();
 
-        _ = try street_ctx.write(".", .Unescaped);
+        _ = try street_ctx.interpolate(".", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
     }
 
@@ -999,13 +1047,13 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try person_ctx.write("indication.address.street", .Unescaped);
+        _ = try person_ctx.interpolate("indication.address.street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Indication
 
         var indication_ctx = switch (try person_ctx.get(allocator, "indication")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -1014,13 +1062,13 @@ const struct_tests = struct {
         defer indication_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try indication_ctx.write("address.street", .Unescaped);
+        _ = try indication_ctx.interpolate("address.street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Address
 
         var address_ctx = switch (try indication_ctx.get(allocator, "address")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -1029,13 +1077,13 @@ const struct_tests = struct {
         defer address_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try address_ctx.write("street", .Unescaped);
+        _ = try address_ctx.interpolate("street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Street
 
         var street_ctx = switch (try address_ctx.get(allocator, "street")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -1045,12 +1093,12 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try street_ctx.write("", .Unescaped);
+        _ = try street_ctx.interpolate("", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         list.clearAndFree();
 
-        _ = try street_ctx.write(".", .Unescaped);
+        _ = try street_ctx.interpolate(".", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
     }
 
@@ -1066,7 +1114,7 @@ const struct_tests = struct {
 
         // Person.address
         var address_ctx = switch (try person_ctx.get(allocator, "address")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -1079,7 +1127,7 @@ const struct_tests = struct {
 
         // Person.address.street
         var street_ctx = switch (try address_ctx.get(allocator, "street")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -1092,7 +1140,7 @@ const struct_tests = struct {
 
         // Person.address.street.len
         var street_len_ctx = switch (try street_ctx.get(allocator, "len")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -1119,7 +1167,7 @@ const struct_tests = struct {
         defer ctx.deinit(allocator);
 
         var iterator = switch (ctx.iterator("items")) {
-            .Resolved => |found| found,
+            .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -1134,7 +1182,7 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try item_1.write("name", .Unescaped);
+        _ = try item_1.interpolate("name", .Unescaped);
         try testing.expectEqualStrings("item 1", list.items);
 
         var item_2 = (try iterator.next(allocator)) orelse {
@@ -1145,7 +1193,7 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try item_2.write("name", .Unescaped);
+        _ = try item_2.interpolate("name", .Unescaped);
         try testing.expectEqualStrings("item 2", list.items);
 
         var no_more = try iterator.next(allocator);
@@ -1165,7 +1213,7 @@ const struct_tests = struct {
         {
             // iterator over true
             var iterator = switch (ctx.iterator("active")) {
-                .Resolved => |found| found,
+                .Field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1185,7 +1233,7 @@ const struct_tests = struct {
         {
             // iterator over false
             var iterator = switch (ctx.iterator("indication.active")) {
-                .Resolved => |found| found,
+                .Field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1210,7 +1258,7 @@ const struct_tests = struct {
         {
             // iterator over true
             var iterator = switch (ctx.iterator("additional_information")) {
-                .Resolved => |found| found,
+                .Field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1230,7 +1278,7 @@ const struct_tests = struct {
         {
             // iterator over false
             var iterator = switch (ctx.iterator("indication.additional_information")) {
-                .Resolved => |found| found,
+                .Field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;

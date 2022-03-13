@@ -72,20 +72,16 @@ fn Render(comptime Writer: type, comptime Data: type) type {
     return struct {
         const Self = @This();
         const ContextInterface = Context(Writer);
+        const ContextStack = ContextInterface.ContextStack;
 
         pub const Error = Allocator.Error || Writer.Error;
-
-        const Stack = struct {
-            parent: ?*Stack,
-            ctx: Context(Writer),
-        };
 
         allocator: Allocator,
         writer: Writer,
         data: Data,
 
         pub fn render(self: *Self, elements: []const Element) Error!void {
-            var stack = Stack{
+            var stack = ContextStack{
                 .parent = null,
                 .ctx = try context.getContext(self.allocator, self.writer, self.data),
             };
@@ -94,19 +90,19 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             try self.renderLevel(&stack, elements);
         }
 
-        fn renderLevel(self: *Self, stack: *Stack, children: ?[]const Element) Error!void {
+        fn renderLevel(self: *Self, stack: *ContextStack, children: ?[]const Element) Error!void {
             if (children) |elements| {
                 for (elements) |element| {
                     switch (element) {
                         .StaticText => |content| try self.writer.writeAll(content),
-                        .Interpolation => |path| try interpolate(stack, path, .Escaped),
-                        .UnescapedInterpolation => |path| try interpolate(stack, path, .Unescaped),
+                        .Interpolation => |path| try self.interpolate(stack, path, .Escaped),
+                        .UnescapedInterpolation => |path| try self.interpolate(stack, path, .Unescaped),
                         .Section => |section| {
                             if (self.getIterator(stack, section)) |*iterator| {
                                 while (try iterator.next(self.allocator)) |item_ctx| {
                                     defer item_ctx.deinit(self.allocator);
 
-                                    var next_level = Stack{
+                                    var next_level = ContextStack{
                                         .parent = stack,
                                         .ctx = item_ctx,
                                     };
@@ -130,14 +126,22 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             }
         }
 
-        fn interpolate(ctx: *Stack, path: []const u8, escape: Escape) Writer.Error!void {
-            var level: ?*Stack = ctx;
+        fn interpolate(self: *Self, stack: *ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
+            var level: ?*ContextStack = stack;
+            _ = self;
+
             while (level) |current| : (level = current.parent) {
-                const path_resolution = try current.ctx.write(path, escape);
+                const path_resolution = try current.ctx.interpolate(path, escape);
 
                 switch (path_resolution) {
-                    .Resolved => {
+                    .Field => {
                         // Success, break the loop
+                        break;
+                    },
+
+                    .Lambda => {
+                        // Expand the lambda against the current context and break the loop
+                        _ = try current.ctx.expandLambda(self.allocator, stack, path, escape);
                         break;
                     },
 
@@ -154,18 +158,27 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             }
         }
 
-        fn getIterator(self: *Self, ctx: *Stack, section: Section) ?Context(Writer).Iterator {
-            _ = self;
-            var level: ?*Stack = ctx;
+        fn getIterator(self: *Self, stack: *ContextStack, section: Section) ?Context(Writer).Iterator {
+            var level: ?*ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {
                 switch (current.ctx.iterator(section.key)) {
-                    .Resolved => |found| return found,
+                    .Field => |found| return found,
+
+                    .Lambda => |found| {
+
+                        // Expand the lambda and break the loop
+                        //try found.context.expandLambda(self.allocator, stack, found.path, .Unescaped);
+                        _ = self;
+                        _ = found;
+                        break;
+                    },
 
                     .IteratorConsumed, .ChainBroken => {
                         // Not found, but should NOT try against the parent context
                         break;
                     },
+
                     .NotFoundInContext => {
                         // Should try against the parent context
                         continue;

@@ -10,7 +10,7 @@ const Escape = context.Escape;
 
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
-const LambdaContextImpl = lambda.LambdaContextImpl;
+const LambdaInvoker = lambda.LambdaInvoker;
 
 const testing = std.testing;
 const assert = std.debug.assert;
@@ -32,14 +32,14 @@ pub inline fn get(
     );
 }
 
-pub inline fn write(
+pub inline fn interpolate(
     out_writer: anytype,
     data: anytype,
     path_iterator: *std.mem.TokenIterator(u8),
     escape: Escape,
 ) @TypeOf(out_writer).Error!PathResolution(void) {
-    const Stringify = Caller(@TypeOf(out_writer).Error, void, writeAction);
-    return try Stringify.call(
+    const Interpolate = Caller(@TypeOf(out_writer).Error, void, interpolateAction);
+    return try Interpolate.call(
         escape,
         out_writer,
         data,
@@ -61,6 +61,25 @@ pub inline fn check(
         data,
         path_iterator,
         index,
+    );
+}
+
+pub inline fn expandLambda(
+    allocator: Allocator,
+    out_writer: anytype,
+    data: anytype,
+    stack: anytype,
+    tag_contents: []const u8,
+    escape: Escape,
+    path_iterator: *std.mem.TokenIterator(u8),
+) (Allocator.Error || @TypeOf(out_writer).Error)!PathResolution(void) {
+    const ExpandLambdaAction = Caller(Allocator.Error || @TypeOf(out_writer).Error, void, expandLambdaAction);
+    return try ExpandLambdaAction.call(
+        .{ allocator, stack, tag_contents, escape },
+        out_writer,
+        data,
+        path_iterator,
+        null,
     );
 }
 
@@ -111,14 +130,34 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
                 }
             };
 
-            const path = if (comptime lambda.isLambdaContextImpl(Data)) null else path_iterator.next();
+            const isLambda = comptime lambda.isLambdaInvoker(Data);
+
+            if (isLambda) {
+                if (index) |current_index| {
+                    if (current_index > 0) return .IteratorConsumed;
+                }
+
+                return Result{ .Lambda = try action_fn(action_param, out_writer, ctx) };
+            } else {
+                if (path_iterator.next()) |current_path| {
+                    return try recursiveFind(depth, @TypeOf(data), action_param, out_writer, ctx, current_path, path_iterator, index);
+                } else if (index) |current_index| {
+                    return try iterateAt(action_param, out_writer, ctx, current_index);
+                } else {
+                    return Result{ .Field = try action_fn(action_param, out_writer, ctx) };
+                }
+            }
+
+            const path = if (isLambda) null else path_iterator.next();
 
             if (path) |current_path| {
                 return try recursiveFind(depth, @TypeOf(data), action_param, out_writer, ctx, current_path, path_iterator, index);
             } else if (index) |current_index| {
                 return try iterateAt(action_param, out_writer, ctx, current_index);
+            } else if (isLambda) {
+                return Result{ .Lambda = try action_fn(action_param, out_writer, ctx) };
             } else {
-                return Result{ .Resolved = try action_fn(action_param, out_writer, ctx) };
+                return Result{ .Field = try action_fn(action_param, out_writer, ctx) };
             }
         }
 
@@ -226,7 +265,6 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
             path_iterator: *std.mem.TokenIterator(u8),
             index: ?usize,
         ) TError!Result {
-            const TWriter = @TypeOf(out_writer);
             const TData = @TypeOf(data);
             const TFn = @TypeOf(bound_fn);
             const args_len = @typeInfo(TFn).Fn.args.len;
@@ -236,9 +274,8 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
             // Path: "person.lambda.address" > Returns "ChainBroken"
             // Path: "person.address.lambda" > "Resolved"
             if (path_iterator.next() == null) {
-                const Impl = if (args_len == 1) LambdaContextImpl(TWriter, TFn, void) else LambdaContextImpl(TWriter, TFn, TData);
+                const Impl = if (args_len == 1) LambdaInvoker(void, TFn) else LambdaInvoker(TData, TFn);
                 var impl = Impl{
-                    .out_writer = out_writer,
                     .bound_fn = bound_fn,
                     .data = if (args_len == 1) {} else data,
                 };
@@ -283,7 +320,7 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
                                     }
                                 };
 
-                                return Result{ .Resolved = try action_fn(action_param, out_writer, item) };
+                                return Result{ .Field = try action_fn(action_param, out_writer, item) };
                             }
                         } else {
                             return .IteratorConsumed;
@@ -294,7 +331,7 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
                 // Booleans are evaluated on the iterator
                 .Bool => {
                     return if (data == true and index == 0)
-                        Result{ .Resolved = try action_fn(action_param, out_writer, data) }
+                        Result{ .Field = try action_fn(action_param, out_writer, data) }
                     else
                         .IteratorConsumed;
                 },
@@ -305,7 +342,7 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
                         //Slice of u8 is always string
                         if (info.child != u8) {
                             return if (index < data.len)
-                                Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                                Result{ .Field = try action_fn(action_param, out_writer, data[index]) }
                             else
                                 .IteratorConsumed;
                         }
@@ -318,7 +355,7 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
                     //Array of u8 is always string
                     if (info.child != u8) {
                         return if (index < data.len)
-                            Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                            Result{ .Field = try action_fn(action_param, out_writer, data[index]) }
                         else
                             .IteratorConsumed;
                     }
@@ -326,7 +363,7 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
 
                 .Vector => {
                     return if (index < data.len)
-                        Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                        Result{ .Field = try action_fn(action_param, out_writer, data[index]) }
                     else
                         .IteratorConsumed;
                 },
@@ -341,7 +378,7 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
             }
 
             return if (index == 0)
-                Result{ .Resolved = try action_fn(action_param, out_writer, data) }
+                Result{ .Field = try action_fn(action_param, out_writer, data) }
             else
                 .IteratorConsumed;
         }
@@ -358,13 +395,45 @@ inline fn checkAction(
     _ = value;
 }
 
-inline fn writeAction(
+inline fn expandLambdaAction(
+    params: anytype,
+    out_writer: anytype,
+    value: anytype,
+) (Allocator.Error || @TypeOf(out_writer).Error)!void {
+    comptime {
+        if (!std.meta.trait.isTuple(@TypeOf(params)) and params.len != 4) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
+        if (!lambda.isLambdaInvoker(@TypeOf(value))) return;
+    }
+
+    const Error = Allocator.Error || @TypeOf(out_writer).Error;
+    const allocator = params.@"0";
+    const stack = params.@"1";
+    const tag_contents = params.@"2";
+    const escape = params.@"3";
+
+    const Impl = lambda.LambdaContextImpl(@TypeOf(out_writer));
+    var impl = Impl{
+        .out_writer = out_writer,
+        .stack = stack,
+        .escape = escape,
+    };
+
+    const lambda_context = impl.context(allocator, tag_contents);
+
+    // Errors are intentionally ignored on lambda calls, interpolating empty strings
+    value.invoke(lambda_context) catch |e| {
+        if (isOnErrorSet(Error, e)) {
+            return @errSetCast(Error, e);
+        }
+    };
+}
+
+inline fn interpolateAction(
     escape: Escape,
     out_writer: anytype,
     value: anytype,
 ) @TypeOf(out_writer).Error!void {
     const TValue = @TypeOf(value);
-    const Error = @TypeOf(out_writer).Error;
 
     switch (@typeInfo(TValue)) {
         .Void, .Null => {},
@@ -372,19 +441,7 @@ inline fn writeAction(
         // what should we print for a struct?
         // maybe call fmt or stringify
 
-        .Struct => {
-            if (comptime lambda.isLambdaContextImpl(TValue)) {
-
-                // Erros are intentionally ignored on lambda calls, interpolating empty strings
-                value.invoke(std.testing.allocator, "") catch |e| {
-                    if (isOnErrorSet(Error, e)) {
-                        return @errSetCast(Error, e);
-                    }
-                };
-            }
-        },
-
-        .Opaque => {},
+        .Struct, .Opaque => {},
 
         .Bool => return try escapeWrite(out_writer, if (value) "true" else "false", escape),
         .Int, .ComptimeInt => return try std.fmt.formatInt(value, 10, .lower, .{}, out_writer),
@@ -392,7 +449,7 @@ inline fn writeAction(
         .Enum => return try escapeWrite(out_writer, @tagName(value), escape),
 
         .Pointer => |info| switch (info.size) {
-            TypeInfo.Pointer.Size.One => return try writeAction(escape, out_writer, value.*),
+            TypeInfo.Pointer.Size.One => return try interpolateAction(escape, out_writer, value.*),
             TypeInfo.Pointer.Size.Slice => {
                 if (info.child == u8) {
                     return try escapeWrite(out_writer, value, escape);
@@ -408,7 +465,7 @@ inline fn writeAction(
         },
         .Optional => {
             if (value) |not_null| {
-                return try writeAction(escape, out_writer, not_null);
+                return try interpolateAction(escape, out_writer, not_null);
             }
         },
         else => {},
@@ -597,24 +654,24 @@ const tests = struct {
 
     fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
         const value = try fooSeek(TExpected, data, path, null);
-        try testing.expect(value == .Resolved);
-        try testing.expect(value.Resolved == true);
+        try testing.expect(value == .Field);
+        try testing.expect(value.Field == true);
     }
 
     fn expectNotFound(data: anytype, path: []const u8) !void {
         const value = try fooSeek(void, data, path, null);
-        try testing.expect(value != .Resolved);
+        try testing.expect(value != .Field);
     }
 
     fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
         const value = try fooSeek(TExpected, data, path, index);
-        try testing.expect(value == .Resolved);
-        try testing.expect(value.Resolved == true);
+        try testing.expect(value == .Field);
+        try testing.expect(value.Field == true);
     }
 
     fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
         const value = try fooSeek(void, data, path, index);
-        try testing.expect(value != .Resolved);
+        try testing.expect(value != .Field);
     }
 
     test "Comptime seek - self" {
