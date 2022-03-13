@@ -1,0 +1,853 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const TypeInfo = std.builtin.TypeInfo;
+const trait = std.meta.trait;
+
+const context = @import("context.zig");
+const PathResolution = context.PathResolution;
+const Context = context.Context;
+const Escape = context.Escape;
+
+const lambda = @import("lambda.zig");
+const LambdaContext = lambda.LambdaContext;
+const LambdaContextImpl = lambda.LambdaContextImpl;
+
+const testing = std.testing;
+const assert = std.debug.assert;
+
+pub inline fn get(
+    allocator: Allocator,
+    out_writer: anytype,
+    data: anytype,
+    path_iterator: *std.mem.TokenIterator(u8),
+    index: ?usize,
+) Allocator.Error!PathResolution(Context(@TypeOf(out_writer))) {
+    const GetContext = Caller(Allocator.Error, Context(@TypeOf(out_writer)), context.getContext);
+    return try GetContext.call(
+        allocator,
+        out_writer,
+        data,
+        path_iterator,
+        index,
+    );
+}
+
+pub inline fn write(
+    out_writer: anytype,
+    data: anytype,
+    path_iterator: *std.mem.TokenIterator(u8),
+    escape: Escape,
+) @TypeOf(out_writer).Error!PathResolution(void) {
+    const Stringify = Caller(@TypeOf(out_writer).Error, void, writeAction);
+    return try Stringify.call(
+        escape,
+        out_writer,
+        data,
+        path_iterator,
+        null,
+    );
+}
+
+pub inline fn check(
+    data: anytype,
+    path_iterator: *std.mem.TokenIterator(u8),
+    index: usize,
+) PathResolution(void) {
+    const null_writer = std.io.null_writer;
+    const CheckAction = Caller(@TypeOf(null_writer).Error, void, checkAction);
+    return try CheckAction.call(
+        {},
+        null_writer,
+        data,
+        path_iterator,
+        index,
+    );
+}
+
+fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
+    const action_type_info = @typeInfo(@TypeOf(action_fn));
+    if (action_type_info != .Fn) @compileError("action_fn must be a function");
+
+    return struct {
+        const Result = PathResolution(TReturn);
+
+        const Depth = enum { Root, Leaf };
+
+        pub inline fn call(
+            action_param: anytype,
+            out_writer: anytype,
+            data: anytype,
+            path_iterator: *std.mem.TokenIterator(u8),
+            index: ?usize,
+        ) TError!Result {
+            return try find(.Root, action_param, out_writer, data, path_iterator, index);
+        }
+
+        inline fn find(
+            depth: Depth,
+            action_param: anytype,
+            out_writer: anytype,
+            data: anytype,
+            path_iterator: *std.mem.TokenIterator(u8),
+            index: ?usize,
+        ) TError!Result {
+            const Data = @TypeOf(data);
+            const is_lambda = comptime lambda.isLambdaContextImpl(Data);
+
+            if (!is_lambda) {
+                if (path_iterator.next()) |token| {
+                    return try recursiveFind(depth, @TypeOf(data), action_param, out_writer, data, token, path_iterator, index);
+                }
+            }
+
+            if (Data == comptime_int) {
+                const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
+                var runtime_value: RuntimeInt = data;
+                return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
+            } else if (Data == comptime_float) {
+                var runtime_value: f64 = data;
+                return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
+            } else if (Data == @TypeOf(null)) {
+                var runtime_value: ?u0 = null;
+                return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
+            } else if (Data == void) {
+                return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+            } else {
+                if (index) |current_index| {
+                    return try iterateAt(action_param, out_writer, data, current_index);
+                } else {
+                    return Result{ .Resolved = try action_fn(action_param, out_writer, data) };
+                }
+            }
+        }
+
+        inline fn recursiveFind(
+            depth: Depth,
+            comptime TValue: type,
+            action_param: anytype,
+            out_writer: anytype,
+            data: anytype,
+            path: []const u8,
+            path_iterator: *std.mem.TokenIterator(u8),
+            index: ?usize,
+        ) TError!Result {
+            const typeInfo = @typeInfo(TValue);
+
+            switch (typeInfo) {
+                .Struct => {
+                    return try findFieldPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
+                },
+                .Pointer => |info| switch (info.size) {
+                    .One => return try recursiveFind(depth, info.child, action_param, out_writer, data, path, path_iterator, index),
+                    .Slice => {
+
+                        //Slice supports the "len" field,
+                        if (std.mem.eql(u8, "len", path)) {
+                            return try find(.Leaf, action_param, out_writer, data.len, path_iterator, index);
+                        }
+                    },
+
+                    .Many => @compileError("[*] pointers not supported"),
+                    .C => @compileError("[*c] pointers not supported"),
+                },
+                .Optional => |info| {
+                    if (data) |value| {
+                        return try recursiveFind(depth, info.child, action_param, out_writer, value, path, path_iterator, index);
+                    }
+                },
+                .Array, .Vector => {
+
+                    //Slice supports the "len" field,
+                    if (std.mem.eql(u8, "len", path)) {
+                        return try find(.Leaf, action_param, out_writer, data.len, path_iterator, index);
+                    }
+                },
+                else => {},
+            }
+
+            return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+        }
+
+        inline fn findFieldPath(
+            depth: Depth,
+            comptime TValue: type,
+            action_param: anytype,
+            out_writer: anytype,
+            data: anytype,
+            path: []const u8,
+            path_iterator: *std.mem.TokenIterator(u8),
+            index: ?usize,
+        ) TError!Result {
+            const fields = std.meta.fields(TValue);
+            inline for (fields) |field| {
+                if (std.mem.eql(u8, field.name, path)) {
+                    return try find(.Leaf, action_param, out_writer, @field(data, field.name), path_iterator, index);
+                }
+            } else {
+                return try findLambdaPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
+            }
+        }
+
+        inline fn findLambdaPath(
+            depth: Depth,
+            comptime TValue: type,
+            action_param: anytype,
+            out_writer: anytype,
+            data: anytype,
+            path: []const u8,
+            path_iterator: *std.mem.TokenIterator(u8),
+            index: ?usize,
+        ) TError!Result {
+            inline for (std.meta.declarations(TValue)) |decl| {
+                switch (decl.data) {
+                    .Fn => |fn_decl| {
+                        if (std.mem.eql(u8, path, decl.name)) {
+                            if (comptime decl.is_pub and lambda.isValidLambdaFunction(TValue, fn_decl.fn_type)) {
+                                const bound_fn = @field(TValue, decl.name);
+                                return try getLambda(action_param, out_writer, data, bound_fn, path_iterator, index);
+                            } else {
+                                return .ChainBroken;
+                            }
+                        }
+                    },
+                    else => {},
+                }
+            } else {
+                return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+            }
+        }
+
+        inline fn getLambda(
+            action_param: anytype,
+            out_writer: anytype,
+            data: anytype,
+            bound_fn: anytype,
+            path_iterator: *std.mem.TokenIterator(u8),
+            index: ?usize,
+        ) TError!Result {
+            const TWriter = @TypeOf(out_writer);
+            const TData = @TypeOf(data);
+            const TFn = @TypeOf(bound_fn);
+            const args_len = @typeInfo(TFn).Fn.args.len;
+
+            // Lambdas cannot be used for navigation through a path
+            // Examples:
+            // Path: "person.lambda.address" > Returns "ChainBroken"
+            // Path: "person.address.lambda" > "Resolved"
+            if (path_iterator.next() == null) {
+                const Impl = if (args_len == 1) LambdaContextImpl(TWriter, TFn, void) else LambdaContextImpl(TWriter, TFn, TData);
+                var impl = Impl{
+                    .out_writer = out_writer,
+                    .bound_fn = bound_fn,
+                    .data = if (args_len == 1) {} else data,
+                };
+
+                return try find(.Leaf, action_param, out_writer, impl, path_iterator, index);
+            } else {
+                return .ChainBroken;
+            }
+        }
+
+        inline fn iterateAt(
+            action_param: anytype,
+            out_writer: anytype,
+            data: anytype,
+            index: usize,
+        ) TError!Result {
+            switch (@typeInfo(@TypeOf(data))) {
+                .Struct => |info| {
+                    if (info.is_tuple) {
+                        inline for (info.fields) |_, i| {
+                            if (index == i) {
+                                return Result{
+                                    .Resolved = blk: {
+
+                                        // Tuple fields can be a comptime value
+                                        // We must convert it to a runtime type
+                                        const Data = @TypeOf(data[i]);
+                                        if (Data == comptime_int) {
+                                            const RuntimeInt = if (data[i] > 0) std.math.IntFittingRange(0, data[i]) else std.math.IntFittingRange(data[i], 0);
+                                            var runtime_value: RuntimeInt = data[i];
+                                            break :blk try action_fn(action_param, out_writer, runtime_value);
+                                        } else if (Data == comptime_float) {
+                                            var runtime_value: f64 = data[i];
+                                            break :blk try action_fn(action_param, out_writer, runtime_value);
+                                        } else if (Data == @TypeOf(null)) {
+                                            var runtime_value: ?u0 = null;
+                                            break :blk try action_fn(action_param, out_writer, runtime_value);
+                                        } else if (Data == void) {
+                                            return .IteratorConsumed;
+                                        } else {
+                                            break :blk try action_fn(action_param, out_writer, data[i]);
+                                        }
+                                    },
+                                };
+                            }
+                        } else {
+                            return .IteratorConsumed;
+                        }
+                    }
+                },
+
+                // Booleans are evaluated on the iterator
+                .Bool => {
+                    return if (data == true and index == 0)
+                        Result{ .Resolved = try action_fn(action_param, out_writer, data) }
+                    else
+                        .IteratorConsumed;
+                },
+
+                .Pointer => |info| switch (info.size) {
+                    .Slice => {
+
+                        //Slice of u8 is always string
+                        if (info.child != u8) {
+                            return if (index < data.len)
+                                Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                            else
+                                .IteratorConsumed;
+                        }
+                    },
+                    else => {},
+                },
+
+                .Array => |info| {
+
+                    //Array of u8 is always string
+                    if (info.child != u8) {
+                        return if (index < data.len)
+                            Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                        else
+                            .IteratorConsumed;
+                    }
+                },
+
+                .Vector => {
+                    return if (index < data.len)
+                        Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
+                    else
+                        .IteratorConsumed;
+                },
+
+                .Optional => {
+                    return if (data) |value|
+                        try iterateAt(action_param, out_writer, value, index)
+                    else
+                        .IteratorConsumed;
+                },
+                else => {},
+            }
+
+            return if (index == 0)
+                Result{ .Resolved = try action_fn(action_param, out_writer, data) }
+            else
+                .IteratorConsumed;
+        }
+    };
+}
+
+inline fn checkAction(
+    param: void,
+    out_writer: anytype,
+    value: anytype,
+) @TypeOf(out_writer).Error!void {
+    _ = param;
+    _ = out_writer;
+    _ = value;
+}
+
+inline fn writeAction(
+    escape: Escape,
+    out_writer: anytype,
+    value: anytype,
+) @TypeOf(out_writer).Error!void {
+    const TValue = @TypeOf(value);
+    const Error = @TypeOf(out_writer).Error;
+
+    switch (@typeInfo(TValue)) {
+        .Void, .Null => {},
+
+        // what should we print for a struct?
+        // maybe call fmt or stringify
+
+        .Struct => {
+            if (comptime lambda.isLambdaContextImpl(TValue)) {
+
+                // Erros are intentionally ignored on lambda calls, interpolating empty strings
+                value.invoke(std.testing.allocator, "") catch |e| {
+                    if (isOnErrorSet(Error, e)) {
+                        return @errSetCast(Error, e);
+                    }
+                };
+            }
+        },
+
+        .Opaque => {},
+
+        .Bool => return try escapeWrite(out_writer, if (value) "true" else "false", escape),
+        .Int, .ComptimeInt => return try std.fmt.formatInt(value, 10, .lower, .{}, out_writer),
+        .Float, .ComptimeFloat => return try std.fmt.formatFloatDecimal(value, .{}, out_writer),
+        .Enum => return try escapeWrite(out_writer, @tagName(value), escape),
+
+        .Pointer => |info| switch (info.size) {
+            TypeInfo.Pointer.Size.One => return try writeAction(escape, out_writer, value.*),
+            TypeInfo.Pointer.Size.Slice => {
+                if (info.child == u8) {
+                    return try escapeWrite(out_writer, value, escape);
+                }
+            },
+            TypeInfo.Pointer.Size.Many => @compileError("[*] pointers not supported"),
+            TypeInfo.Pointer.Size.C => @compileError("[*c] pointers not supported"),
+        },
+        .Array => |info| {
+            if (info.child == u8) {
+                return try escapeWrite(out_writer, &value, escape);
+            }
+        },
+        .Optional => {
+            if (value) |not_null| {
+                return try writeAction(escape, out_writer, not_null);
+            }
+        },
+        else => {},
+    }
+}
+
+fn escapeWrite(
+    out_writer: anytype,
+    value: []const u8,
+    escape: Escape,
+) @TypeOf(out_writer).Error!void {
+    switch (escape) {
+        .Unescaped => {
+            try out_writer.writeAll(value);
+        },
+
+        .Escaped => {
+            const @"null" = '\x00';
+            const html_null: []const u8 = "\u{fffd}";
+
+            var index: usize = 0;
+
+            for (value) |char, char_index| {
+                const replace = switch (char) {
+                    '"' => "&quot;",
+                    '\'' => "&#39;",
+                    '&' => "&amp;",
+                    '<' => "&lt;",
+                    '>' => "&gt;",
+                    @"null" => html_null,
+                    else => continue,
+                };
+
+                if (char_index > index) {
+                    try out_writer.writeAll(value[index..char_index]);
+                }
+
+                try out_writer.writeAll(replace);
+                index = char_index + 1;
+                if (index == value.len) break;
+            }
+
+            if (index < value.len) {
+                try out_writer.writeAll(value[index..]);
+            }
+        },
+    }
+}
+
+// Check if an error is part of a error set
+// https://github.com/ziglang/zig/issues/2473
+fn isOnErrorSet(comptime Error: type, value: anytype) bool {
+    switch (@typeInfo(Error)) {
+        .ErrorSet => |info| if (info) |errors| {
+            if (@typeInfo(@TypeOf(value)) == .ErrorSet) {
+                inline for (errors) |item| {
+                    const int_value = @errorToInt(@field(Error, item.name));
+                    if (int_value == @errorToInt(value)) return true;
+                }
+            }
+        },
+        else => {},
+    }
+
+    return false;
+}
+
+test "escapeWrite" {
+    const allocator = testing.allocator;
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
+
+    try escapeWrite(list.writer(), ">abc", .Escaped);
+    try testing.expectEqualStrings("&gt;abc", list.items);
+
+    list.clearAndFree();
+
+    try escapeWrite(list.writer(), "abc<", .Escaped);
+    try testing.expectEqualStrings("abc&lt;", list.items);
+
+    list.clearAndFree();
+
+    try escapeWrite(list.writer(), ">abc<", .Escaped);
+    try testing.expectEqualStrings("&gt;abc&lt;", list.items);
+
+    list.clearAndFree();
+
+    try escapeWrite(list.writer(), "ab&cd", .Escaped);
+    try testing.expectEqualStrings("ab&amp;cd", list.items);
+
+    list.clearAndFree();
+
+    try escapeWrite(list.writer(), ">ab&cd", .Escaped);
+    try testing.expectEqualStrings("&gt;ab&amp;cd", list.items);
+
+    list.clearAndFree();
+
+    try escapeWrite(list.writer(), "ab&cd<", .Escaped);
+    try testing.expectEqualStrings("ab&amp;cd&lt;", list.items);
+
+    list.clearAndFree();
+
+    try escapeWrite(list.writer(), ">ab&cd<", .Escaped);
+    try testing.expectEqualStrings("&gt;ab&amp;cd&lt;", list.items);
+
+    list.clearAndFree();
+
+    try escapeWrite(list.writer(), ">ab&cd<", .Unescaped);
+    try testing.expectEqualStrings(">ab&cd<", list.items);
+}
+
+test "isOnErrorSet" {
+    const A = error{ a1, a2 };
+    const B = error{ b1, b2 };
+    const AB = A || B;
+    const Mixed = error{ a1, b2 };
+    const Empty = error{};
+
+    try testing.expect(isOnErrorSet(A, error.a1));
+    try testing.expect(isOnErrorSet(A, error.a2));
+    try testing.expect(!isOnErrorSet(A, error.b1));
+    try testing.expect(!isOnErrorSet(A, error.b2));
+
+    try testing.expect(isOnErrorSet(AB, error.a1));
+    try testing.expect(isOnErrorSet(AB, error.a2));
+    try testing.expect(isOnErrorSet(AB, error.b1));
+    try testing.expect(isOnErrorSet(AB, error.b2));
+
+    try testing.expect(isOnErrorSet(Mixed, error.a1));
+    try testing.expect(!isOnErrorSet(Mixed, error.a2));
+    try testing.expect(!isOnErrorSet(Mixed, error.b1));
+    try testing.expect(isOnErrorSet(Mixed, error.b2));
+
+    try testing.expect(!isOnErrorSet(Empty, error.a1));
+    try testing.expect(!isOnErrorSet(Empty, error.a2));
+    try testing.expect(!isOnErrorSet(Empty, error.b1));
+    try testing.expect(!isOnErrorSet(Empty, error.b2));
+}
+
+test {
+    _ = tests;
+}
+
+const tests = struct {
+    const Tuple = std.meta.Tuple(&.{ u8, u32, u64 });
+    const Data = struct {
+        a1: struct {
+            b1: struct {
+                c1: struct {
+                    d1: u0 = 0,
+                    d2: u0 = 0,
+                    d_null: ?u0 = null,
+                    d_slice: []const u0 = &.{ 0, 0, 0 },
+                    d_array: [3]u0 = .{ 0, 0, 0 },
+                    d_tuple: Tuple = Tuple{ 0, 0, 0 },
+                } = .{},
+                c_null: ?u0 = null,
+                c_slice: []const u0 = &.{ 0, 0, 0 },
+                c_array: [3]u0 = .{ 0, 0, 0 },
+                c_tuple: Tuple = Tuple{ 0, 0, 0 },
+            } = .{},
+            b2: u0 = 0,
+            b_null: ?u0 = null,
+            b_slice: []const u0 = &.{ 0, 0, 0 },
+            b_array: [3]u0 = .{ 0, 0, 0 },
+            b_tuple: Tuple = Tuple{ 0, 0, 0 },
+        } = .{},
+        a2: u0 = 0,
+        a_null: ?u0 = null,
+        a_slice: []const u0 = &.{ 0, 0, 0 },
+        a_array: [3]u0 = .{ 0, 0, 0 },
+        a_tuple: Tuple = Tuple{ 0, 0, 0 },
+    };
+
+    const FooCaller = Caller(error{}, bool, fooAction);
+
+    fn fooAction(comptime TExpected: type, out_writer: anytype, value: anytype) error{}!bool {
+        _ = out_writer;
+        return TExpected == @TypeOf(value);
+    }
+
+    fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !FooCaller.Result {
+        var path_iterator = std.mem.tokenize(u8, path, ".");
+        return try FooCaller.call(TExpected, std.io.null_writer, data, &path_iterator, index);
+    }
+
+    fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
+        const value = try fooSeek(TExpected, data, path, null);
+        try testing.expect(value == .Resolved);
+        try testing.expect(value.Resolved == true);
+    }
+
+    fn expectNotFound(data: anytype, path: []const u8) !void {
+        const value = try fooSeek(void, data, path, null);
+        try testing.expect(value != .Resolved);
+    }
+
+    fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
+        const value = try fooSeek(TExpected, data, path, index);
+        try testing.expect(value == .Resolved);
+        try testing.expect(value.Resolved == true);
+    }
+
+    fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
+        const value = try fooSeek(void, data, path, index);
+        try testing.expect(value != .Resolved);
+    }
+
+    test "Comptime seek - self" {
+        var data = Data{};
+        try expectFound(Data, data, "");
+    }
+
+    test "Comptime seek - dot" {
+        var data = Data{};
+        try expectFound(Data, data, ".");
+    }
+
+    test "Comptime seek - not found" {
+        var data = Data{};
+        try expectNotFound(data, "wrong");
+    }
+
+    test "Comptime seek - found" {
+        var data = Data{};
+        try expectFound(@TypeOf(data.a1), data, "a1");
+
+        try expectFound(@TypeOf(data.a2), data, "a2");
+    }
+
+    test "Comptime seek - self null" {
+        var data: ?Data = null;
+        try expectFound(?Data, data, "");
+    }
+
+    test "Comptime seek - self dot" {
+        var data: ?Data = null;
+        try expectFound(?Data, data, ".");
+    }
+
+    test "Comptime seek - found nested" {
+        var data = Data{};
+        try expectFound(@TypeOf(data.a1.b1), data, "a1.b1");
+        try expectFound(@TypeOf(data.a1.b2), data, "a1.b2");
+        try expectFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1");
+        try expectFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1");
+        try expectFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2");
+    }
+
+    test "Comptime seek - not found nested" {
+        var data = Data{};
+        try expectNotFound(data, "a1.wong");
+        try expectNotFound(data, "a1.b1.wong");
+        try expectNotFound(data, "a1.b2.wrong");
+        try expectNotFound(data, "a1.b1.c1.wrong");
+        try expectNotFound(data, "a1.b1.c1.d1.wrong");
+        try expectNotFound(data, "a1.b1.c1.d2.wrong");
+    }
+
+    test "Comptime seek - null nested" {
+        var data = Data{};
+        try expectFound(@TypeOf(data.a_null), data, "a_null");
+        try expectFound(@TypeOf(data.a1.b_null), data, "a1.b_null");
+        try expectFound(@TypeOf(data.a1.b1.c_null), data, "a1.b1.c_null");
+        try expectFound(@TypeOf(data.a1.b1.c1.d_null), data, "a1.b1.c1.d_null");
+    }
+
+    test "Comptime iter - self" {
+        var data = Data{};
+        try expectIterFound(Data, data, "", 0);
+    }
+
+    test "Comptime iter consumed - self" {
+        var data = Data{};
+        try expectIterNotFound(data, "", 1);
+    }
+
+    test "Comptime iter - dot" {
+        var data = Data{};
+        try expectIterFound(Data, data, ".", 0);
+    }
+
+    test "Comptime iter consumed - dot" {
+        var data = Data{};
+        try expectIterNotFound(data, ".", 1);
+    }
+
+    test "Comptime seek - not found" {
+        var data = Data{};
+        try expectIterNotFound(data, "wrong", 0);
+        try expectIterNotFound(data, "wrong", 1);
+    }
+
+    test "Comptime iter - found" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a1), data, "a1", 0);
+
+        try expectIterFound(@TypeOf(data.a2), data, "a2", 0);
+    }
+
+    test "Comptime iter consumed - found" {
+        var data = Data{};
+        try expectIterNotFound(data, "a1", 1);
+
+        try expectIterNotFound(data, "a2", 1);
+    }
+
+    test "Comptime iter - found nested" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a1.b1), data, "a1.b1", 0);
+        try expectIterFound(@TypeOf(data.a1.b2), data, "a1.b2", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2", 0);
+    }
+
+    test "Comptime iter consumed - found nested" {
+        var data = Data{};
+        try expectIterNotFound(data, "a1.b1", 1);
+        try expectIterNotFound(data, "a1.b2", 1);
+        try expectIterNotFound(data, "a1.b1.c1", 1);
+        try expectIterNotFound(data, "a1.b1.c1.d1", 1);
+        try expectIterNotFound(data, "a1.b1.c1.d2", 1);
+    }
+
+    test "Comptime iter - not found nested" {
+        var data = Data{};
+        try expectIterNotFound(data, "a1.wong", 0);
+        try expectIterNotFound(data, "a1.b1.wong", 0);
+        try expectIterNotFound(data, "a1.b2.wrong", 0);
+        try expectIterNotFound(data, "a1.b1.c1.wrong", 0);
+        try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 0);
+        try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 0);
+
+        try expectIterNotFound(data, "a1.wong", 1);
+        try expectIterNotFound(data, "a1.b1.wong", 1);
+        try expectIterNotFound(data, "a1.b2.wrong", 1);
+        try expectIterNotFound(data, "a1.b1.c1.wrong", 1);
+        try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 1);
+        try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 1);
+    }
+
+    test "Comptime iter - slice" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
+
+        try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
+
+        try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
+
+        try expectIterNotFound(data, "a_slice", 3);
+    }
+
+    test "Comptime iter - array" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
+
+        try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
+
+        try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
+
+        try expectIterNotFound(data, "a_array", 3);
+    }
+
+    test "Comptime iter - tuple" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
+
+        try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
+
+        try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
+
+        try expectIterNotFound(data, "a_tuple", 3);
+    }
+
+    test "Comptime iter - nested slice" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
+        try expectIterFound(@TypeOf(data.a1.b_slice[0]), data, "a1.b_slice", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c_slice[0]), data, "a1.b1.c_slice", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[0]), data, "a1.b1.c1.d_slice", 0);
+
+        try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
+        try expectIterFound(@TypeOf(data.a1.b_slice[1]), data, "a1.b_slice", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c_slice[1]), data, "a1.b1.c_slice", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[1]), data, "a1.b1.c1.d_slice", 1);
+
+        try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
+        try expectIterFound(@TypeOf(data.a1.b_slice[2]), data, "a1.b_slice", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c_slice[2]), data, "a1.b1.c_slice", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[2]), data, "a1.b1.c1.d_slice", 2);
+
+        try expectIterNotFound(data, "a_slice", 3);
+        try expectIterNotFound(data, "a1.b_slice", 3);
+        try expectIterNotFound(data, "a1.b1.c_slice", 3);
+        try expectIterNotFound(data, "a1.b1.c1.d_slice", 3);
+    }
+
+    test "Comptime iter - nested array" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
+        try expectIterFound(@TypeOf(data.a1.b_tuple[0]), data, "a1.b_tuple", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c_tuple[0]), data, "a1.b1.c_tuple", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[0]), data, "a1.b1.c1.d_tuple", 0);
+
+        try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
+        try expectIterFound(@TypeOf(data.a1.b_tuple[1]), data, "a1.b_tuple", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c_tuple[1]), data, "a1.b1.c_tuple", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[1]), data, "a1.b1.c1.d_tuple", 1);
+
+        try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
+        try expectIterFound(@TypeOf(data.a1.b_tuple[2]), data, "a1.b_tuple", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c_tuple[2]), data, "a1.b1.c_tuple", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[2]), data, "a1.b1.c1.d_tuple", 2);
+
+        try expectIterNotFound(data, "a_tuple", 3);
+        try expectIterNotFound(data, "a1.b_tuple", 3);
+        try expectIterNotFound(data, "a1.b1.c_tuple", 3);
+        try expectIterNotFound(data, "a1.b1.c1.d_tuple", 3);
+    }
+
+    test "Comptime iter - nested tuple" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
+        try expectIterFound(@TypeOf(data.a1.b_array[0]), data, "a1.b_array", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c_array[0]), data, "a1.b1.c_array", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[0]), data, "a1.b1.c1.d_array", 0);
+
+        try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
+        try expectIterFound(@TypeOf(data.a1.b_array[1]), data, "a1.b_array", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c_array[1]), data, "a1.b1.c_array", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[1]), data, "a1.b1.c1.d_array", 1);
+
+        try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
+        try expectIterFound(@TypeOf(data.a1.b_array[2]), data, "a1.b_array", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c_array[2]), data, "a1.b1.c_array", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[2]), data, "a1.b1.c1.d_array", 2);
+
+        try expectIterNotFound(data, "a_array", 3);
+        try expectIterNotFound(data, "a1.b_array", 3);
+        try expectIterNotFound(data, "a1.b1.c_array", 3);
+        try expectIterNotFound(data, "a1.b1.c1.d_array", 3);
+    }
+};

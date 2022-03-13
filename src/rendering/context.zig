@@ -1,12 +1,17 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const TypeInfo = std.builtin.TypeInfo;
+const meta = std.meta;
 const trait = std.meta.trait;
 
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
 const Element = mustache.Element;
+
+const lambda = @import("lambda.zig");
+const LambdaContext = lambda.LambdaContext;
+const Comptime = @import("Comptime.zig");
 
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
@@ -225,867 +230,9 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
     };
 }
 
-const Comptime = struct {
-    pub inline fn get(
-        allocator: Allocator,
-        out_writer: anytype,
-        data: anytype,
-        path_iterator: *std.mem.TokenIterator(u8),
-        index: ?usize,
-    ) Allocator.Error!PathResolution(Context(@TypeOf(out_writer))) {
-        const GetContext = Caller(Allocator.Error, Context(@TypeOf(out_writer)), getContext);
-        return try GetContext.call(
-            allocator,
-            out_writer,
-            data,
-            path_iterator,
-            index,
-        );
-    }
-
-    pub inline fn write(
-        out_writer: anytype,
-        data: anytype,
-        path_iterator: *std.mem.TokenIterator(u8),
-        escape: Escape,
-    ) @TypeOf(out_writer).Error!PathResolution(void) {
-        const Stringify = Caller(@TypeOf(out_writer).Error, void, stringify);
-        return try Stringify.call(
-            escape,
-            out_writer,
-            data,
-            path_iterator,
-            null,
-        );
-    }
-
-    pub inline fn check(
-        data: anytype,
-        path_iterator: *std.mem.TokenIterator(u8),
-        index: usize,
-    ) PathResolution(void) {
-        const null_writer = std.io.null_writer;
-        const NoAction = Caller(@TypeOf(null_writer).Error, void, no_action);
-        return try NoAction.call(
-            {},
-            null_writer,
-            data,
-            path_iterator,
-            index,
-        );
-    }
-
-    fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
-        const action_type_info = @typeInfo(@TypeOf(action_fn));
-        if (action_type_info != .Fn) @compileError("action_fn must be a function");
-
-        return struct {
-            const Result = PathResolution(TReturn);
-
-            const Depth = enum { Root, Leaf };
-
-            pub inline fn call(
-                action_param: anytype,
-                out_writer: anytype,
-                data: anytype,
-                path_iterator: *std.mem.TokenIterator(u8),
-                index: ?usize,
-            ) TError!Result {
-                return try find(.Root, action_param, out_writer, data, path_iterator, index);
-            }
-
-            inline fn find(
-                depth: Depth,
-                action_param: anytype,
-                out_writer: anytype,
-                data: anytype,
-                path_iterator: *std.mem.TokenIterator(u8),
-                index: ?usize,
-            ) TError!Result {
-                if (path_iterator.next()) |token| {
-                    return try recursiveFind(depth, @TypeOf(data), action_param, out_writer, data, token, path_iterator, index);
-                } else {
-                    const Data = @TypeOf(data);
-                    if (Data == comptime_int) {
-                        const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
-                        var runtime_value: RuntimeInt = data;
-                        return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
-                    } else if (Data == comptime_float) {
-                        var runtime_value: f64 = data;
-                        return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
-                    } else if (Data == @TypeOf(null)) {
-                        var runtime_value: ?u0 = null;
-                        return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
-                    } else if (Data == void) {
-                        return if (depth == .Root) .NotFoundInContext else .ChainBroken;
-                    } else {
-                        if (index) |current_index| {
-                            return try iterateAt(action_param, out_writer, data, current_index);
-                        } else {
-                            return Result{ .Resolved = try action_fn(action_param, out_writer, data) };
-                        }
-                    }
-                }
-            }
-
-            inline fn recursiveFind(
-                depth: Depth,
-                comptime TValue: type,
-                action_param: anytype,
-                out_writer: anytype,
-                data: anytype,
-                path: []const u8,
-                path_iterator: *std.mem.TokenIterator(u8),
-                index: ?usize,
-            ) TError!Result {
-                const typeInfo = @typeInfo(TValue);
-
-                switch (typeInfo) {
-                    .Struct => {
-                        return try findFieldPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
-                    },
-                    .Pointer => |info| switch (info.size) {
-                        .One => return try recursiveFind(depth, info.child, action_param, out_writer, data, path, path_iterator, index),
-                        .Slice => {
-
-                            //Slice supports the "len" field,
-                            if (std.mem.eql(u8, "len", path)) {
-                                return try find(.Leaf, action_param, out_writer, data.len, path_iterator, index);
-                            }
-                        },
-
-                        .Many => @compileError("[*] pointers not supported"),
-                        .C => @compileError("[*c] pointers not supported"),
-                    },
-                    .Optional => |info| {
-                        if (data) |value| {
-                            return try recursiveFind(depth, info.child, action_param, out_writer, value, path, path_iterator, index);
-                        }
-                    },
-                    .Array, .Vector => {
-
-                        //Slice supports the "len" field,
-                        if (std.mem.eql(u8, "len", path)) {
-                            return try find(.Leaf, action_param, out_writer, data.len, path_iterator, index);
-                        }
-                    },
-                    else => {},
-                }
-
-                return if (depth == .Root) .NotFoundInContext else .ChainBroken;
-            }
-
-            inline fn findFieldPath(
-                depth: Depth,
-                comptime TValue: type,
-                action_param: anytype,
-                out_writer: anytype,
-                data: anytype,
-                path: []const u8,
-                path_iterator: *std.mem.TokenIterator(u8),
-                index: ?usize,
-            ) TError!Result {
-                const fields = std.meta.fields(TValue);
-                inline for (fields) |field| {
-                    if (std.mem.eql(u8, field.name, path)) {
-                        return try find(.Leaf, action_param, out_writer, @field(data, field.name), path_iterator, index);
-                    }
-                } else {
-                    return try findLambdaPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
-                }
-            }
-
-            inline fn findLambdaPath(
-                depth: Depth,
-                comptime TValue: type,
-                action_param: anytype,
-                out_writer: anytype,
-                data: anytype,
-                path: []const u8,
-                path_iterator: *std.mem.TokenIterator(u8),
-                index: ?usize,
-            ) TError!Result {
-                inline for (std.meta.declarations(TValue)) |decl| {
-                    if (std.mem.eql(u8, path, decl.name)) {
-                        switch (decl.data) {
-                            .Fn => {
-                                const bound_fn = @field(TValue, decl.name);
-                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, bound_fn, .{});
-                            },
-                            else => {},
-                        }
-                    }
-                } else {
-                    return if (depth == .Root) .NotFoundInContext else .ChainBroken;
-                }
-            }
-
-            inline fn invokeLambda(
-                action_param: anytype,
-                out_writer: anytype,
-                data: anytype,
-                path: []const u8,
-                path_iterator: *std.mem.TokenIterator(u8),
-                index: ?usize,
-                lambda: anytype,
-                args: anytype,
-            ) TError!Result {
-                const TData = @TypeOf(data);
-                const fnType = switch (@typeInfo(@TypeOf(lambda))) {
-                    .Fn => |info| info,
-                    else => @compileError("Fn expected"),
-                };
-
-                if (fnType.args.len == args.len) {
-
-                    const has_error = @typeInfo(fnType.return_type.?) == .ErrorUnion;
-
-                    return try find(
-                        .Leaf,
-                        action_param,
-                        out_writer,
-                        if (has_error)
-                            // Errors are ignored and will interpolate as a empty string
-                            @call(.{}, lambda, args) catch return .ChainBroken
-                        else
-                            @call(.{}, lambda, args),
-                        path_iterator,
-                        index,
-                    );
-                } else {
-                    comptime assert(args.len < fnType.args.len);
-
-                    if (fnType.args[args.len].arg_type) |fnArg| {
-
-                        // Lambdas can receive the following arguments:
-                        // - self: TValue, *TValue or *const TValue
-                        // - allocator: Allocator
-                        // - content: []const u8
-
-                        if (fnArg == Allocator or fnArg == []const u8) {
-                            const new_args = blk: {
-                                if (fnArg == Allocator) {
-                                    const dummy_allocator: Allocator = undefined; //TODO
-                                    break :blk args ++ .{dummy_allocator};
-                                } else {
-                                    const dummy_context: []const u8 = "TODO!";
-                                    break :blk args ++ .{dummy_context};
-                                }
-                            };
-
-                            return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, new_args);
-                        } else if (args.len == 0) {
-
-                            // Self is only expected on the first argument
-                            // Any other type isn't expected.
-
-                            switch (@typeInfo(TData)) {
-                                .Pointer => |info| {
-                                    switch (info.size) {
-                                        .One => {
-                                            if (info.child == fnArg) {
-
-                                                // Context is a pointer, but the parameter is a value
-                                                // fn (self TValue ...) called from a *TValue or *const TValue
-
-                                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, .{data.*});
-                                            } else {
-                                                switch (@typeInfo(fnArg)) {
-                                                    .Pointer => |arg_info| {
-                                                        if (info.child == arg_info.child) {
-                                                            if (arg_info.is_const == true or info.is_const == false) {
-
-                                                                // Both context and parameter are pointers
-                                                                // fn (self *TValue ...) called from a *TValue
-                                                                // or
-                                                                // fn (self const* TValue ...) called from a *const TValue or *TValue
-
-                                                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, .{data});
-                                                            }
-                                                        }
-                                                    },
-                                                    else => {},
-                                                }
-                                            }
-                                        },
-                                        else => {},
-                                    }
-                                },
-                                else => {
-                                    switch (@typeInfo(fnArg)) {
-                                        .Pointer => |arg_info| {
-                                            if (TData == arg_info.child and arg_info.is_const == true) {
-
-                                                // fn (self const* TValue ...)
-
-                                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, .{&data});
-                                            }
-                                        },
-                                        else => {
-                                            if (TData == fnArg) {
-
-                                                // Both context and parameter are the same type:''
-                                                // fn (self TValue ...) called from a TValue
-                                                // or
-                                                // fn (self *TValue ...) called from a *TValue
-                                                // or
-                                                // fn (self const* TValue ...) called from a *const TValue
-
-                                                return try invokeLambda(action_param, out_writer, data, path, path_iterator, index, lambda, .{data});
-                                            }
-                                        },
-                                    }
-                                },
-                            }
-                        }
-                    }
-                }
-
-                return .ChainBroken;
-            }
-
-            inline fn iterateAt(
-                action_param: anytype,
-                out_writer: anytype,
-                data: anytype,
-                index: usize,
-            ) TError!Result {
-                switch (@typeInfo(@TypeOf(data))) {
-                    .Struct => |info| {
-                        if (info.is_tuple) {
-                            inline for (info.fields) |_, i| {
-                                if (index == i) {
-                                    return Result{
-                                        .Resolved = blk: {
-
-                                            // Tuple fields can be a comptime value
-                                            // We must convert it to a runtime type
-                                            const Data = @TypeOf(data[i]);
-                                            if (Data == comptime_int) {
-                                                const RuntimeInt = if (data[i] > 0) std.math.IntFittingRange(0, data[i]) else std.math.IntFittingRange(data[i], 0);
-                                                var runtime_value: RuntimeInt = data[i];
-                                                break :blk try action_fn(action_param, out_writer, runtime_value);
-                                            } else if (Data == comptime_float) {
-                                                var runtime_value: f64 = data[i];
-                                                break :blk try action_fn(action_param, out_writer, runtime_value);
-                                            } else if (Data == @TypeOf(null)) {
-                                                var runtime_value: ?u0 = null;
-                                                break :blk try action_fn(action_param, out_writer, runtime_value);
-                                            } else if (Data == void) {
-                                                return .IteratorConsumed;
-                                            } else {
-                                                break :blk try action_fn(action_param, out_writer, data[i]);
-                                            }
-                                        },
-                                    };
-                                }
-                            } else {
-                                return .IteratorConsumed;
-                            }
-                        }
-                    },
-
-                    // Booleans are evaluated on the iterator
-                    .Bool => {
-                        return if (data == true and index == 0)
-                            Result{ .Resolved = try action_fn(action_param, out_writer, data) }
-                        else
-                            .IteratorConsumed;
-                    },
-
-                    .Pointer => |info| switch (info.size) {
-                        .Slice => {
-
-                            //Slice of u8 is always string
-                            if (info.child != u8) {
-                                return if (index < data.len)
-                                    Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
-                                else
-                                    .IteratorConsumed;
-                            }
-                        },
-                        else => {},
-                    },
-
-                    .Array => |info| {
-
-                        //Array of u8 is always string
-                        if (info.child != u8) {
-                            return if (index < data.len)
-                                Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
-                            else
-                                .IteratorConsumed;
-                        }
-                    },
-
-                    .Vector => {
-                        return if (index < data.len)
-                            Result{ .Resolved = try action_fn(action_param, out_writer, data[index]) }
-                        else
-                            .IteratorConsumed;
-                    },
-
-                    .Optional => {
-                        return if (data) |value|
-                            try iterateAt(action_param, out_writer, value, index)
-                        else
-                            .IteratorConsumed;
-                    },
-                    else => {},
-                }
-
-                return if (index == 0)
-                    Result{ .Resolved = try action_fn(action_param, out_writer, data) }
-                else
-                    .IteratorConsumed;
-            }
-        };
-    }
-
-    inline fn no_action(
-        param: void,
-        out_writer: anytype,
-        value: anytype,
-    ) @TypeOf(out_writer).Error!void {
-        _ = param;
-        _ = out_writer;
-        _ = value;
-    }
-
-    inline fn stringify(
-        escape: Escape,
-        out_writer: anytype,
-        value: anytype,
-    ) @TypeOf(out_writer).Error!void {
-        const typeInfo = @typeInfo(@TypeOf(value));
-
-        switch (typeInfo) {
-            .Void, .Null => {},
-
-            // what should we print?
-            .Struct, .Opaque => {},
-
-            .Bool => return try escape_write(out_writer, if (value) "true" else "false", escape),
-            .Int, .ComptimeInt => return try std.fmt.formatInt(value, 10, .lower, .{}, out_writer),
-            .Float, .ComptimeFloat => return try std.fmt.formatFloatDecimal(value, .{}, out_writer),
-            .Enum => return try escape_write(out_writer, @tagName(value), escape),
-
-            .Pointer => |info| switch (info.size) {
-                TypeInfo.Pointer.Size.One => return try stringify(escape, out_writer, value.*),
-                TypeInfo.Pointer.Size.Slice => {
-                    if (info.child == u8) {
-                        return try escape_write(out_writer, value, escape);
-                    }
-                },
-                TypeInfo.Pointer.Size.Many => @compileError("[*] pointers not supported"),
-                TypeInfo.Pointer.Size.C => @compileError("[*c] pointers not supported"),
-            },
-            .Array => |info| {
-                if (info.child == u8) {
-                    return try escape_write(out_writer, &value, escape);
-                }
-            },
-            .Optional => {
-                if (value) |not_null| {
-                    return try stringify(escape, out_writer, not_null);
-                }
-            },
-            else => @compileError("Not supported"),
-        }
-    }
-
-    fn escape_write(
-        out_writer: anytype,
-        value: []const u8,
-        escape: Escape,
-    ) @TypeOf(out_writer).Error!void {
-        switch (escape) {
-            .Unescaped => {
-                try out_writer.writeAll(value);
-            },
-
-            .Escaped => {
-                const @"null" = '\x00';
-                const html_null: []const u8 = "\u{fffd}";
-
-                var index: usize = 0;
-
-                for (value) |char, char_index| {
-                    const replace = switch (char) {
-                        '"' => "&quot;",
-                        '\'' => "&#39;",
-                        '&' => "&amp;",
-                        '<' => "&lt;",
-                        '>' => "&gt;",
-                        @"null" => html_null,
-                        else => continue,
-                    };
-
-                    if (char_index > index) {
-                        try out_writer.writeAll(value[index..char_index]);
-                    }
-
-                    try out_writer.writeAll(replace);
-                    index = char_index + 1;
-                    if (index == value.len) break;
-                }
-
-                if (index < value.len) {
-                    try out_writer.writeAll(value[index..]);
-                }
-            },
-        }
-    }
-
-    test "escape_write" {
-        const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
-
-        try escape_write(list.writer(), ">abc", .Escaped);
-        try testing.expectEqualStrings("&gt;abc", list.items);
-
-        list.clearAndFree();
-
-        try escape_write(list.writer(), "abc<", .Escaped);
-        try testing.expectEqualStrings("abc&lt;", list.items);
-
-        list.clearAndFree();
-
-        try escape_write(list.writer(), ">abc<", .Escaped);
-        try testing.expectEqualStrings("&gt;abc&lt;", list.items);
-
-        list.clearAndFree();
-
-        try escape_write(list.writer(), "ab&cd", .Escaped);
-        try testing.expectEqualStrings("ab&amp;cd", list.items);
-
-        list.clearAndFree();
-
-        try escape_write(list.writer(), ">ab&cd", .Escaped);
-        try testing.expectEqualStrings("&gt;ab&amp;cd", list.items);
-
-        list.clearAndFree();
-
-        try escape_write(list.writer(), "ab&cd<", .Escaped);
-        try testing.expectEqualStrings("ab&amp;cd&lt;", list.items);
-
-        list.clearAndFree();
-
-        try escape_write(list.writer(), ">ab&cd<", .Escaped);
-        try testing.expectEqualStrings("&gt;ab&amp;cd&lt;", list.items);
-
-        list.clearAndFree();
-
-        try escape_write(list.writer(), ">ab&cd<", .Unescaped);
-        try testing.expectEqualStrings(">ab&cd<", list.items);
-    }
-
-    const tests = struct {
-        const Tuple = std.meta.Tuple(&.{ u8, u32, u64 });
-        const Data = struct {
-            a1: struct {
-                b1: struct {
-                    c1: struct {
-                        d1: u0 = 0,
-                        d2: u0 = 0,
-                        d_null: ?u0 = null,
-                        d_slice: []const u0 = &.{ 0, 0, 0 },
-                        d_array: [3]u0 = .{ 0, 0, 0 },
-                        d_tuple: Tuple = Tuple{ 0, 0, 0 },
-                    } = .{},
-                    c_null: ?u0 = null,
-                    c_slice: []const u0 = &.{ 0, 0, 0 },
-                    c_array: [3]u0 = .{ 0, 0, 0 },
-                    c_tuple: Tuple = Tuple{ 0, 0, 0 },
-                } = .{},
-                b2: u0 = 0,
-                b_null: ?u0 = null,
-                b_slice: []const u0 = &.{ 0, 0, 0 },
-                b_array: [3]u0 = .{ 0, 0, 0 },
-                b_tuple: Tuple = Tuple{ 0, 0, 0 },
-            } = .{},
-            a2: u0 = 0,
-            a_null: ?u0 = null,
-            a_slice: []const u0 = &.{ 0, 0, 0 },
-            a_array: [3]u0 = .{ 0, 0, 0 },
-            a_tuple: Tuple = Tuple{ 0, 0, 0 },
-        };
-
-        const FooCaller = Caller(error{}, bool, fooAction);
-
-        fn fooAction(comptime TExpected: type, out_writer: anytype, value: anytype) error{}!bool {
-            _ = out_writer;
-            return TExpected == @TypeOf(value);
-        }
-
-        fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !FooCaller.Result {
-            var path_iterator = std.mem.tokenize(u8, path, ".");
-            return try FooCaller.call(TExpected, std.io.null_writer, data, &path_iterator, index);
-        }
-
-        fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
-            const value = try fooSeek(TExpected, data, path, null);
-            try testing.expect(value == .Resolved);
-            try testing.expect(value.Resolved == true);
-        }
-
-        fn expectNotFound(data: anytype, path: []const u8) !void {
-            const value = try fooSeek(void, data, path, null);
-            try testing.expect(value != .Resolved);
-        }
-
-        fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
-            const value = try fooSeek(TExpected, data, path, index);
-            try testing.expect(value == .Resolved);
-            try testing.expect(value.Resolved == true);
-        }
-
-        fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
-            const value = try fooSeek(void, data, path, index);
-            try testing.expect(value != .Resolved);
-        }
-
-        test "Comptime seek - self" {
-            var data = Data{};
-            try expectFound(Data, data, "");
-        }
-
-        test "Comptime seek - dot" {
-            var data = Data{};
-            try expectFound(Data, data, ".");
-        }
-
-        test "Comptime seek - not found" {
-            var data = Data{};
-            try expectNotFound(data, "wrong");
-        }
-
-        test "Comptime seek - found" {
-            var data = Data{};
-            try expectFound(@TypeOf(data.a1), data, "a1");
-
-            try expectFound(@TypeOf(data.a2), data, "a2");
-        }
-
-        test "Comptime seek - self null" {
-            var data: ?Data = null;
-            try expectFound(?Data, data, "");
-        }
-
-        test "Comptime seek - self dot" {
-            var data: ?Data = null;
-            try expectFound(?Data, data, ".");
-        }
-
-        test "Comptime seek - found nested" {
-            var data = Data{};
-            try expectFound(@TypeOf(data.a1.b1), data, "a1.b1");
-            try expectFound(@TypeOf(data.a1.b2), data, "a1.b2");
-            try expectFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1");
-            try expectFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1");
-            try expectFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2");
-        }
-
-        test "Comptime seek - not found nested" {
-            var data = Data{};
-            try expectNotFound(data, "a1.wong");
-            try expectNotFound(data, "a1.b1.wong");
-            try expectNotFound(data, "a1.b2.wrong");
-            try expectNotFound(data, "a1.b1.c1.wrong");
-            try expectNotFound(data, "a1.b1.c1.d1.wrong");
-            try expectNotFound(data, "a1.b1.c1.d2.wrong");
-        }
-
-        test "Comptime seek - null nested" {
-            var data = Data{};
-            try expectFound(@TypeOf(data.a_null), data, "a_null");
-            try expectFound(@TypeOf(data.a1.b_null), data, "a1.b_null");
-            try expectFound(@TypeOf(data.a1.b1.c_null), data, "a1.b1.c_null");
-            try expectFound(@TypeOf(data.a1.b1.c1.d_null), data, "a1.b1.c1.d_null");
-        }
-
-        test "Comptime iter - self" {
-            var data = Data{};
-            try expectIterFound(Data, data, "", 0);
-        }
-
-        test "Comptime iter consumed - self" {
-            var data = Data{};
-            try expectIterNotFound(data, "", 1);
-        }
-
-        test "Comptime iter - dot" {
-            var data = Data{};
-            try expectIterFound(Data, data, ".", 0);
-        }
-
-        test "Comptime iter consumed - dot" {
-            var data = Data{};
-            try expectIterNotFound(data, ".", 1);
-        }
-
-        test "Comptime seek - not found" {
-            var data = Data{};
-            try expectIterNotFound(data, "wrong", 0);
-            try expectIterNotFound(data, "wrong", 1);
-        }
-
-        test "Comptime iter - found" {
-            var data = Data{};
-            try expectIterFound(@TypeOf(data.a1), data, "a1", 0);
-
-            try expectIterFound(@TypeOf(data.a2), data, "a2", 0);
-        }
-
-        test "Comptime iter consumed - found" {
-            var data = Data{};
-            try expectIterNotFound(data, "a1", 1);
-
-            try expectIterNotFound(data, "a2", 1);
-        }
-
-        test "Comptime iter - found nested" {
-            var data = Data{};
-            try expectIterFound(@TypeOf(data.a1.b1), data, "a1.b1", 0);
-            try expectIterFound(@TypeOf(data.a1.b2), data, "a1.b2", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2", 0);
-        }
-
-        test "Comptime iter consumed - found nested" {
-            var data = Data{};
-            try expectIterNotFound(data, "a1.b1", 1);
-            try expectIterNotFound(data, "a1.b2", 1);
-            try expectIterNotFound(data, "a1.b1.c1", 1);
-            try expectIterNotFound(data, "a1.b1.c1.d1", 1);
-            try expectIterNotFound(data, "a1.b1.c1.d2", 1);
-        }
-
-        test "Comptime iter - not found nested" {
-            var data = Data{};
-            try expectIterNotFound(data, "a1.wong", 0);
-            try expectIterNotFound(data, "a1.b1.wong", 0);
-            try expectIterNotFound(data, "a1.b2.wrong", 0);
-            try expectIterNotFound(data, "a1.b1.c1.wrong", 0);
-            try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 0);
-            try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 0);
-
-            try expectIterNotFound(data, "a1.wong", 1);
-            try expectIterNotFound(data, "a1.b1.wong", 1);
-            try expectIterNotFound(data, "a1.b2.wrong", 1);
-            try expectIterNotFound(data, "a1.b1.c1.wrong", 1);
-            try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 1);
-            try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 1);
-        }
-
-        test "Comptime iter - slice" {
-            var data = Data{};
-            try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
-
-            try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
-
-            try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
-
-            try expectIterNotFound(data, "a_slice", 3);
-        }
-
-        test "Comptime iter - array" {
-            var data = Data{};
-            try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
-
-            try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
-
-            try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
-
-            try expectIterNotFound(data, "a_array", 3);
-        }
-
-        test "Comptime iter - tuple" {
-            var data = Data{};
-            try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
-
-            try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
-
-            try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
-
-            try expectIterNotFound(data, "a_tuple", 3);
-        }
-
-        test "Comptime iter - nested slice" {
-            var data = Data{};
-            try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
-            try expectIterFound(@TypeOf(data.a1.b_slice[0]), data, "a1.b_slice", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c_slice[0]), data, "a1.b1.c_slice", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[0]), data, "a1.b1.c1.d_slice", 0);
-
-            try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
-            try expectIterFound(@TypeOf(data.a1.b_slice[1]), data, "a1.b_slice", 1);
-            try expectIterFound(@TypeOf(data.a1.b1.c_slice[1]), data, "a1.b1.c_slice", 1);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[1]), data, "a1.b1.c1.d_slice", 1);
-
-            try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
-            try expectIterFound(@TypeOf(data.a1.b_slice[2]), data, "a1.b_slice", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c_slice[2]), data, "a1.b1.c_slice", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[2]), data, "a1.b1.c1.d_slice", 2);
-
-            try expectIterNotFound(data, "a_slice", 3);
-            try expectIterNotFound(data, "a1.b_slice", 3);
-            try expectIterNotFound(data, "a1.b1.c_slice", 3);
-            try expectIterNotFound(data, "a1.b1.c1.d_slice", 3);
-        }
-
-        test "Comptime iter - nested array" {
-            var data = Data{};
-            try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
-            try expectIterFound(@TypeOf(data.a1.b_tuple[0]), data, "a1.b_tuple", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c_tuple[0]), data, "a1.b1.c_tuple", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[0]), data, "a1.b1.c1.d_tuple", 0);
-
-            try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
-            try expectIterFound(@TypeOf(data.a1.b_tuple[1]), data, "a1.b_tuple", 1);
-            try expectIterFound(@TypeOf(data.a1.b1.c_tuple[1]), data, "a1.b1.c_tuple", 1);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[1]), data, "a1.b1.c1.d_tuple", 1);
-
-            try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
-            try expectIterFound(@TypeOf(data.a1.b_tuple[2]), data, "a1.b_tuple", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c_tuple[2]), data, "a1.b1.c_tuple", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[2]), data, "a1.b1.c1.d_tuple", 2);
-
-            try expectIterNotFound(data, "a_tuple", 3);
-            try expectIterNotFound(data, "a1.b_tuple", 3);
-            try expectIterNotFound(data, "a1.b1.c_tuple", 3);
-            try expectIterNotFound(data, "a1.b1.c1.d_tuple", 3);
-        }
-
-        test "Comptime iter - nested tuple" {
-            var data = Data{};
-            try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
-            try expectIterFound(@TypeOf(data.a1.b_array[0]), data, "a1.b_array", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c_array[0]), data, "a1.b1.c_array", 0);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[0]), data, "a1.b1.c1.d_array", 0);
-
-            try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
-            try expectIterFound(@TypeOf(data.a1.b_array[1]), data, "a1.b_array", 1);
-            try expectIterFound(@TypeOf(data.a1.b1.c_array[1]), data, "a1.b1.c_array", 1);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[1]), data, "a1.b1.c1.d_array", 1);
-
-            try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
-            try expectIterFound(@TypeOf(data.a1.b_array[2]), data, "a1.b_array", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c_array[2]), data, "a1.b1.c_array", 2);
-            try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[2]), data, "a1.b1.c1.d_array", 2);
-
-            try expectIterNotFound(data, "a_array", 3);
-            try expectIterNotFound(data, "a1.b_array", 3);
-            try expectIterNotFound(data, "a1.b1.c_array", 3);
-            try expectIterNotFound(data, "a1.b1.c1.d_array", 3);
-        }
-    };
-};
-
 test {
-    _ = Comptime.tests;
+    _ = Comptime;
+    _ = lambda;
     _ = struct_tests;
 }
 const testing = std.testing;
@@ -1128,80 +275,39 @@ const struct_tests = struct {
 
         // Lambdas
 
-        pub fn staticValue() u32 {
-            return 1;
+        pub fn staticLambda(ctx: LambdaContext) !void {
+            try ctx.write("1");
         }
 
-        pub fn staticString() []const u8 {
-            return "this is static";
+        pub fn selfLambda(self: Person, ctx: LambdaContext) !void {
+            const str = try std.fmt.allocPrint(ctx.allocator, "{}", .{self.name.len});
+            defer ctx.allocator.free(str);
+            return try ctx.write(str);
         }
 
-        pub fn selfValue(self: Person) usize {
-            return self.name.len;
+        pub fn selfConstPtrLambda(self: *const Person, ctx: LambdaContext) !void {
+            const str = try std.fmt.allocPrint(ctx.allocator, "{}", .{self.name.len});
+            defer ctx.allocator.free(str);
+
+            return try ctx.write(str);
         }
 
-        pub fn selfString(self: Person) []const u8 {
-            return self.name;
-        }
-
-        pub fn selfConstPtrValue(self: *const Person) usize {
-            return self.name.len;
-        }
-
-        pub fn selfConstPtrString(self: *const Person) []const u8 {
-            return self.name;
-        }
-
-        pub fn selfMutPtrValue(self: *Person) usize {
+        pub fn selfMutPtrLambda(self: *Person, ctx: LambdaContext) !void {
             self.counter += 1;
-            return self.counter;
+
+            const str = try std.fmt.allocPrint(ctx.allocator, "{}", .{self.counter});
+            defer ctx.allocator.free(str);
+            return try ctx.write(str);
         }
 
-        pub fn selfMutPtrString(self: *Person) []const u8 {
-            const size = std.fmt.formatIntBuf(&self.buffer, self.counter, 10, .lower, .{});
-            return self.buffer[0..size];
+        pub fn willFailStaticLambda(ctx: LambdaContext) error{Expected}!void {
+            _ = ctx;
+            return error.Expected;
         }
 
-        pub fn staticAllocator(allocator: Allocator) u32 {
-            _ = allocator;
-            return 100;
-        }
-
-        pub fn staticContent(content: []const u8) usize {
-            _ = content;
-            return 101;
-        }
-
-        pub fn staticAllocatorAndContent(allocator: Allocator, content: []const u8) u32 {
-            _ = allocator;
-            _ = content;
-            return 102;
-        }
-
-        pub fn selfAllocator(self: Person, allocator: Allocator) u32 {
+        pub fn willFailSelfLambda(self: Person, ctx: LambdaContext) error{Expected}!void {
             _ = self;
-            _ = allocator;
-            return 100;
-        }
-
-        pub fn selfContent(self: Person, content: []const u8) u32 {
-            _ = self;
-            _ = content;
-            return 101;
-        }
-
-        pub fn selfAllocatorAndContent(self: Person, allocator: Allocator, content: []const u8) u32 {
-            _ = self;
-            _ = allocator;
-            _ = content;
-            return 102;
-        }
-
-        pub fn mayFailStatic() error{Unexpected}!u32 {
-            return 200;
-        }
-
-        pub fn willFailStatic() error{Expected}!u32 {
+            ctx.write("unfinished") catch unreachable;
             return error.Expected;
         }
 
@@ -1572,8 +678,7 @@ const struct_tests = struct {
         try write(writer, &person, "name.wrong_name");
         try testing.expectEqualStrings("", list.items);
     }
-
-    test "Lambda - Write static" {
+    test "Lambda - staticLambda" {
         const allocator = testing.allocator;
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
@@ -1584,57 +689,37 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "staticValue");
+        try write(writer, person, "staticLambda");
         try testing.expectEqualStrings("1", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "staticString");
-        try testing.expectEqualStrings("this is static", list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "staticValue");
+        try write(writer, &person, "staticLambda");
         try testing.expectEqualStrings("1", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, &person, "staticString");
-        try testing.expectEqualStrings("this is static", list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.staticValue");
+        try write(writer, person, "indication.staticLambda");
         try testing.expectEqualStrings("1", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "indication.staticString");
-        try testing.expectEqualStrings("this is static", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person, "staticValue");
+        try write(writer, &person, "staticLambda");
         try testing.expectEqualStrings("1", list.items);
 
         list.clearAndFree();
 
-        try write(writer, &person, "staticString");
-        try testing.expectEqualStrings("this is static", list.items);
-
-        list.clearAndFree();
-
         // Nested Ref pointer access
-        try write(writer, &person, "indication.staticValue");
+        try write(writer, &person, "indication.staticLambda");
         try testing.expectEqualStrings("1", list.items);
 
         list.clearAndFree();
     }
 
-    test "Lambda - Write self" {
+    test "Lambda - selfLambda" {
         const allocator = testing.allocator;
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
@@ -1645,57 +730,37 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "selfValue");
+        try write(writer, person, "selfLambda");
         try testing.expectEqualStrings("10", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "selfString");
-        try testing.expectEqualStrings(person.name, list.items);
 
         list.clearAndFree();
 
         // Ref access
-        try write(writer, &person, "selfValue");
+        try write(writer, &person, "selfLambda");
         try testing.expectEqualStrings("10", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, &person, "selfString");
-        try testing.expectEqualStrings(person.name, list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.selfValue");
+        try write(writer, person, "indication.selfLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
 
-        try write(writer, person, "indication.selfString");
-        try testing.expectEqualStrings(person.indication.?.name, list.items);
-
-        list.clearAndFree();
-
         // Nested Ref access
-        try write(writer, &person, "selfValue");
+        try write(writer, &person, "selfLambda");
         try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
-        try write(writer, &person, "selfString");
-        try testing.expectEqualStrings(person.name, list.items);
-
-        list.clearAndFree();
-
         // Nested Ref pointer access
-        try write(writer, &person, "indication.selfValue");
+        try write(writer, &person, "indication.selfLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
     }
 
-    test "Lambda - Write selfConstPtr" {
+    test "Lambda - selfConstPtrLambda" {
         const allocator = testing.allocator;
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
@@ -1703,60 +768,50 @@ const struct_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
+        const person_const_ptr: *const Person = &person;
+        const person_ptr: *Person = &person;
+
         var writer = list.writer();
 
         // Direct access
-        try write(writer, person, "selfConstPtrValue");
+        //ry write(writer, person, "selfConstPtrLambda");
+        //try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        // Const Ref access
+
+        //try write(writer, person_const_ptr, "selfConstPtrLambda");
+        //try testing.expectEqualStrings("10", list.items);
+
+        list.clearAndFree();
+
+        // Mut Ref access
+        try write(writer, person_ptr, "selfConstPtrLambda");
         try testing.expectEqualStrings("10", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "selfConstPtrString");
-        try testing.expectEqualStrings(person.name, list.items);
-
-        list.clearAndFree();
-
-        // Ref access
-        try write(writer, &person, "selfConstPtrValue");
-        try testing.expectEqualStrings("10", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, &person, "selfConstPtrString");
-        try testing.expectEqualStrings(person.name, list.items);
 
         list.clearAndFree();
 
         // Nested pointer access
-        try write(writer, person, "indication.selfConstPtrValue");
+        try write(writer, person, "indication.selfConstPtrLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
 
-        try write(writer, person, "indication.selfConstPtrString");
-        try testing.expectEqualStrings(person.indication.?.name, list.items);
+        // Nested const Ref access
+        try write(writer, person_const_ptr, "indication.selfConstPtrLambda");
+        try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
 
         // Nested Ref access
-        try write(writer, &person, "selfConstPtrValue");
-        try testing.expectEqualStrings("10", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, &person, "selfConstPtrString");
-        try testing.expectEqualStrings(person.name, list.items);
-
-        list.clearAndFree();
-
-        // Nested Ref pointer access
-        try write(writer, &person, "indication.selfConstPtrValue");
+        try write(writer, person_ptr, "indication.selfConstPtrLambda");
         try testing.expectEqualStrings("8", list.items);
 
         list.clearAndFree();
     }
 
-    test "Lambda - Write selfMutPtr" {
+    test "Lambda - Write selfMutPtrLambda" {
         const allocator = testing.allocator;
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
@@ -1768,36 +823,21 @@ const struct_tests = struct {
             defer if (person.indication) |indication| allocator.destroy(indication);
 
             // Cannot be called from a context by value
-            try write(writer, person, "selfMutPtrValue");
-            try testing.expectEqualStrings("", list.items);
-
-            list.clearAndFree();
-
-            try write(writer, person, "selfMutPtrString");
+            try write(writer, person, "selfMutPtrLambda");
             try testing.expectEqualStrings("", list.items);
 
             list.clearAndFree();
 
             // Mutable pointer
-            try write(writer, person, "indication.selfMutPtrValue");
+            try write(writer, person, "indication.selfMutPtrLambda");
             try testing.expectEqualStrings("1", list.items);
             try testing.expect(person.indication.?.counter == 1);
 
             list.clearAndFree();
 
-            try write(writer, person, "indication.selfMutPtrString");
-            try testing.expectEqualStrings("1", list.items);
-
-            list.clearAndFree();
-
-            try write(writer, person, "indication.selfMutPtrValue");
-            try testing.expectEqualStrings("2", list.items);
+            try write(writer, person, "indication.selfMutPtrLambda");
+            try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
             try testing.expect(person.indication.?.counter == 2);
-
-            list.clearAndFree();
-
-            try write(writer, person, "indication.selfMutPtrString");
-            try testing.expectEqualStrings("2", list.items);
 
             list.clearAndFree();
         }
@@ -1808,12 +848,7 @@ const struct_tests = struct {
 
             // Cannot be called from a context const
             const const_person_ptr: *const Person = &person;
-            try write(writer, const_person_ptr, "selfMutPtrValue");
-            try testing.expectEqualStrings("", list.items);
-
-            list.clearAndFree();
-
-            try write(writer, const_person_ptr, "selfMutPtrString");
+            try write(writer, const_person_ptr, "selfMutPtrLambda");
             try testing.expectEqualStrings("", list.items);
 
             list.clearAndFree();
@@ -1824,50 +859,34 @@ const struct_tests = struct {
             defer if (person.indication) |indication| allocator.destroy(indication);
 
             // Ref access
-            try write(writer, &person, "selfMutPtrValue");
+            try write(writer, &person, "selfMutPtrLambda");
             try testing.expectEqualStrings("1", list.items);
+            try testing.expect(person.counter == 1);
 
             list.clearAndFree();
 
-            try write(writer, &person, "selfMutPtrString");
-            try testing.expectEqualStrings("1", list.items);
-
-            list.clearAndFree();
-
-            try write(writer, &person, "selfMutPtrValue");
-            try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
-
-            list.clearAndFree();
-
-            try write(writer, &person, "selfMutPtrString");
-            try testing.expectEqualStrings("2", list.items);
+            try write(writer, &person, "selfMutPtrLambda");
+            try testing.expectEqualStrings("2", list.items); //Called again, it's mutable
+            try testing.expect(person.counter == 2);
 
             list.clearAndFree();
 
             // Nested pointer access
-            try write(writer, &person, "indication.selfMutPtrValue");
+            try write(writer, &person, "indication.selfMutPtrLambda");
             try testing.expectEqualStrings("1", list.items);
+            try testing.expect(person.indication.?.counter == 1);
 
             list.clearAndFree();
 
-            try write(writer, &person, "indication.selfMutPtrString");
-            try testing.expectEqualStrings("1", list.items);
-
-            list.clearAndFree();
-
-            try write(writer, &person, "indication.selfMutPtrValue");
+            try write(writer, &person, "indication.selfMutPtrLambda");
             try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
-
-            list.clearAndFree();
-
-            try write(writer, &person, "indication.selfMutPtrString");
-            try testing.expectEqualStrings("2", list.items);
+            try testing.expect(person.indication.?.counter == 2);
 
             list.clearAndFree();
         }
     }
 
-    test "Lambda - Write static arguments" {
+    test "Lambda - error handling" {
         const allocator = testing.allocator;
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
@@ -1877,99 +896,13 @@ const struct_tests = struct {
 
         var writer = list.writer();
 
-        // Direct access
-        try write(writer, person, "staticAllocator");
-        try testing.expectEqualStrings("100", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "staticContent");
-        try testing.expectEqualStrings("101", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "staticAllocatorAndContent");
-        try testing.expectEqualStrings("102", list.items);
-
-        list.clearAndFree();
-    }
-
-    test "Lambda - Write self arguments" {
-        const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
-
-        var person = getPerson();
-        defer if (person.indication) |indication| allocator.destroy(indication);
-
-        var writer = list.writer();
-
-        // Direct access
-        try write(writer, person, "selfAllocator");
-        try testing.expectEqualStrings("100", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "selfContent");
-        try testing.expectEqualStrings("101", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "selfAllocatorAndContent");
-        try testing.expectEqualStrings("102", list.items);
-
-        list.clearAndFree();
-
-        // Ref access
-        try write(writer, &person, "selfAllocator");
-        try testing.expectEqualStrings("100", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, &person, "selfContent");
-        try testing.expectEqualStrings("101", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, &person, "selfAllocatorAndContent");
-        try testing.expectEqualStrings("102", list.items);
-
-        list.clearAndFree();
-
-        // Nested pointer access
-        try write(writer, person, "indication.selfAllocator");
-        try testing.expectEqualStrings("100", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "indication.selfContent");
-        try testing.expectEqualStrings("101", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "indication.selfAllocatorAndContent");
-        try testing.expectEqualStrings("102", list.items);
-
-        list.clearAndFree();
-    }
-
-    test "Lambda - Write invalid functions" {
-        const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
-
-        var person = getPerson();
-        defer if (person.indication) |indication| allocator.destroy(indication);
-
-        var writer = list.writer();
-
-        try write(writer, person, "mayFailStatic");
-        try testing.expectEqualStrings("200", list.items);
-
-        list.clearAndFree();
-
-        try write(writer, person, "willFailStatic");
+        try write(writer, person, "willFailStaticLambda");
         try testing.expectEqualStrings("", list.items);
+
+        list.clearAndFree();
+
+        try write(writer, person, "willFailSelfLambda");
+        try testing.expectEqualStrings("unfinished", list.items);
 
         list.clearAndFree();
     }
