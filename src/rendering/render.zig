@@ -99,23 +99,32 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                         .Interpolation => |path| try self.interpolate(stack, path, .Escaped),
                         .UnescapedInterpolation => |path| try self.interpolate(stack, path, .Unescaped),
                         .Section => |section| {
-                            if (self.getIterator(stack, section)) |*iterator| {
-                                while (try iterator.next(self.allocator)) |item_ctx| {
-                                    defer item_ctx.deinit(self.allocator);
+                            if (try getIterator(stack, section)) |*iterator| {
+                                if (iterator.is_lambda) {
+                                    const expand_result = try iterator.context.expandLambda(self.allocator, stack, section.key, .Unescaped);
+                                    assert(expand_result == .Lambda);
+                                } else {
+                                    while (try iterator.next(self.allocator)) |item_ctx| {
+                                        defer item_ctx.deinit(self.allocator);
 
-                                    var next_level = ContextStack{
-                                        .parent = stack,
-                                        .ctx = item_ctx,
-                                    };
+                                        var next_level = ContextStack{
+                                            .parent = stack,
+                                            .ctx = item_ctx,
+                                        };
 
-                                    try self.renderLevel(&next_level, section.content);
+                                        try self.renderLevel(&next_level, section.content);
+                                    }
                                 }
                             }
                         },
                         .InvertedSection => |section| {
-                            var iterator = self.getIterator(stack, section);
+                            var iterator = try getIterator(stack, section);
 
-                            if (iterator == null or iterator.?.hasNext() == false) {
+                            // Lambdas aways evaluate as "true" for inverted section
+                            // Broken paths, empty lists, null and false evaluates as "false"
+
+                            const render_inverted = if (iterator) |it| it.is_lambda == false and it.hasNext() == false else true;
+                            if (render_inverted) {
                                 try self.renderLevel(stack, section.content);
                             }
                         },
@@ -160,21 +169,14 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             }
         }
 
-        fn getIterator(self: *Self, stack: *ContextStack, section: Section) ?Context(Writer).Iterator {
+        fn getIterator(stack: *ContextStack, section: Section) (Allocator.Error || Writer.Error)!?Context(Writer).Iterator {
             var level: ?*ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {
                 switch (current.ctx.iterator(section.key)) {
                     .Field => |found| return found,
 
-                    .Lambda => |found| {
-
-                        // Expand the lambda and break the loop
-                        //try found.context.expandLambda(self.allocator, stack, found.path, .Unescaped);
-                        _ = self;
-                        _ = found;
-                        break;
-                    },
+                    .Lambda => |found| return found,
 
                     .IteratorConsumed, .ChainBroken => {
                         // Not found, but should NOT try against the parent context

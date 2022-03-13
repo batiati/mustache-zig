@@ -88,6 +88,7 @@ pub fn Context(comptime Writer: type) type {
             path: []const u8,
             current: usize,
             finished: bool,
+            is_lambda: bool,
 
             pub fn hasNext(self: Iterator) bool {
                 if (self.finished) {
@@ -147,14 +148,23 @@ pub fn Context(comptime Writer: type) type {
 
             return switch (result) {
                 .Field,
-                .Lambda,
                 .IteratorConsumed,
                 => .{
                     .Field = .{
                         .context = self,
                         .path = path,
                         .current = 0,
-                        .finished = result != .Field,
+                        .finished = result == .IteratorConsumed,
+                        .is_lambda = false,
+                    },
+                },
+                .Lambda => .{
+                    .Lambda = .{
+                        .context = self,
+                        .path = path,
+                        .current = 0,
+                        .finished = true,
+                        .is_lambda = true,
                     },
                 },
 
@@ -727,6 +737,7 @@ const struct_tests = struct {
         try interpolate(writer, &person, "name.wrong_name");
         try testing.expectEqualStrings("", list.items);
     }
+
     test "Lambda - staticLambda" {
         const allocator = testing.allocator;
         var list = std.ArrayList(u8).init(allocator);
@@ -823,15 +834,15 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Direct access
-        //ry write(writer, person, "selfConstPtrLambda");
-        //try testing.expectEqualStrings("10", list.items);
+        try interpolate(writer, person, "selfConstPtrLambda");
+        try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
         // Const Ref access
 
-        //try interpolate(writer, person_const_ptr, "selfConstPtrLambda");
-        //try testing.expectEqualStrings("10", list.items);
+        try interpolate(writer, person_const_ptr, "selfConstPtrLambda");
+        try testing.expectEqualStrings("10", list.items);
 
         list.clearAndFree();
 
