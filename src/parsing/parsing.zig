@@ -125,6 +125,7 @@ pub const ParserOptions = struct {
     source: TextSource,
     owns_string: bool,
     output: ParserOutput,
+    allow_lambdas: bool,
 };
 
 pub fn Parser(comptime parser_options: ParserOptions) type {
@@ -220,7 +221,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
         pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) (AbortError || LoadError)![]Element {
             var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
             errdefer list.deinit(self.gpa);
-            defer Node.deinitMany(self.gpa, nodes);
+            defer Node.unRefMany(self.gpa, nodes);
 
             for (nodes) |node| {
                 const element = blk: {
@@ -345,10 +346,10 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
             var static_text_block: ?*Node = null;
 
             while (try self.text_scanner.next(self.gpa)) |*text_block| {
-                errdefer text_block.deinit(self.gpa);
+                errdefer text_block.unRef(self.gpa);
 
                 var block_type = text_block.matchBlockType() orelse {
-                    text_block.deinit(self.gpa);
+                    text_block.unRef(self.gpa);
                     continue;
                 };
 
@@ -357,7 +358,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                     .StaticText => {
                         if (self.current_level.current_node) |current_node| {
                             if (current_node.block_type.ignoreStaticText()) {
-                                text_block.deinit(self.gpa);
+                                text_block.unRef(self.gpa);
                                 continue;
                             }
                         }
@@ -372,7 +373,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                         };
 
                         self.current_level.delimiters = new_delimiters;
-                        text_block.deinit(self.gpa);
+                        text_block.unRef(self.gpa);
                     },
 
                     else => {},
@@ -493,7 +494,12 @@ test {
     _ = testing.refAllDecls(@This());
 }
 
-const StreamedParser = Parser(.{ .source = .String, .owns_string = true, .output = .Streamed });
+const StreamedParser = Parser(.{
+    .source = .String,
+    .owns_string = true,
+    .output = .Streamed,
+    .allow_lambdas = true,
+});
 
 test "Basic parse" {
     const template_text =
@@ -516,7 +522,7 @@ test "Basic parse" {
 
     // The parser produces only the minimun amount of tags that can be render at once
     if (first_block) |nodes| {
-        defer Node.deinitMany(allocator, nodes);
+        defer Node.unRefMany(allocator, nodes);
 
         try testing.expectEqual(@as(usize, 1), nodes.len);
         try testing.expectEqual(BlockType.Comment, nodes[0].block_type);
@@ -528,7 +534,7 @@ test "Basic parse" {
 
     // Nested tags must be produced together
     if (second_block) |nodes| {
-        defer Node.deinitMany(allocator, nodes);
+        defer Node.unRefMany(allocator, nodes);
 
         try testing.expectEqual(@as(usize, 2), nodes.len);
 
@@ -568,7 +574,7 @@ test "Basic parse" {
     var third_block = try testParseTree(&parser);
 
     if (third_block) |nodes| {
-        defer Node.deinitMany(allocator, nodes);
+        defer Node.unRefMany(allocator, nodes);
 
         try testing.expectEqual(@as(usize, 1), nodes.len);
 
@@ -599,7 +605,7 @@ test "Scan standAlone tags" {
 
     // The parser produces only the minimun amount of tags that can be render at once
     if (first_block) |nodes| {
-        defer Node.deinitMany(allocator, nodes);
+        defer Node.unRefMany(allocator, nodes);
 
         try testing.expectEqual(@as(usize, 2), nodes.len);
 
@@ -613,7 +619,7 @@ test "Scan standAlone tags" {
 
     var second_block = try testParseTree(&parser);
     if (second_block) |nodes| {
-        defer Node.deinitMany(allocator, nodes);
+        defer Node.unRefMany(allocator, nodes);
 
         try testing.expectEqual(@as(usize, 1), nodes.len);
 
@@ -642,7 +648,7 @@ test "Scan delimiters Tags" {
 
     var first_block = try testParseTree(&parser);
     if (first_block) |nodes| {
-        defer Node.deinitMany(allocator, nodes);
+        defer Node.unRefMany(allocator, nodes);
 
         try testing.expectEqual(@as(usize, 1), nodes.len);
 
@@ -654,7 +660,7 @@ test "Scan delimiters Tags" {
 
     var second_block = try testParseTree(&parser);
     if (second_block) |nodes| {
-        defer Node.deinitMany(allocator, nodes);
+        defer Node.unRefMany(allocator, nodes);
 
         try testing.expectEqual(@as(usize, 2), nodes.len);
 

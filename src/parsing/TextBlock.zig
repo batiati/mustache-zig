@@ -56,7 +56,7 @@ right_trimming: TrimmingIndex = .PreserveWhitespaces,
 /// All indentation must be propagated to the child elements
 indentation: ?[]const u8 = null,
 
-pub inline fn deinit(self: *Self, allocator: Allocator) void {
+pub inline fn unRef(self: *Self, allocator: Allocator) void {
     self.ref_counter.free(allocator);
 }
 

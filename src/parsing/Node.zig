@@ -15,19 +15,22 @@ text_block: TextBlock,
 prev_node: ?*Self = null,
 children: ?[]*Self = null,
 
-pub fn deinitMany(allocator: Allocator, nodes: ?[]*Self) void {
+///
+/// A node holds a RefCounter to the underlying text buffer
+/// This function unref a list of nodes and free the buffer if no other Node references it
+pub fn unRefMany(allocator: Allocator, nodes: ?[]*Self) void {
     if (nodes) |items| {
         for (items) |item| {
-            item.deinit(allocator);
+            item.unRef(allocator);
         }
-
-        //allocator.free(items);
     }
 }
 
-pub fn deinit(self: *Self, allocator: Allocator) void {
-    self.text_block.deinit(allocator);
-    //allocator.destroy(self);
+///
+/// A node holds a RefCounter to the underlying text buffer
+/// This functions unref the counter and free the buffer if no other Node references it
+pub fn unRef(self: *Self, allocator: Allocator) void {
+    self.text_block.unRef(allocator);
 }
 
 pub fn trimStandAlone(self: *Self) void {

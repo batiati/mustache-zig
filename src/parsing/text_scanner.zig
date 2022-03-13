@@ -208,7 +208,7 @@ test "basic tests" {
 
     var part_1 = try reader.next(allocator);
     try testing.expect(part_1 != null);
-    defer part_1.?.deinit(allocator);
+    defer part_1.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
@@ -220,7 +220,7 @@ test "basic tests" {
 
     var part_2 = try reader.next(allocator);
     try testing.expect(part_2 != null);
-    defer part_2.?.deinit(allocator);
+    defer part_2.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
@@ -232,7 +232,7 @@ test "basic tests" {
 
     var part_3 = try reader.next(allocator);
     try testing.expect(part_3 != null);
-    defer part_3.?.deinit(allocator);
+    defer part_3.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_3.?.event);
     try testing.expectEqual(MarkType.Starting, part_3.?.event.Mark.mark_type);
@@ -244,7 +244,7 @@ test "basic tests" {
 
     var part_4 = try reader.next(allocator);
     try testing.expect(part_4 != null);
-    defer part_4.?.deinit(allocator);
+    defer part_4.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_4.?.event);
     try testing.expectEqual(MarkType.Ending, part_4.?.event.Mark.mark_type);
@@ -256,7 +256,7 @@ test "basic tests" {
 
     var part_5 = try reader.next(allocator);
     try testing.expect(part_5 != null);
-    defer part_5.?.deinit(allocator);
+    defer part_5.?.unRef(allocator);
 
     try testing.expectEqual(Event.Eof, part_5.?.event);
     try testing.expectEqualStrings("Until eof", part_5.?.tail.?);
@@ -282,7 +282,7 @@ test "custom tags" {
 
     var part_1 = try reader.next(allocator);
     try testing.expect(part_1 != null);
-    defer part_1.?.deinit(allocator);
+    defer part_1.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
@@ -294,7 +294,7 @@ test "custom tags" {
 
     var part_2 = try reader.next(allocator);
     try testing.expect(part_2 != null);
-    defer part_2.?.deinit(allocator);
+    defer part_2.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
@@ -306,7 +306,7 @@ test "custom tags" {
 
     var part_3 = try reader.next(allocator);
     try testing.expect(part_3 != null);
-    defer part_3.?.deinit(allocator);
+    defer part_3.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_3.?.event);
     try testing.expectEqual(MarkType.Starting, part_3.?.event.Mark.mark_type);
@@ -318,7 +318,7 @@ test "custom tags" {
 
     var part_4 = try reader.next(allocator);
     try testing.expect(part_4 != null);
-    defer part_4.?.deinit(allocator);
+    defer part_4.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_4.?.event);
     try testing.expectEqual(MarkType.Ending, part_4.?.event.Mark.mark_type);
@@ -330,7 +330,7 @@ test "custom tags" {
 
     var part_5 = try reader.next(allocator);
     try testing.expect(part_5 != null);
-    defer part_5.?.deinit(allocator);
+    defer part_5.?.unRef(allocator);
 
     try testing.expectEqual(Event.Eof, part_5.?.event);
     try testing.expectEqualStrings("Until eof", part_5.?.tail.?);
@@ -353,7 +353,7 @@ test "EOF" {
 
     var part_1 = try reader.next(allocator);
     try testing.expect(part_1 != null);
-    defer part_1.?.deinit(allocator);
+    defer part_1.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
@@ -365,7 +365,7 @@ test "EOF" {
 
     var part_2 = try reader.next(allocator);
     try testing.expect(part_2 != null);
-    defer part_2.?.deinit(allocator);
+    defer part_2.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
@@ -377,7 +377,7 @@ test "EOF" {
 
     var part_3 = try reader.next(allocator);
     try testing.expect(part_3 != null);
-    defer part_3.?.deinit(allocator);
+    defer part_3.?.unRef(allocator);
     try testing.expectEqual(Event.Eof, part_3.?.event);
     try testing.expect(part_3.?.tail == null);
 
@@ -397,7 +397,7 @@ test "EOF custom tags" {
 
     var part_1 = try reader.next(allocator);
     try testing.expect(part_1 != null);
-    defer part_1.?.deinit(allocator);
+    defer part_1.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_1.?.event);
     try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
@@ -409,7 +409,7 @@ test "EOF custom tags" {
 
     var part_2 = try reader.next(allocator);
     try testing.expect(part_2 != null);
-    defer part_2.?.deinit(allocator);
+    defer part_2.?.unRef(allocator);
 
     try testing.expectEqual(Event.Mark, part_2.?.event);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
@@ -420,7 +420,7 @@ test "EOF custom tags" {
     try testing.expectEqual(@as(usize, 6), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
-    defer part_3.?.deinit(allocator);
+    defer part_3.?.unRef(allocator);
     try testing.expect(part_3 != null);
     try testing.expectEqual(Event.Eof, part_3.?.event);
     try testing.expect(part_3.?.tail == null);
