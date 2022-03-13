@@ -92,32 +92,33 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
             index: ?usize,
         ) TError!Result {
             const Data = @TypeOf(data);
-            const is_lambda = comptime lambda.isLambdaContextImpl(Data);
 
-            if (!is_lambda) {
-                if (path_iterator.next()) |token| {
-                    return try recursiveFind(depth, @TypeOf(data), action_param, out_writer, data, token, path_iterator, index);
-                }
-            }
-
-            if (Data == comptime_int) {
-                const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
-                var runtime_value: RuntimeInt = data;
-                return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
-            } else if (Data == comptime_float) {
-                var runtime_value: f64 = data;
-                return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
-            } else if (Data == @TypeOf(null)) {
-                var runtime_value: ?u0 = null;
-                return try find(depth, action_param, out_writer, runtime_value, path_iterator, index);
-            } else if (Data == void) {
-                return if (depth == .Root) .NotFoundInContext else .ChainBroken;
-            } else {
-                if (index) |current_index| {
-                    return try iterateAt(action_param, out_writer, data, current_index);
+            const ctx = comptime blk: {
+                if (Data == comptime_int) {
+                    const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
+                    var runtime_value: RuntimeInt = data;
+                    break :blk runtime_value;
+                } else if (Data == comptime_float) {
+                    var runtime_value: f64 = data;
+                    break :blk runtime_value;
+                } else if (Data == @TypeOf(null)) {
+                    var runtime_value: ?u0 = null;
+                    break :blk runtime_value;
+                } else if (Data == void) {
+                    return if (depth == .Root) .NotFoundInContext else .ChainBroken;
                 } else {
-                    return Result{ .Resolved = try action_fn(action_param, out_writer, data) };
+                    break :blk data;
                 }
+            };
+
+            const path = if (comptime lambda.isLambdaContextImpl(Data)) null else path_iterator.next();
+
+            if (path) |current_path| {
+                return try recursiveFind(depth, @TypeOf(data), action_param, out_writer, ctx, current_path, path_iterator, index);
+            } else if (index) |current_index| {
+                return try iterateAt(action_param, out_writer, ctx, current_index);
+            } else {
+                return Result{ .Resolved = try action_fn(action_param, out_writer, ctx) };
             }
         }
 
@@ -259,29 +260,30 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
                     if (info.is_tuple) {
                         inline for (info.fields) |_, i| {
                             if (index == i) {
-                                return Result{
-                                    .Resolved = blk: {
+                                const item = comptime blk: {
 
-                                        // Tuple fields can be a comptime value
-                                        // We must convert it to a runtime type
-                                        const Data = @TypeOf(data[i]);
-                                        if (Data == comptime_int) {
-                                            const RuntimeInt = if (data[i] > 0) std.math.IntFittingRange(0, data[i]) else std.math.IntFittingRange(data[i], 0);
-                                            var runtime_value: RuntimeInt = data[i];
-                                            break :blk try action_fn(action_param, out_writer, runtime_value);
-                                        } else if (Data == comptime_float) {
-                                            var runtime_value: f64 = data[i];
-                                            break :blk try action_fn(action_param, out_writer, runtime_value);
-                                        } else if (Data == @TypeOf(null)) {
-                                            var runtime_value: ?u0 = null;
-                                            break :blk try action_fn(action_param, out_writer, runtime_value);
-                                        } else if (Data == void) {
-                                            return .IteratorConsumed;
-                                        } else {
-                                            break :blk try action_fn(action_param, out_writer, data[i]);
-                                        }
-                                    },
+                                    // Tuple fields can be a comptime value
+                                    // We must convert it to a runtime type
+                                    const Data = @TypeOf(data[i]);
+
+                                    if (Data == comptime_int) {
+                                        const RuntimeInt = if (data[i] > 0) std.math.IntFittingRange(0, data[i]) else std.math.IntFittingRange(data[i], 0);
+                                        var runtime_value: RuntimeInt = data[i];
+                                        break :blk runtime_value;
+                                    } else if (Data == comptime_float) {
+                                        var runtime_value: f64 = data[i];
+                                        break :blk runtime_value;
+                                    } else if (Data == @TypeOf(null)) {
+                                        var runtime_value: ?u0 = null;
+                                        break :blk runtime_value;
+                                    } else if (Data == void) {
+                                        return .IteratorConsumed;
+                                    } else {
+                                        break :blk data[i];
+                                    }
                                 };
+
+                                return Result{ .Resolved = try action_fn(action_param, out_writer, item) };
                             }
                         } else {
                             return .IteratorConsumed;
