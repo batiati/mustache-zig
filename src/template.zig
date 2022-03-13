@@ -302,6 +302,7 @@ inline fn parse(
 pub const TemplateOptions = struct {
     read_buffer_size: usize = 4 * 1024,
     owns_string: bool = true,
+    allow_lambdas: bool = true,
 };
 
 pub fn TemplateLoader(comptime options: TemplateOptions) type {
@@ -309,24 +310,28 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
         .source = .File,
         .owns_string = options.owns_string,
         .output = .Cached,
+        .allow_lambdas = options.allow_lambdas,
     });
 
     const StringCachedParser = parsing.Parser(.{
         .source = .String,
         .owns_string = options.owns_string,
         .output = .Cached,
+        .allow_lambdas = options.allow_lambdas,
     });
 
     const StringStreamedParser = parsing.Parser(.{
         .source = .String,
         .owns_string = options.owns_string,
         .output = .Streamed,
+        .allow_lambdas = options.allow_lambdas,
     });
 
     const FileStreamedParser = parsing.Parser(.{
         .source = .File,
         .owns_string = options.owns_string,
         .output = .Streamed,
+        .allow_lambdas = options.allow_lambdas,
     });
 
     return struct {
