@@ -20,7 +20,9 @@ const TextBlock = parsing.TextBlock;
 const Trimmer = parsing.Trimmer;
 const FileReader = parsing.FileReader;
 
-const RefCounter = @import("../mem.zig").RefCounter;
+const mem = @import("../mem.zig");
+const RefCounter = mem.RefCounter;
+const RefCounterHolder = mem.RefCounterHolder;
 
 pub const TextSource = enum { String, File };
 
@@ -190,6 +192,186 @@ pub fn TextScanner(comptime source: TextSource) type {
             }
         }
     };
+}
+
+// Aggregates multiple slices into a single buffer
+pub fn Bookmarking(comptime is_ref_counted: bool) type {
+    return struct {
+        const Self = @This();
+
+        ref_counters: if (is_ref_counted) RefCounterHolder else void = if (is_ref_counted) .{} else {},
+        segments: std.ArrayListUnmanaged(Segment) = .{},
+
+        const Segment = union(enum) {
+            First: struct {
+                slice: []const u8,
+                start: usize,
+            },
+
+            Next: []const u8,
+
+            pub inline fn ptr(self: Segment) [*]const u8 {
+                return switch (self) {
+                    .First => |value| value.slice.ptr,
+                    .Next => |value| value.ptr,
+                };
+            }
+        };
+
+        pub const Result = struct {
+            slice: []const u8,
+            ref_counter: RefCounter,
+        };
+
+        pub fn append(self: *Self, allocator: Allocator, ref_counter: RefCounter, slice: []const u8, start: usize) Allocator.Error!void {
+
+            // Same slice, no need to add a new segment
+            if (self.peek()) |last| if (last.ptr() == slice.ptr) return;
+
+            const segment: Segment = if (self.segments.items.len == 0) .{ .First = .{ .slice = slice, .start = start } } else .{ .Next = slice };
+            if (is_ref_counted) try self.ref_counters.add(allocator, ref_counter);
+            try self.segments.append(allocator, segment);
+        }
+
+        pub fn getResult(self: *Self, allocator: Allocator, end: usize) Allocator.Error!Result {
+            if (self.segments.items.len == 0) {
+                return Result{
+                    .slice = &.{},
+                    .ref_counter = RefCounter.nullRef,
+                };
+            } else if (self.segments.items.len == 1) {
+                assert(self.segments.items[0] == .First);
+
+                const first = self.segments.items[0].First;
+                assert(end >= first.start);
+                assert(end < first.slice.len);
+
+                const ref_counter = blk: {
+                    if (is_ref_counted) {
+                        var iterator = self.ref_counters.iterator();
+                        if (iterator.next()) |source_ref_counter| {
+                            break :blk source_ref_counter.ref();
+                        }
+                    }
+
+                    break :blk RefCounter.nullRef;
+                };
+
+                return Result{
+                    .slice = first.slice[first.start..end],
+                    .ref_counter = ref_counter,
+                };
+            } else {
+                var list = std.ArrayListUnmanaged(u8){};
+                errdefer list.deinit(allocator);
+
+                for (self.segments.items) |segment, i| {
+                    const is_last = i + 1 == self.segments.items.len;
+                    const slice = switch (segment) {
+                        .First => |value| if (is_last) value.slice[value.start..end] else value.slice[value.start..],
+                        .Next => |value| if (is_last) value[0..end] else value,
+                    };
+
+                    try list.appendSlice(allocator, slice);
+                }
+
+                const buffer = list.toOwnedSlice(allocator);
+                errdefer allocator.free(buffer);
+
+                return Result{
+                    .slice = buffer,
+                    .ref_counter = try RefCounter.init(allocator, buffer),
+                };
+            }
+        }
+
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            self.segments.deinit(allocator);
+            if (is_ref_counted) self.ref_counters.free(allocator);
+        }
+
+        fn peek(self: *Self) ?Segment {
+            if (self.segments.items.len == 0) {
+                return null;
+            } else {
+                return self.segments.items[self.segments.items.len - 1];
+            }
+        }
+    };
+}
+
+test "Bookmarking" {
+    const tester = struct {
+        pub fn doTheTest(comptime is_ref_counted: bool) !void {
+            const allocator = testing.allocator;
+
+            const slice_1 = try allocator.dupe(u8, "ABCDEFGHIJKLMNOPQRSTUVXYZ");
+            var ref_counter_1 = if (is_ref_counted) try RefCounter.init(allocator, slice_1) else RefCounter.nullRef;
+            defer if (is_ref_counted) ref_counter_1.free(allocator) else allocator.free(slice_1);
+
+            const slice_2 = try allocator.dupe(u8, "0123456789012345678901234567890");
+            var ref_counter_2 = if (is_ref_counted) try RefCounter.init(allocator, slice_2) else RefCounter.nullRef;
+            defer if (is_ref_counted) ref_counter_2.free(allocator) else allocator.free(slice_2);
+
+            const Impl = Bookmarking(is_ref_counted);
+
+            {
+                // Empty
+                var aggregator = Impl{};
+                defer aggregator.deinit(allocator);
+
+                var result = try aggregator.getResult(allocator, 0);
+                defer result.ref_counter.free(allocator);
+
+                try testing.expectEqualStrings("", result.slice);
+            }
+
+            {
+                // Single call
+                var aggregator = Impl{};
+                defer aggregator.deinit(allocator);
+
+                try aggregator.append(allocator, ref_counter_1, slice_1, 5);
+
+                var result = try aggregator.getResult(allocator, 8);
+                defer result.ref_counter.free(allocator);
+
+                try testing.expectEqualStrings("FGH", result.slice);
+            }
+
+            {
+                // Multiple call
+                var aggregator = Impl{};
+                defer aggregator.deinit(allocator);
+
+                try aggregator.append(allocator, ref_counter_1, slice_1, 5);
+                try aggregator.append(allocator, ref_counter_1, slice_1, 8);
+                try aggregator.append(allocator, ref_counter_1, slice_1, 10);
+
+                var result = try aggregator.getResult(allocator, 12);
+                defer result.ref_counter.free(allocator);
+
+                try testing.expectEqualStrings("FGHIJKL", result.slice);
+            }
+
+            {
+                // Multiple slices
+                var aggregator = Impl{};
+                defer aggregator.deinit(allocator);
+
+                try aggregator.append(allocator, ref_counter_1, slice_1, 18);
+                try aggregator.append(allocator, ref_counter_2, slice_2, 0);
+
+                var result = try aggregator.getResult(allocator, 5);
+                defer result.ref_counter.free(allocator);
+
+                try testing.expectEqualStrings("STUVXYZ01234", result.slice);
+            }
+        }
+    };
+
+    try tester.doTheTest(true);
+    try tester.doTheTest(false);
 }
 
 const testing = std.testing;

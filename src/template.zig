@@ -29,6 +29,11 @@ pub const Section = struct {
     content: ?[]const Element,
 };
 
+pub const InvertedSection = struct {
+    key: []const u8,
+    content: ?[]const Element,
+};
+
 pub const Partial = struct {
     key: []const u8,
     indentation: ?[]const u8,
@@ -128,7 +133,7 @@ pub const Element = union(enum) {
     ///  
     ///  Section and End Section tags SHOULD be treated as standalone when appropriate.
     Section: Section,
-    InvertedSection: Section,
+    InvertedSection: InvertedSection,
 
     ///
     /// Partial tags are used to expand an external template into the current

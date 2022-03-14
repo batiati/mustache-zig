@@ -99,7 +99,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                         .Interpolation => |path| try self.interpolate(stack, path, .Escaped),
                         .UnescapedInterpolation => |path| try self.interpolate(stack, path, .Unescaped),
                         .Section => |section| {
-                            if (try getIterator(stack, section)) |*iterator| {
+                            if (try getIterator(stack, section.key)) |*iterator| {
                                 if (iterator.is_lambda) {
                                     const expand_result = try iterator.context.expandLambda(self.allocator, stack, section.key, .Unescaped);
                                     assert(expand_result == .Lambda);
@@ -118,7 +118,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                             }
                         },
                         .InvertedSection => |section| {
-                            var iterator = try getIterator(stack, section);
+                            var iterator = try getIterator(stack, section.key);
 
                             // Lambdas aways evaluate as "true" for inverted section
                             // Broken paths, empty lists, null and false evaluates as "false"
@@ -169,11 +169,11 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             }
         }
 
-        fn getIterator(stack: *ContextStack, section: Section) (Allocator.Error || Writer.Error)!?Context(Writer).Iterator {
+        fn getIterator(stack: *ContextStack, path: []const u8) (Allocator.Error || Writer.Error)!?Context(Writer).Iterator {
             var level: ?*ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {
-                switch (current.ctx.iterator(section.key)) {
+                switch (current.ctx.iterator(path)) {
                     .Field => |found| return found,
 
                     .Lambda => |found| return found,

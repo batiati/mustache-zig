@@ -11,6 +11,8 @@ pub const RefCounter = struct {
         buffer: []const u8,
     };
 
+    pub const nullRef = RefCounter{};
+
     state: ?*State = null,
 
     pub fn init(allocator: Allocator, buffer: []const u8) Allocator.Error!RefCounter {
@@ -29,7 +31,7 @@ pub const RefCounter = struct {
             state.counter += 1;
             return .{ .state = state };
         } else {
-            return .{};
+            return RefCounter.nullRef;
         }
     }
 
@@ -91,7 +93,19 @@ pub const RefCounter = struct {
 };
 
 pub const RefCounterHolder = struct {
-    group: std.AutoHashMapUnmanaged(usize, void) = .{},
+    const HashMap = std.AutoHashMapUnmanaged(usize, void);
+    group: HashMap = .{},
+
+    pub const Iterator = struct {
+        hash_map_iterator: HashMap.KeyIterator,
+
+        pub fn next(self: *Iterator) ?RefCounter {
+            return if (self.hash_map_iterator.next()) |item| blk: {
+                var state = @intToPtr(*RefCounter.State, item.*);
+                break :blk RefCounter{ .state = state };
+            } else null;
+        }
+    };
 
     pub fn add(self: *RefCounterHolder, allocator: Allocator, ref_counter: RefCounter) Allocator.Error!void {
         if (ref_counter.state) |state| {
@@ -102,16 +116,20 @@ pub const RefCounterHolder = struct {
         }
     }
 
+    pub fn iterator(self: *const RefCounterHolder) Iterator {
+        return Iterator{
+            .hash_map_iterator = self.group.keyIterator(),
+        };
+    }
+
     pub fn free(self: *RefCounterHolder, allocator: Allocator) void {
         defer {
             self.group.deinit(allocator);
             self.group = .{};
         }
 
-        var it = self.group.keyIterator();
-        while (it.next()) |item| {
-            var state = @intToPtr(*RefCounter.State, item.*);
-            var ref_counter = RefCounter{ .state = state };
+        var it = self.iterator();
+        while (it.next()) |*ref_counter| {
             ref_counter.free(allocator);
         }
     }
