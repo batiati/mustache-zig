@@ -1,11 +1,8 @@
 ## Zig + git + codecov + kcov
 FROM ubuntu:20.04
-ARG ZIG_VERSION=0.9.1
-ARG ZIG_URL=https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz
-ARG ZIG_SHA256=be8da632c1d3273f766b69244d80669fe4f5e27798654681d77c992f17c237d7
+ARG ZIG_JSON=https://ziglang.org/download/index.json
 ARG CODECOV=https://uploader.codecov.io/latest/linux/codecov
 ARG TARGET_DIR=/usr/local/bin/zig
-
 WORKDIR /usr/src
 
 RUN apt-get update && \
@@ -15,8 +12,10 @@ RUN apt-get update && \
 		xz-utils \
 		git \
 		kcov \
+		jq \
 	&& \
-	curl -o zig.tar.xz "$ZIG_URL" && \
+	export ZIG_URL=$(curl "$ZIG_JSON" | jq '."master"."x86_64-linux"."tarball"' --raw-output)
+	curl "$ZIG_URL" -o zig.tar.xz  && \
 	mkdir -p "$TARGET_DIR"  && \
 	tar -Jxf zig.tar.xz -C "$TARGET_DIR" --strip-components=1 && \
 	rm zig.tar.xz && \
