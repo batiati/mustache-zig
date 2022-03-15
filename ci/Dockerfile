@@ -14,7 +14,7 @@ RUN apt-get update && \
 		kcov \
 		jq \
 	&& \
-	export ZIG_URL=$(curl "$ZIG_JSON" | jq '."master"."x86_64-linux"."tarball"' --raw-output)
+	export ZIG_URL=$(curl "$ZIG_JSON" | jq '."master"."x86_64-linux"."tarball"' --raw-output) && \
 	curl "$ZIG_URL" -o zig.tar.xz  && \
 	mkdir -p "$TARGET_DIR"  && \
 	tar -Jxf zig.tar.xz -C "$TARGET_DIR" --strip-components=1 && \
