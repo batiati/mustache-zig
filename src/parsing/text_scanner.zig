@@ -195,13 +195,11 @@ pub fn TextScanner(comptime source: TextSource) type {
     };
 }
 
-
 ///
 /// Implements a "bookmark", allowing to return the raw string content between two tags
 /// This is a simple operation when parsing from a single slice, but requires
 /// allocation when reading from a file with chunks from multiple buffers.
 fn Bookmark(comptime source: TextSource) type {
-
     const Result = struct {
         slice: []const u8,
         ref_counter: RefCounter,
@@ -352,9 +350,9 @@ fn Bookmark(comptime source: TextSource) type {
         }
     };
 
-    return switch(source) {
-      .String => StringBookmark,
-      .File => FileBookmark,  
+    return switch (source) {
+        .String => StringBookmark,
+        .File => FileBookmark,
     };
 }
 
@@ -414,8 +412,7 @@ test "Bookmarking" {
                 try testing.expectEqualStrings("FGHIJKL", result.slice);
             }
 
-            if (source == .File)
-            {
+            if (source == .File) {
                 // Multiple slices (only possible when parsing from files, each buffer read is a slice)
                 var aggregator = Impl{};
                 defer aggregator.deinit(allocator);

@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const TypeInfo = std.builtin.TypeInfo;
+const Type = std.builtin.Type;
 const meta = std.meta;
 
 const assert = std.debug.assert;
@@ -130,7 +130,7 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
     };
 
     const argIs = struct {
-        fn _argIs(comptime arg: TypeInfo.FnArg, comptime types: []const type) bool {
+        fn _argIs(comptime arg: Type.FnArg, comptime types: []const type) bool {
             inline for (types) |compare_to| {
                 if (arg.arg_type) |arg_type| {
                     if (arg_type == compare_to) return true;

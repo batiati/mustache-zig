@@ -1,6 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const TypeInfo = std.builtin.TypeInfo;
+const Type = std.builtin.Type;
 const trait = std.meta.trait;
 
 const context = @import("context.zig");
@@ -112,7 +112,7 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
         ) TError!Result {
             const Data = @TypeOf(data);
 
-            const ctx = comptime blk: {
+            const ctx = blk: {
                 if (Data == comptime_int) {
                     const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
                     var runtime_value: RuntimeInt = data;
@@ -238,19 +238,18 @@ fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) typ
             path_iterator: *std.mem.TokenIterator(u8),
             index: ?usize,
         ) TError!Result {
-            inline for (std.meta.declarations(TValue)) |decl| {
-                switch (decl.data) {
-                    .Fn => |fn_decl| {
-                        if (std.mem.eql(u8, path, decl.name)) {
-                            if (comptime decl.is_pub and lambda.isValidLambdaFunction(TValue, fn_decl.fn_type)) {
-                                const bound_fn = @field(TValue, decl.name);
-                                return try getLambda(action_param, out_writer, data, bound_fn, path_iterator, index);
-                            } else {
-                                return .ChainBroken;
-                            }
-                        }
-                    },
-                    else => {},
+            const decls = comptime std.meta.declarations(TValue);
+            inline for (decls) |decl| {
+                const has_fn = comptime decl.is_pub and trait.hasFn(decl.name)(TValue);
+                if (has_fn) {
+                    const bound_fn = @field(TValue, decl.name);
+                    const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
+                    if (std.mem.eql(u8, path, decl.name)) {
+                        return if (is_valid_lambda)
+                            try getLambda(action_param, out_writer, data, bound_fn, path_iterator, index)
+                        else
+                            .ChainBroken;
+                    }
                 }
             } else {
                 return if (depth == .Root) .NotFoundInContext else .ChainBroken;
@@ -449,14 +448,14 @@ inline fn interpolateAction(
         .Enum => return try escapeWrite(out_writer, @tagName(value), escape),
 
         .Pointer => |info| switch (info.size) {
-            TypeInfo.Pointer.Size.One => return try interpolateAction(escape, out_writer, value.*),
-            TypeInfo.Pointer.Size.Slice => {
+            Type.Pointer.Size.One => return try interpolateAction(escape, out_writer, value.*),
+            Type.Pointer.Size.Slice => {
                 if (info.child == u8) {
                     return try escapeWrite(out_writer, value, escape);
                 }
             },
-            TypeInfo.Pointer.Size.Many => @compileError("[*] pointers not supported"),
-            TypeInfo.Pointer.Size.C => @compileError("[*c] pointers not supported"),
+            Type.Pointer.Size.Many => @compileError("[*] pointers not supported"),
+            Type.Pointer.Size.C => @compileError("[*c] pointers not supported"),
         },
         .Array => |info| {
             if (info.child == u8) {
