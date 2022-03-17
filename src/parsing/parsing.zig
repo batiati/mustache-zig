@@ -28,6 +28,7 @@ pub const TextBlock = @import("TextBlock.zig");
 pub const TextScanner = @import("text_scanner.zig").TextScanner;
 pub const TextSource = @import("text_scanner.zig").TextSource;
 pub const Trimmer = @import("trimmer.zig").Trimmer;
+
 pub const FileReader = @import("FileReader.zig");
 
 pub const Delimiters = struct {
@@ -422,10 +423,15 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                     .Parent,
                     .Block,
                     => {
+                        try self.text_scanner.beginBookmark(self.gpa);
                         self.current_level = try self.current_level.nextLevel(arena);
                     },
 
                     .CloseSection => {
+                        if (try self.text_scanner.endBookmark(self.gpa)) |*bookmark| {
+                            bookmark.ref_counter.free(self.gpa);
+                        }
+
                         self.current_level = self.current_level.endLevel(arena) catch |err| {
                             return self.setLastError(err, text_block, null);
                         };

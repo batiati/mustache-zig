@@ -35,12 +35,20 @@ pub fn TextScanner(comptime source: TextSource) type {
             ExpectingMark: MarkType,
         };
 
+        const Bookmark = struct {
+            prev: ?*@This(),
+            index: usize,
+        };
+
         reader: if (source == .File) *FileReader else void,
         ref_counter: if (source == .File) RefCounter else void = if (source == .File) .{} else {},
+        preserve: if (source == .File) ?usize else void = if (source == .File) null else {},
 
         content: []const u8 = &.{},
         index: usize = 0,
         block_index: usize = 0,
+        bookmark: ?*Bookmark = null,
+
         state: State = .{ .ExpectingMark = .Starting },
         lin: u32 = 1,
         col: u32 = 1,
@@ -66,6 +74,8 @@ pub fn TextScanner(comptime source: TextSource) type {
             if (source == .File) {
                 self.ref_counter.free(allocator);
                 self.reader.deinit(allocator);
+
+                freeBookmarks(allocator, self.bookmark);
             }
         }
 
@@ -80,7 +90,31 @@ pub fn TextScanner(comptime source: TextSource) type {
         fn requestContent(self: *Self, allocator: Allocator) !void {
             if (source == .File) {
                 if (!self.reader.finished()) {
-                    const prepend = self.content[self.block_index..];
+
+                    //
+                    // Requesting a new buffer must preserve some parts of the current slice that are still needed
+                    const adjust: struct { off_set: usize, preserve: @TypeOf(self.preserve) } = adjust: {
+                        if (if (source == .File) self.preserve else null) |preserve| {
+                            if (preserve < self.block_index) {
+                                break :adjust .{
+                                    .off_set = preserve,
+                                    .preserve = 0,
+                                };
+                            } else {
+                                break :adjust .{
+                                    .off_set = self.block_index,
+                                    .preserve = preserve - self.block_index,
+                                };
+                            }
+                        } else {
+                            break :adjust .{
+                                .off_set = self.block_index,
+                                .preserve = if (source == .File) null else {},
+                            };
+                        }
+                    };
+
+                    const prepend = self.content[adjust.off_set..];
 
                     const read = try self.reader.read(allocator, prepend);
                     errdefer read.ref_counter.free(allocator);
@@ -89,8 +123,13 @@ pub fn TextScanner(comptime source: TextSource) type {
                     self.ref_counter = read.ref_counter;
 
                     self.content = read.content;
-                    self.index -= self.block_index;
-                    self.block_index = 0;
+                    self.index -= adjust.off_set;
+                    self.block_index -= adjust.off_set;
+                    if (source == .File) {
+
+                        adjustBookmarkOffset(self.bookmark, adjust.off_set);
+                        self.preserve = adjust.preserve;
+                    }
                 }
             }
         }
@@ -170,6 +209,60 @@ pub fn TextScanner(comptime source: TextSource) type {
             }
         }
 
+        pub fn beginBookmark(self: *Self, allocator: Allocator) Allocator.Error!void {
+            var bookmark = try allocator.create(Bookmark);
+            bookmark.* = .{
+                .prev = self.bookmark,
+                .index = self.index,
+            };
+
+            self.bookmark = bookmark;
+            if (source == .File) {
+                if (self.preserve) |preserve| {
+                    assert(preserve <= self.index);
+                } else {
+                    self.preserve = self.index;
+                }
+            }
+        }
+
+        pub fn endBookmark(self: *Self, allocator: Allocator) Allocator.Error!?FileReader.Result {
+            if (self.bookmark) |bookmark| {
+                defer {
+                    self.bookmark = bookmark.prev;
+                    if (source == .File and bookmark.prev == null) {
+                        self.preserve = null;
+                    } 
+                    allocator.destroy(bookmark);
+                }
+
+                assert(bookmark.index < self.content.len);
+                assert(bookmark.index <= self.index);
+
+                return FileReader.Result{
+                    .content = if (self.index < self.content.len) self.content[bookmark.index..self.index] else self.content[bookmark.index..],
+                    .ref_counter = if (source == .File) self.ref_counter.ref() else .{},
+                };
+            } else {
+                return null;
+            }
+        }
+
+        fn adjustBookmarkOffset(bookmark: ?*Bookmark, off_set: usize) void {
+            if (bookmark) |current| {
+                assert(current.index >= off_set);
+                current.index -= off_set;
+                adjustBookmarkOffset(current.prev, off_set);
+            }
+        }
+
+        fn freeBookmarks(allocator: Allocator, bookmark: ?*Bookmark) void {
+            if (bookmark) |current| {
+                freeBookmarks(allocator, current.prev);
+                allocator.destroy(current);
+            }
+        }
+
         fn matchTagMark(self: *Self, expected_mark: MarkType) ?Mark {
             const slice = self.content[self.index..];
             return switch (expected_mark) {
@@ -193,243 +286,6 @@ pub fn TextScanner(comptime source: TextSource) type {
             }
         }
     };
-}
-
-///
-/// Implements a "bookmark", allowing to return the raw string content between two tags
-/// This is a simple operation when parsing from a single slice, but requires
-/// allocation when reading from a file with chunks from multiple buffers.
-fn Bookmark(comptime source: TextSource) type {
-    const Result = struct {
-        slice: []const u8,
-        ref_counter: RefCounter,
-    };
-
-    const StringBookmark = struct {
-        const Self = @This();
-
-        pub const Result = Result;
-
-        slice: ?[]const u8 = null,
-        start: usize = 0,
-        ref_counter: RefCounter = RefCounter.nullRef,
-
-        pub fn append(self: *Self, allocator: Allocator, ref_counter: RefCounter, slice: []const u8, start: usize) Allocator.Error!void {
-
-            // Just for keeping the same interface
-            _ = allocator;
-
-            if (self.slice) |current_slice| {
-                assert(current_slice.ptr == slice.ptr);
-                assert(start >= self.start);
-            } else {
-                self.slice = slice;
-                self.start = start;
-                self.ref_counter = ref_counter.ref();
-            }
-        }
-
-        pub fn getResult(self: *Self, allocator: Allocator, end: usize) Allocator.Error!Result {
-
-            // Just for keeping the same interface
-            _ = allocator;
-
-            if (self.slice) |current_slice| {
-                assert(end >= self.start);
-                return Result{
-                    .slice = current_slice[self.start..end],
-                    .ref_counter = self.ref_counter.ref(),
-                };
-            } else {
-                return Result{
-                    .slice = &.{},
-                    .ref_counter = RefCounter.nullRef,
-                };
-            }
-        }
-
-        pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.ref_counter.free(allocator);
-        }
-    };
-
-    const FileBookmark = struct {
-        const Self = @This();
-
-        pub const Result = Result;
-
-        ref_counters: RefCounterHolder = .{},
-        segments: std.ArrayListUnmanaged(Segment) = .{},
-
-        const Segment = union(enum) {
-            First: struct {
-                slice: []const u8,
-                start: usize,
-            },
-
-            Next: []const u8,
-
-            pub inline fn ptr(self: Segment) [*]const u8 {
-                return switch (self) {
-                    .First => |value| value.slice.ptr,
-                    .Next => |value| value.ptr,
-                };
-            }
-        };
-
-        pub fn append(self: *Self, allocator: Allocator, ref_counter: RefCounter, slice: []const u8, start: usize) Allocator.Error!void {
-
-            // Same slice, no need to add a new segment
-            if (self.peek()) |last| if (last.ptr() == slice.ptr) return;
-
-            const segment: Segment = if (self.segments.items.len == 0) .{ .First = .{ .slice = slice, .start = start } } else .{ .Next = slice };
-            try self.ref_counters.add(allocator, ref_counter);
-            try self.segments.append(allocator, segment);
-        }
-
-        pub fn getResult(self: *Self, allocator: Allocator, end: usize) Allocator.Error!Result {
-            if (self.segments.items.len == 0) {
-                return Result{
-                    .slice = &.{},
-                    .ref_counter = RefCounter.nullRef,
-                };
-            } else if (self.segments.items.len == 1) {
-                assert(self.segments.items[0] == .First);
-
-                const first = self.segments.items[0].First;
-                assert(end >= first.start);
-                assert(end < first.slice.len);
-
-                const ref_counter = blk: {
-                    var iterator = self.ref_counters.iterator();
-                    break :blk if (iterator.next()) |source_ref_counter|
-                        source_ref_counter.ref()
-                    else
-                        RefCounter.nullRef;
-                };
-
-                return Result{
-                    .slice = first.slice[first.start..end],
-                    .ref_counter = ref_counter,
-                };
-            } else {
-                var list = std.ArrayListUnmanaged(u8){};
-                errdefer list.deinit(allocator);
-
-                for (self.segments.items) |segment, i| {
-                    const is_last = i + 1 == self.segments.items.len;
-                    const slice = switch (segment) {
-                        .First => |value| if (is_last) value.slice[value.start..end] else value.slice[value.start..],
-                        .Next => |value| if (is_last) value[0..end] else value,
-                    };
-
-                    try list.appendSlice(allocator, slice);
-                }
-
-                const buffer = list.toOwnedSlice(allocator);
-                errdefer allocator.free(buffer);
-
-                return Result{
-                    .slice = buffer,
-                    .ref_counter = try RefCounter.init(allocator, buffer),
-                };
-            }
-        }
-
-        pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.segments.deinit(allocator);
-            self.ref_counters.free(allocator);
-        }
-
-        fn peek(self: *Self) ?Segment {
-            if (self.segments.items.len == 0) {
-                return null;
-            } else {
-                return self.segments.items[self.segments.items.len - 1];
-            }
-        }
-    };
-
-    return switch (source) {
-        .String => StringBookmark,
-        .File => FileBookmark,
-    };
-}
-
-test "Bookmarking" {
-    const tester = struct {
-        pub fn doTheTest(comptime source: TextSource) !void {
-            const allocator = testing.allocator;
-
-            const is_ref_counted = source == .File;
-
-            const slice_1 = try allocator.dupe(u8, "ABCDEFGHIJKLMNOPQRSTUVXYZ");
-            var ref_counter_1 = if (is_ref_counted) try RefCounter.init(allocator, slice_1) else RefCounter.nullRef;
-            defer if (is_ref_counted) ref_counter_1.free(allocator) else allocator.free(slice_1);
-
-            const slice_2 = try allocator.dupe(u8, "0123456789012345678901234567890");
-            var ref_counter_2 = if (is_ref_counted) try RefCounter.init(allocator, slice_2) else RefCounter.nullRef;
-            defer if (is_ref_counted) ref_counter_2.free(allocator) else allocator.free(slice_2);
-
-            const Impl = Bookmark(source);
-
-            {
-                // Empty
-                var aggregator = Impl{};
-                defer aggregator.deinit(allocator);
-
-                var result = try aggregator.getResult(allocator, 0);
-                defer result.ref_counter.free(allocator);
-
-                try testing.expectEqualStrings("", result.slice);
-            }
-
-            {
-                // Single call
-                var aggregator = Impl{};
-                defer aggregator.deinit(allocator);
-
-                try aggregator.append(allocator, ref_counter_1, slice_1, 5);
-
-                var result = try aggregator.getResult(allocator, 8);
-                defer result.ref_counter.free(allocator);
-
-                try testing.expectEqualStrings("FGH", result.slice);
-            }
-
-            {
-                // Multiple call
-                var aggregator = Impl{};
-                defer aggregator.deinit(allocator);
-
-                try aggregator.append(allocator, ref_counter_1, slice_1, 5);
-                try aggregator.append(allocator, ref_counter_1, slice_1, 8);
-                try aggregator.append(allocator, ref_counter_1, slice_1, 10);
-
-                var result = try aggregator.getResult(allocator, 12);
-                defer result.ref_counter.free(allocator);
-
-                try testing.expectEqualStrings("FGHIJKL", result.slice);
-            }
-
-            if (source == .File) {
-                // Multiple slices (only possible when parsing from files, each buffer read is a slice)
-                var aggregator = Impl{};
-                defer aggregator.deinit(allocator);
-
-                try aggregator.append(allocator, ref_counter_1, slice_1, 18);
-                try aggregator.append(allocator, ref_counter_2, slice_2, 0);
-
-                var result = try aggregator.getResult(allocator, 5);
-                defer result.ref_counter.free(allocator);
-
-                try testing.expectEqualStrings("STUVXYZ01234", result.slice);
-            }
-        }
-    };
-
-    try tester.doTheTest(.String);
-    try tester.doTheTest(.File);
 }
 
 test "basic tests" {
