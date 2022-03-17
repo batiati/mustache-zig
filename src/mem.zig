@@ -5,6 +5,11 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 const testing = std.testing;
 
+pub const RefCountedSlice = struct {
+    content: []const u8,
+    ref_counter: RefCounter,
+};
+
 pub const RefCounter = struct {
     const State = struct {
         counter: u32,

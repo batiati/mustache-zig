@@ -270,11 +270,14 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                             const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
                             errdefer if (options.owns_string) if (indentation) |indentation_value| self.gpa.free(indentation_value);
 
+                            const inner_text: ?[]const u8 = if (node.inner_text) |*node_inner_text| try self.dupe(node_inner_text.ref_counter, node_inner_text.content) else null;
+                            errdefer if (options.owns_string) if (inner_text) |inner_text_value| self.gpa.free(inner_text_value);
+
                             break :blk switch (block_type) {
                                 .Interpolation => Element{ .Interpolation = key },
                                 .UnescapedInterpolation => Element{ .UnescapedInterpolation = key },
-                                .Section => Element{ .Section = .{ .key = key, .content = content } },
                                 .InvertedSection => Element{ .InvertedSection = .{ .key = key, .content = content } },
+                                .Section => Element{ .Section = .{ .key = key, .content = content, .inner_text = inner_text } },
                                 .Partial => Element{ .Partial = .{ .key = key, .indentation = indentation } },
                                 .Parent => Element{ .Parent = .{ .key = key, .indentation = indentation, .content = content } },
                                 .Block => Element{ .Block = .{ .key = key, .content = content } },
@@ -418,23 +421,29 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                         }
                     },
 
-                    .Section,
+                    .Section => {
+                        try self.text_scanner.beginBookmark(self.gpa);
+                        self.current_level = try self.current_level.nextLevel(arena);
+                    },
                     .InvertedSection,
                     .Parent,
                     .Block,
                     => {
-                        try self.text_scanner.beginBookmark(self.gpa);
                         self.current_level = try self.current_level.nextLevel(arena);
                     },
 
                     .CloseSection => {
-                        if (try self.text_scanner.endBookmark(self.gpa)) |*bookmark| {
-                            bookmark.ref_counter.free(self.gpa);
-                        }
 
-                        self.current_level = self.current_level.endLevel(arena) catch |err| {
+                        const ret = self.current_level.endLevel(arena) catch |err| {
                             return self.setLastError(err, text_block, null);
                         };
+
+                        self.current_level = ret.level;
+                        if (ret.parent_node.block_type == .Section) {
+                            if (try self.text_scanner.endBookmark(self.gpa)) |bookmark| {
+                                ret.parent_node.inner_text = bookmark;
+                            }
+                        }                        
 
                         // Restore parent delimiters
 

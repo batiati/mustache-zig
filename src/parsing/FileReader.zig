@@ -11,15 +11,13 @@ const FileError = OpenError || ReadError;
 
 pub const Error = Allocator.Error || FileError;
 
-const RefCounter = @import("../mem.zig").RefCounter;
+const mem = @import("../mem.zig");
+const RefCounter = mem.RefCounter;
+const RefCountedSlice = mem.RefCountedSlice;
+
 const File = std.fs.File;
 
 const Self = @This();
-
-pub const Result = struct {
-    content: []const u8,
-    ref_counter: RefCounter,
-};
 
 file: File,
 eof: bool = false,
@@ -40,7 +38,7 @@ pub fn init(allocator: Allocator, file: File, read_buffer_size: usize) Allocator
     return self;
 }
 
-pub fn read(self: *Self, allocator: Allocator, prepend: []const u8) Error!Result {
+pub fn read(self: *Self, allocator: Allocator, prepend: []const u8) Error!RefCountedSlice {
     var buffer = try allocator.alloc(u8, self.read_buffer_size + prepend.len);
     errdefer allocator.free(buffer);
 
@@ -60,7 +58,7 @@ pub fn read(self: *Self, allocator: Allocator, prepend: []const u8) Error!Result
         self.eof = false;
     }
 
-    return Result{
+    return RefCountedSlice{
         .content = buffer,
         .ref_counter = try RefCounter.init(allocator, buffer),
     };

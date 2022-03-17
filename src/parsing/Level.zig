@@ -14,6 +14,11 @@ const Node = parsing.Node;
 const assert = std.debug.assert;
 const testing = std.testing;
 
+pub const EndLevel = struct { 
+    level: *Self, 
+    parent_node: *Node, 
+};
+
 const Self = @This();
 
 parent: ?*Self,
@@ -56,14 +61,17 @@ pub fn nextLevel(self: *Self, arena: Allocator) Allocator.Error!*Self {
     return next_level;
 }
 
-pub fn endLevel(self: *Self, arena: Allocator) ParseError!*Self {
+pub fn endLevel(self: *Self, arena: Allocator) ParseError!EndLevel {
     var prev_level = self.parent orelse return ParseError.UnexpectedCloseSection;
     var parent_node = prev_level.current_node orelse return ParseError.UnexpectedCloseSection;
 
     parent_node.children = self.list.toOwnedSlice(arena);
-
     prev_level.current_node = self.current_node;
-    return prev_level;
+
+    return EndLevel { 
+        .level = prev_level,
+        .parent_node = parent_node
+    };
 }
 
 test "Level" {
@@ -103,8 +111,8 @@ test "Level" {
     try testing.expect(n4.prev_node != null);
     try testing.expectEqual(n3, n4.prev_node.?);
 
-    var restore_level = level2.endLevel(allocator);
-    try testing.expectEqual(restore_level, level);
+    var restore_level = try level2.endLevel(allocator);
+    try testing.expectEqual(restore_level.level, level);
     try testing.expectEqual(level.current_node, n4);
 
     try testing.expect(n2.children != null);

@@ -5,6 +5,9 @@ const parsing = @import("parsing.zig");
 const TextBlock = parsing.TextBlock;
 const BlockType = parsing.BlockType;
 
+const mem = @import("../mem.zig");
+const RefCountedSlice = mem.RefCountedSlice;
+
 const assert = std.debug.assert;
 const testing = std.testing;
 
@@ -12,6 +15,7 @@ const Self = @This();
 
 block_type: BlockType,
 text_block: TextBlock,
+inner_text: ?RefCountedSlice = null, 
 prev_node: ?*Self = null,
 children: ?[]*Self = null,
 
@@ -31,6 +35,9 @@ pub fn unRefMany(allocator: Allocator, nodes: ?[]*Self) void {
 /// This functions unref the counter and free the buffer if no other Node references it
 pub fn unRef(self: *Self, allocator: Allocator) void {
     self.text_block.unRef(allocator);
+    if (self.inner_text) |*inner_text| {
+        inner_text.ref_counter.free(allocator);
+    }
 }
 
 pub fn trimStandAlone(self: *Self) void {
