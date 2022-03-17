@@ -480,6 +480,7 @@ const tests = struct {
         _ = sections;
         _ = inverted;
         _ = partials;
+        _ = lambdas;
     }
 
     pub fn getTemplate(template_text: []const u8) !TemplateLoader(.{}) {
@@ -2213,6 +2214,69 @@ const tests = struct {
         }
     };
 
+    const lambdas = struct {
+
+        // Lambdas used for sections should receive the raw section string.
+        test "Sections" {
+
+            const template_text = "<{{#lambda}}{{x}}{{/lambda}}>";
+
+           var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("<", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+            try testing.expectEqualStrings("lambda", elements[1].Section.key);
+            try testing.expect(elements[1].Section.inner_text != null);
+            try testing.expectEqualStrings("{{x}}", elements[1].Section.inner_text.?);
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(">", elements[2].StaticText);            
+        }
+
+        // Lambdas used for sections should receive the raw section string.
+        test "Nested Sections" {
+
+            const template_text = "<{{#lambda}}{{#lambda2}}{{x}}{{/lambda2}}{{/lambda}}>";
+
+           var template = try getTemplate(template_text);
+            defer template.deinit();
+
+            const elements = template.result.Elements;
+
+            try testing.expectEqual(@as(usize, 3), elements.len);
+
+            try testing.expectEqual(Element.StaticText, elements[0]);
+            try testing.expectEqualStrings("<", elements[0].StaticText);
+
+            try testing.expectEqual(Element.Section, elements[1]);
+
+            const section = elements[1].Section;
+            try testing.expectEqualStrings("lambda", section.key);
+            try testing.expect(section.inner_text != null);
+            try testing.expectEqualStrings("{{#lambda2}}{{x}}{{/lambda2}}", section.inner_text.?);
+
+            try testing.expect(section.content != null);
+            try testing.expectEqual(@as(usize, 1), section.content.?.len);
+            try testing.expectEqual(Element.Section, section.content.?[0]);
+
+            const sub_section = section.content.?[0].Section;
+
+            try testing.expectEqualStrings("lambda2", sub_section.key);
+            try testing.expect(sub_section.inner_text != null);
+            try testing.expectEqualStrings("{{x}}", sub_section.inner_text.?);            
+
+            try testing.expectEqual(Element.StaticText, elements[2]);
+            try testing.expectEqualStrings(">", elements[2].StaticText);            
+        }        
+    };
+
     test "Basic DOM test" {
         const template_text =
             \\{{! Comments block }}
@@ -2370,7 +2434,6 @@ const tests = struct {
     }
 
     test "Large DOM File test" {
-        if (true) return error.SkipZigTest;
         
         const template_text =
             \\{{! Comments block }}
@@ -2408,9 +2471,10 @@ const tests = struct {
         // Must be at least 10MB big
         try testing.expect(size > 10 * 1024 * 1024);
 
-        // 16KB should be enough memory for this job
+        // 32KB should be enough memory for this job
+        // 16KB if we don't need to support lambdas 😅
         var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){
-            .requested_memory_limit = 16 * 1024,
+            .requested_memory_limit = 32 * 1024,
         };
         defer _ = plenty_of_memory.deinit();
 
