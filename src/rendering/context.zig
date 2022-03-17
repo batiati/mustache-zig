@@ -1,6 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Type = std.builtin.Type;
 const meta = std.meta;
 const trait = std.meta.trait;
 

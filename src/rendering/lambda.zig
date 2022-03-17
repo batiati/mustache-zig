@@ -1,6 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Type = std.builtin.Type;
 const meta = std.meta;
 
 const assert = std.debug.assert;
@@ -128,6 +127,10 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
         .Fn => |info| info,
         else => return false,
     };
+
+      
+    //TODO: deprecated
+    const Type = std.builtin.TypeInfo;
 
     const argIs = struct {
         fn _argIs(comptime arg: Type.FnArg, comptime types: []const type) bool {

@@ -1,6 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Type = std.builtin.Type;
 const trait = std.meta.trait;
 
 const context = @import("context.zig");
@@ -448,14 +447,14 @@ inline fn interpolateAction(
         .Enum => return try escapeWrite(out_writer, @tagName(value), escape),
 
         .Pointer => |info| switch (info.size) {
-            Type.Pointer.Size.One => return try interpolateAction(escape, out_writer, value.*),
-            Type.Pointer.Size.Slice => {
+            .One => return try interpolateAction(escape, out_writer, value.*),
+            .Slice => {
                 if (info.child == u8) {
                     return try escapeWrite(out_writer, value, escape);
                 }
             },
-            Type.Pointer.Size.Many => @compileError("[*] pointers not supported"),
-            Type.Pointer.Size.C => @compileError("[*c] pointers not supported"),
+            .Many => @compileError("[*] pointers not supported"),
+            .C => @compileError("[*c] pointers not supported"),
         },
         .Array => |info| {
             if (info.child == u8) {
