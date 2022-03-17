@@ -47,7 +47,10 @@ pub fn TextScanner(comptime source: TextSource) type {
         content: []const u8 = &.{},
         index: usize = 0,
         block_index: usize = 0,
+        
         bookmark: ?*Bookmark = null,
+        last_starting_mark: usize = 0,
+        last_ending_mark: usize = 0,        
 
         state: State = .{ .ExpectingMark = .Starting },
         lin: u32 = 1,
@@ -126,7 +129,6 @@ pub fn TextScanner(comptime source: TextSource) type {
                     self.index -= adjust.off_set;
                     self.block_index -= adjust.off_set;
                     if (source == .File) {
-
                         adjustBookmarkOffset(self.bookmark, adjust.off_set);
                         self.preserve = adjust.preserve;
                     }
@@ -172,6 +174,11 @@ pub fn TextScanner(comptime source: TextSource) type {
                             self.state = .{ .ExpectingMark = if (expected_mark == .Starting) .Ending else .Starting };
                             increment = mark.delimiter_len;
 
+                            switch (mark.mark_type) {
+                                .Starting => self.last_starting_mark = self.index,
+                                .Ending => self.last_ending_mark = self.index + mark.delimiter_len,
+                            }
+
                             const tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null;
                             return TextBlock{
                                 .event = .{ .Mark = mark },
@@ -213,15 +220,15 @@ pub fn TextScanner(comptime source: TextSource) type {
             var bookmark = try allocator.create(Bookmark);
             bookmark.* = .{
                 .prev = self.bookmark,
-                .index = self.index,
+                .index = self.last_ending_mark,
             };
 
             self.bookmark = bookmark;
             if (source == .File) {
                 if (self.preserve) |preserve| {
-                    assert(preserve <= self.index);
+                    assert(preserve <= self.last_ending_mark);
                 } else {
-                    self.preserve = self.index;
+                    self.preserve = self.last_ending_mark;
                 }
             }
         }
@@ -232,15 +239,15 @@ pub fn TextScanner(comptime source: TextSource) type {
                     self.bookmark = bookmark.prev;
                     if (source == .File and bookmark.prev == null) {
                         self.preserve = null;
-                    } 
+                    }
                     allocator.destroy(bookmark);
                 }
 
                 assert(bookmark.index < self.content.len);
-                assert(bookmark.index <= self.index);
+                assert(bookmark.index <= self.last_starting_mark);
 
                 return FileReader.Result{
-                    .content = if (self.index < self.content.len) self.content[bookmark.index..self.index] else self.content[bookmark.index..],
+                    .content = if (self.last_starting_mark < self.content.len) self.content[bookmark.index..self.last_starting_mark] else self.content[bookmark.index..],
                     .ref_counter = if (source == .File) self.ref_counter.ref() else .{},
                 };
             } else {
@@ -376,52 +383,34 @@ test "custom tags" {
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
     var part_1 = try reader.next(allocator);
-    try testing.expect(part_1 != null);
     defer part_1.?.unRef(allocator);
 
-    try testing.expectEqual(Event.Mark, part_1.?.event);
-    try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
+    try expectMark(.Starting, part_1, "Hello", 1, 6);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
     try testing.expectEqual(@as(u32, 1), part_1.?.event.Mark.delimiter_len);
-    try testing.expectEqualStrings("Hello", part_1.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_1.?.lin);
-    try testing.expectEqual(@as(usize, 6), part_1.?.col);
+
 
     var part_2 = try reader.next(allocator);
-    try testing.expect(part_2 != null);
     defer part_2.?.unRef(allocator);
 
-    try testing.expectEqual(Event.Mark, part_2.?.event);
-    try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
+    try expectMark(.Ending, part_2, "tag1", 1, 11);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
     try testing.expectEqual(@as(u32, 1), part_2.?.event.Mark.delimiter_len);
-    try testing.expectEqualStrings("tag1", part_2.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_2.?.lin);
-    try testing.expectEqual(@as(usize, 11), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
-    try testing.expect(part_3 != null);
     defer part_3.?.unRef(allocator);
 
-    try testing.expectEqual(Event.Mark, part_3.?.event);
-    try testing.expectEqual(MarkType.Starting, part_3.?.event.Mark.mark_type);
+    try expectMark(.Starting, part_3, "\nWorld", 2, 6);
     try testing.expectEqual(DelimiterType.Regular, part_3.?.event.Mark.delimiter_type);
     try testing.expectEqual(@as(u32, 1), part_3.?.event.Mark.delimiter_len);
-    try testing.expectEqualStrings("\nWorld", part_3.?.tail.?);
-    try testing.expectEqual(@as(usize, 2), part_3.?.lin);
-    try testing.expectEqual(@as(usize, 6), part_3.?.col);
+
 
     var part_4 = try reader.next(allocator);
-    try testing.expect(part_4 != null);
     defer part_4.?.unRef(allocator);
 
-    try testing.expectEqual(Event.Mark, part_4.?.event);
-    try testing.expectEqual(MarkType.Ending, part_4.?.event.Mark.mark_type);
+    try expectMark(.Ending, part_4, " tag2 ", 2, 13);    
     try testing.expectEqual(DelimiterType.Regular, part_4.?.event.Mark.delimiter_type);
     try testing.expectEqual(@as(u32, 1), part_4.?.event.Mark.delimiter_len);
-    try testing.expectEqualStrings(" tag2 ", part_4.?.tail.?);
-    try testing.expectEqual(@as(usize, 2), part_4.?.lin);
-    try testing.expectEqual(@as(usize, 13), part_4.?.col);
 
     var part_5 = try reader.next(allocator);
     try testing.expect(part_5 != null);
@@ -447,28 +436,18 @@ test "EOF" {
     try reader.setDelimiters(.{});
 
     var part_1 = try reader.next(allocator);
-    try testing.expect(part_1 != null);
     defer part_1.?.unRef(allocator);
 
-    try testing.expectEqual(Event.Mark, part_1.?.event);
-    try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
+    try expectMark(.Starting, part_1, null, 1, 1);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
     try testing.expectEqual(@as(u32, 2), part_1.?.event.Mark.delimiter_len);
-    try testing.expect(part_1.?.tail == null);
-    try testing.expectEqual(@as(usize, 1), part_1.?.lin);
-    try testing.expectEqual(@as(usize, 1), part_1.?.col);
 
     var part_2 = try reader.next(allocator);
-    try testing.expect(part_2 != null);
     defer part_2.?.unRef(allocator);
 
-    try testing.expectEqual(Event.Mark, part_2.?.event);
-    try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
+    try expectMark(.Ending, part_2, "tag1", 1, 7);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
     try testing.expectEqual(@as(u32, 2), part_2.?.event.Mark.delimiter_len);
-    try testing.expectEqualStrings("tag1", part_2.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_2.?.lin);
-    try testing.expectEqual(@as(usize, 7), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
     try testing.expect(part_3 != null);
@@ -491,28 +470,18 @@ test "EOF custom tags" {
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
     var part_1 = try reader.next(allocator);
-    try testing.expect(part_1 != null);
     defer part_1.?.unRef(allocator);
 
-    try testing.expectEqual(Event.Mark, part_1.?.event);
-    try testing.expectEqual(MarkType.Starting, part_1.?.event.Mark.mark_type);
+    try expectMark(.Starting, part_1, null, 1, 1);
     try testing.expectEqual(DelimiterType.Regular, part_1.?.event.Mark.delimiter_type);
     try testing.expectEqual(@as(u32, 1), part_1.?.event.Mark.delimiter_len);
-    try testing.expect(part_1.?.tail == null);
-    try testing.expectEqual(@as(usize, 1), part_1.?.lin);
-    try testing.expectEqual(@as(usize, 1), part_1.?.col);
 
     var part_2 = try reader.next(allocator);
-    try testing.expect(part_2 != null);
     defer part_2.?.unRef(allocator);
 
-    try testing.expectEqual(Event.Mark, part_2.?.event);
+    try expectMark(.Ending, part_2, "tag1", 1, 6);
     try testing.expectEqual(MarkType.Ending, part_2.?.event.Mark.mark_type);
     try testing.expectEqual(DelimiterType.Regular, part_2.?.event.Mark.delimiter_type);
-    try testing.expectEqual(@as(u32, 1), part_2.?.event.Mark.delimiter_len);
-    try testing.expectEqualStrings("tag1", part_2.?.tail.?);
-    try testing.expectEqual(@as(usize, 1), part_2.?.lin);
-    try testing.expectEqual(@as(usize, 6), part_2.?.col);
 
     var part_3 = try reader.next(allocator);
     defer part_3.?.unRef(allocator);
@@ -522,4 +491,95 @@ test "EOF custom tags" {
 
     var part_4 = try reader.next(allocator);
     try testing.expect(part_4 == null);
+}
+
+test "bookmarks" {
+
+    //               0          1        2         3         4         5         6         7         8
+    //               01234567890123456789012345678901234567890123456789012345678901234567890123456789012345
+    //                ↓          ↓               ↓          ↓         ↓          ↓             ↓          ↓
+    const content = "{{#section1}}begin_content1{{#section2}}content2{{/section2}}end_content1{{/section1}}";
+    const allocator = testing.allocator;
+
+    var reader = try TextScanner(.String).init(allocator, content);
+    defer reader.deinit(allocator);
+
+    try reader.setDelimiters(.{});
+
+    var part_1 = try reader.next(allocator);
+    defer part_1.?.unRef(allocator);
+    try expectMark(.Starting, part_1, null, 1, 1);
+
+    var part_2 = try reader.next(allocator);
+    defer part_2.?.unRef(allocator);
+    try expectMark(.Ending, part_2, "#section1", 1, 12);
+
+    try reader.beginBookmark(allocator);
+
+    var part_3 = try reader.next(allocator);
+    defer part_3.?.unRef(allocator);
+    try expectMark(.Starting, part_3, "begin_content1", 1, 28);
+
+    var part_4 = try reader.next(allocator);
+    defer part_4.?.unRef(allocator);
+
+    try expectMark(.Ending, part_4, "#section2", 1, 39);
+
+    try reader.beginBookmark(allocator);
+
+    var part_5 = try reader.next(allocator);
+    defer part_5.?.unRef(allocator);
+    try expectMark(.Starting, part_5, "content2", 1, 49);
+
+    var part_6 = try reader.next(allocator);
+    defer part_6.?.unRef(allocator);
+    try expectMark(.Ending, part_6, "/section2", 1, 60);
+
+    if (try reader.endBookmark(allocator)) |*bookmark_1| {
+        try testing.expectEqualStrings("content2", bookmark_1.content);
+        bookmark_1.ref_counter.free(allocator);
+    } else {
+        try testing.expect(false);
+    }
+
+    var part_7 = try reader.next(allocator);
+    defer part_7.?.unRef(allocator);
+    try expectMark(.Starting, part_7, "end_content1", 1, 74);
+
+    var part_8 = try reader.next(allocator);
+    defer part_8.?.unRef(allocator);
+    try expectMark(.Ending, part_8, "/section1", 1, 85);
+
+    if (try reader.endBookmark(allocator)) |*bookmark_2| {
+        try testing.expectEqualStrings("begin_content1{{#section2}}content2{{/section2}}end_content1", bookmark_2.content);
+        bookmark_2.ref_counter.free(allocator);
+    } else {
+        try testing.expect(false);
+    }
+
+    var part_9 = try reader.next(allocator);
+    try testing.expect(part_9 != null);
+    try testing.expect(part_9.?.event == .Eof);
+
+    var part_10 = try reader.next(allocator);
+    try testing.expect(part_10 == null);
+}
+
+fn expectMark(mark_type: MarkType, value: anytype, content: ?[]const u8, lin: u32, col: u32) !void {
+    if (value) |part| {
+        try testing.expectEqual(Event.Mark, part.event);
+        try testing.expectEqual(mark_type, part.event.Mark.mark_type);
+
+        if (content) |content_value| {
+            try testing.expect(part.tail != null);
+            try testing.expectEqualStrings(content_value, part.tail.?);
+        } else {
+            try testing.expect(part.tail == null);
+        }
+
+        try testing.expectEqual(lin, part.lin);
+        try testing.expectEqual(col, part.col);
+    } else {
+        try testing.expect(false);
+    }
 }

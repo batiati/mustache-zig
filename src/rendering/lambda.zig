@@ -128,7 +128,6 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
         else => return false,
     };
 
-      
     //TODO: deprecated
     const Type = std.builtin.TypeInfo;
 
