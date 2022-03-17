@@ -15,7 +15,7 @@ const Self = @This();
 
 block_type: BlockType,
 text_block: TextBlock,
-inner_text: ?RefCountedSlice = null, 
+inner_text: ?RefCountedSlice = null,
 prev_node: ?*Self = null,
 children: ?[]*Self = null,
 

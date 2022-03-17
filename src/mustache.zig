@@ -25,6 +25,8 @@ pub const renderFromString = rendering.renderFromString;
 pub const renderFromFile = rendering.renderFromFile;
 pub const renderAllocFromString = rendering.renderAllocFromString;
 
+pub const LambdaContext = rendering.LambdaContext;
+
 test {
     _ = template;
     _ = rendering;

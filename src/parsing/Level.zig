@@ -14,9 +14,9 @@ const Node = parsing.Node;
 const assert = std.debug.assert;
 const testing = std.testing;
 
-pub const EndLevel = struct { 
-    level: *Self, 
-    parent_node: *Node, 
+pub const EndLevel = struct {
+    level: *Self,
+    parent_node: *Node,
 };
 
 const Self = @This();
@@ -68,10 +68,7 @@ pub fn endLevel(self: *Self, arena: Allocator) ParseError!EndLevel {
     parent_node.children = self.list.toOwnedSlice(arena);
     prev_level.current_node = self.current_node;
 
-    return EndLevel { 
-        .level = prev_level,
-        .parent_node = parent_node
-    };
+    return EndLevel{ .level = prev_level, .parent_node = parent_node };
 }
 
 test "Level" {

@@ -254,7 +254,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                 assert(bookmark.index <= self.bookmark.starting_mark);
                 assert(self.bookmark.starting_mark < self.content.len);
 
-                return RefCountedSlice {
+                return RefCountedSlice{
                     .content = self.content[bookmark.index..self.bookmark.starting_mark],
                     .ref_counter = if (source == .File) self.stream.ref_counter.ref() else .{},
                 };

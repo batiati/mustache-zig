@@ -2218,10 +2218,9 @@ const tests = struct {
 
         // Lambdas used for sections should receive the raw section string.
         test "Sections" {
-
             const template_text = "<{{#lambda}}{{x}}{{/lambda}}>";
 
-           var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text);
             defer template.deinit();
 
             const elements = template.result.Elements;
@@ -2237,15 +2236,14 @@ const tests = struct {
             try testing.expectEqualStrings("{{x}}", elements[1].Section.inner_text.?);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
-            try testing.expectEqualStrings(">", elements[2].StaticText);            
+            try testing.expectEqualStrings(">", elements[2].StaticText);
         }
 
         // Lambdas used for sections should receive the raw section string.
         test "Nested Sections" {
-
             const template_text = "<{{#lambda}}{{#lambda2}}{{x}}{{/lambda2}}{{/lambda}}>";
 
-           var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text);
             defer template.deinit();
 
             const elements = template.result.Elements;
@@ -2270,11 +2268,11 @@ const tests = struct {
 
             try testing.expectEqualStrings("lambda2", sub_section.key);
             try testing.expect(sub_section.inner_text != null);
-            try testing.expectEqualStrings("{{x}}", sub_section.inner_text.?);            
+            try testing.expectEqualStrings("{{x}}", sub_section.inner_text.?);
 
             try testing.expectEqual(Element.StaticText, elements[2]);
-            try testing.expectEqualStrings(">", elements[2].StaticText);            
-        }        
+            try testing.expectEqualStrings(">", elements[2].StaticText);
+        }
     };
 
     test "Basic DOM test" {
@@ -2434,7 +2432,6 @@ const tests = struct {
     }
 
     test "Large DOM File test" {
-        
         const template_text =
             \\{{! Comments block }}
             \\  Hello

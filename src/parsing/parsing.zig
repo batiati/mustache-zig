@@ -433,7 +433,6 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                     },
 
                     .CloseSection => {
-
                         const ret = self.current_level.endLevel(arena) catch |err| {
                             return self.setLastError(err, text_block, null);
                         };
@@ -443,7 +442,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                             if (try self.text_scanner.endBookmark(self.gpa)) |bookmark| {
                                 ret.parent_node.inner_text = bookmark;
                             }
-                        }                        
+                        }
 
                         // Restore parent delimiters
 

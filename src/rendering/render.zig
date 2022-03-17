@@ -18,6 +18,8 @@ const Escape = context.Escape;
 
 const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 
+pub const LambdaContext = @import("lambda.zig").LambdaContext;
+
 pub fn renderAllocCached(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![]const u8 {
     var builder = std.ArrayList(u8).init(allocator);
     errdefer builder.deinit();
@@ -101,7 +103,9 @@ fn Render(comptime Writer: type, comptime Data: type) type {
                         .Section => |section| {
                             if (try getIterator(stack, section.key)) |*iterator| {
                                 if (iterator.is_lambda) {
-                                    const expand_result = try iterator.context.expandLambda(self.allocator, stack, section.key, .Unescaped);
+                                    assert(section.inner_text != null);
+
+                                    const expand_result = try iterator.context.expandLambda(self.allocator, stack, section.key, section.inner_text.?, .Unescaped);
                                     assert(expand_result == .Lambda);
                                 } else {
                                     while (try iterator.next(self.allocator)) |item_ctx| {
@@ -151,7 +155,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
 
                     .Lambda => {
                         // Expand the lambda against the current context and break the loop
-                        const expand_result = try current.ctx.expandLambda(self.allocator, stack, path, escape);
+                        const expand_result = try current.ctx.expandLambda(self.allocator, stack, path, "", escape);
                         assert(expand_result == .Lambda);
                         break;
                     },
@@ -206,6 +210,7 @@ const tests = struct {
         _ = sections;
         _ = inverted;
         _ = delimiters;
+        _ = lambdas;
     }
 
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
@@ -1886,6 +1891,184 @@ const tests = struct {
             const expected = "||";
 
             var data = .{};
+            try expectRender(template_text, data, expected);
+        }
+    };
+
+    /// Those tests are a verbatim copy from
+    /// https://github.com/mustache/spec/blob/master/specs/~lambdas.yml
+    const lambdas = struct {
+
+        // A lambda's return value should be interpolated.
+        test "Interpolation" {
+            const Data = struct {
+                text: []const u8,
+
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    try ctx.write("world");
+                }
+            };
+
+            const template_text = "Hello, {{lambda}}!";
+            const expected = "Hello, world!";
+
+            var data = Data{ .text = "Hey!" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // A lambda's return value should be parsed.
+        test "Interpolation - Expansion" {
+
+            //TODO: implement ctx.renderAlloc
+            if (true) return error.SkipZigTest;
+
+            const Data = struct {
+                planet: []const u8,
+
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    const ret = try ctx.renderAlloc(ctx.allocator, "{{planet}}");
+                    defer ctx.allocator.free(ret);
+
+                    try ctx.write(ret);
+                }
+            };
+
+            const template_text = "Hello, {{lambda}}!";
+            const expected = "Hello, world!";
+
+            var data = Data{ .planet = "world" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // A lambda's return value should parse with the default delimiters.
+        test "Interpolation - Alternate Delimiters" {
+
+            //TODO: implement ctx.renderAlloc
+            if (true) return error.SkipZigTest;
+
+            const Data = struct {
+                planet: []const u8,
+
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    const ret = try ctx.renderAlloc(ctx.allocator, "|planet| => {{planet}}");
+                    defer ctx.allocator.free(ret);
+
+                    try ctx.write(ret);
+                }
+            };
+
+            const template_text = "{{= | | =}}\nHello, (|&lambda|)!";
+            const expected = "Hello, (|planet| => world)!";
+
+            var data = Data{ .planet = "world" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Interpolated lambdas should not be cached.
+        test "Interpolation - Multiple Calls" {
+
+            //TODO: implement duplicating calls
+            if (true) return error.SkipZigTest;
+
+            const Data = struct {
+                calls: u32 = 0,
+
+                pub fn lambda(self: *@This(), ctx: mustache.LambdaContext) !void {
+                    self.calls += 1;
+
+                    const ret = try std.fmt.allocPrint(ctx.allocator, "{}", .{self.calls});
+                    defer ctx.allocator.free(ret);
+
+                    try ctx.write(ret);
+                }
+            };
+
+            const template_text = "{{lambda}} == {{{lambda}}} == {{lambda}}";
+            const expected = "1 == 2 == 3";
+
+            var data = Data{};
+            try expectRender(template_text, &data, expected);
+        }
+
+        // Lambda results should be appropriately escaped.
+        test "Escaping" {
+
+            //TODO: implement escaping
+            if (true) return error.SkipZigTest;
+
+            const Data = struct {
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    try ctx.write(">");
+                }
+            };
+
+            const template_text = "<{{lambda}}{{{lambda}}}";
+            const expected = "<&gt;>";
+
+            var data = Data{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Lambdas used for sections should receive the raw section string.
+        test "Section" {
+            const Data = struct {
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    if (std.mem.eql(u8, "{{x}}", ctx.tag_contents)) {
+                        try ctx.write("yes");
+                    } else {
+                        try ctx.write("no");
+                    }
+                }
+            };
+
+            const template_text = "<{{#lambda}}{{x}}{{/lambda}}>";
+            const expected = "<yes>";
+
+            var data = Data{};
+            try expectRender(template_text, data, expected);
+        }
+
+        // Lambdas used for sections should have their results parsed.
+        test "Section - Expansion" {
+
+            //TODO: implement ctx.renderAlloc
+            if (true) return error.SkipZigTest;
+
+            const Data = struct {
+                planet: []const u8,
+
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    const template = try std.fmt.allocPrint(ctx.allocator, "{s}{s}{s}", .{ ctx.tag_contents, "{{planet}}", ctx.tag_contents });
+                    defer ctx.allocator.free(template);
+
+                    const ret = try ctx.renderAlloc(ctx.allocator, template);
+                    defer ctx.allocator.free(ret);
+
+                    try ctx.write(ret);
+                }
+            };
+
+            const template_text = "<{{#lambda}}-{{/lambda}}>";
+            const expected = "<-Earth->";
+
+            var data = Data{ .planet = "Earth" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Lambdas used for inverted sections should be considered truthy.
+        test "Inverted Section" {
+            const Data = struct {
+                static: []const u8,
+
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    _ = ctx;
+                }
+            };
+
+            const template_text = "<{{^lambda}}{{static}}{{/lambda}}>";
+            const expected = "<>";
+
+            var data = Data{ .static = "static" };
             try expectRender(template_text, data, expected);
         }
     };
