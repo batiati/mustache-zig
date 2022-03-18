@@ -214,28 +214,33 @@ const tests = struct {
     }
 
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
+        try expectCachedRender(template_text, data, expected);
+        try expectStreamedRender(template_text, data, expected);
+    }
+
+    fn expectCachedRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
         const allocator = testing.allocator;
 
-        {
-            // Cached template render
-            var cached_template = switch (try mustache.parseTemplate(allocator, template_text, .{}, false)) {
-                .ParseError => return try testing.expect(false),
-                .Success => |ret| ret,
-            };
-            defer cached_template.free(allocator);
+        // Cached template render
+        var cached_template = switch (try mustache.parseTemplate(allocator, template_text, .{}, false)) {
+            .ParseError => return try testing.expect(false),
+            .Success => |ret| ret,
+        };
+        defer cached_template.free(allocator);
 
-            var result = try renderAllocCached(allocator, cached_template, data);
-            defer allocator.free(result);
-            try testing.expectEqualStrings(expected, result);
-        }
+        var result = try renderAllocCached(allocator, cached_template, data);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
 
-        {
-            // Streamed template render
-            var result = try renderAllocFromString(allocator, template_text, data);
-            defer allocator.free(result);
+    fn expectStreamedRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
+        const allocator = testing.allocator;
 
-            try testing.expectEqualStrings(expected, result);
-        }
+        // Streamed template render
+        var result = try renderAllocFromString(allocator, template_text, data);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings(expected, result);
     }
 
     /// Those tests are a verbatim copy from
@@ -1966,10 +1971,6 @@ const tests = struct {
 
         // Interpolated lambdas should not be cached.
         test "Interpolation - Multiple Calls" {
-
-            //TODO: implement duplicating calls
-            if (true) return error.SkipZigTest;
-
             const Data = struct {
                 calls: u32 = 0,
 
@@ -1982,8 +1983,11 @@ const tests = struct {
             const template_text = "{{lambda}} == {{{lambda}}} == {{lambda}}";
             const expected = "1 == 2 == 3";
 
-            var data = Data{};
-            try expectRender(template_text, &data, expected);
+            var data1 = Data{};
+            try expectCachedRender(template_text, &data1, expected);
+
+            var data2 = Data{};
+            try expectStreamedRender(template_text, &data2, expected);
         }
 
         // Lambda results should be appropriately escaped.
