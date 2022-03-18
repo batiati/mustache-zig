@@ -69,6 +69,9 @@ test "write" {
     try write("&gt;ab&amp;cd", ">ab&cd", .Escaped);
     try write("ab&amp;cd&lt;", "ab&cd<", .Escaped);
     try write("&gt;ab&amp;cd&lt;", ">ab&cd<", .Escaped);
+    try write("&quot;ab&#39;&amp;&#39;cd&quot;",
+        \\"ab'&'cd"
+    , .Escaped);
 
     try write(">ab&cd<", ">ab&cd<", .Unescaped);
 }
