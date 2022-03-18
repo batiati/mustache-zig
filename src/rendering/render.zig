@@ -2006,7 +2006,7 @@ const tests = struct {
         test "Section" {
             const Data = struct {
                 pub fn lambda(ctx: mustache.LambdaContext) !void {
-                    if (std.mem.eql(u8, "{{x}}", ctx.tag_contents)) {
+                    if (std.mem.eql(u8, "{{x}}", ctx.inner_text)) {
                         try ctx.write("yes");
                     } else {
                         try ctx.write("no");
@@ -2027,7 +2027,7 @@ const tests = struct {
                 planet: []const u8,
 
                 pub fn lambda(ctx: mustache.LambdaContext) !void {
-                    try ctx.renderFormat("{s}{s}{s}", .{ ctx.tag_contents, "{{planet}}", ctx.tag_contents });
+                    try ctx.renderFormat("{s}{s}{s}", .{ ctx.inner_text, "{{planet}}", ctx.inner_text });
                 }
             };
 
@@ -2044,7 +2044,7 @@ const tests = struct {
                 planet: []const u8,
 
                 pub fn lambda(ctx: mustache.LambdaContext) !void {
-                    try ctx.renderFormat("{s}{s}{s}", .{ ctx.tag_contents, "{{planet}} => |planet|", ctx.tag_contents });
+                    try ctx.renderFormat("{s}{s}{s}", .{ ctx.inner_text, "{{planet}} => |planet|", ctx.inner_text });
                 }
             };
 
@@ -2059,7 +2059,7 @@ const tests = struct {
         test "Section - Multiple Calls" {
             const Data = struct {
                 pub fn lambda(ctx: mustache.LambdaContext) !void {
-                    try ctx.renderFormat("__{s}__", .{ctx.tag_contents});
+                    try ctx.renderFormat("__{s}__", .{ctx.inner_text});
                 }
             };
 

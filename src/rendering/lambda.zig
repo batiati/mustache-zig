@@ -26,7 +26,7 @@ pub const LambdaContext = struct {
     vtable: *const VTable,
 
     allocator: Allocator,
-    tag_contents: []const u8,
+    inner_text: []const u8,
 
     const VTable = struct {
         renderAlloc: fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
@@ -98,12 +98,12 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             .write = write,
         };
 
-        pub fn context(self: *Self, allocator: Allocator, tag_contents: []const u8) LambdaContext {
+        pub fn context(self: *Self, allocator: Allocator, inner_text: []const u8) LambdaContext {
             return .{
                 .ptr = self,
                 .vtable = &vtable,
                 .allocator = allocator,
-                .tag_contents = tag_contents,
+                .inner_text = inner_text,
             };
         }
 
