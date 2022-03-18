@@ -2,6 +2,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const trait = std.meta.trait;
 
+const mustache = @import("../mustache.zig");
+const Delimiters = mustache.Delimiters;
+
 const context = @import("context.zig");
 const PathResolution = context.PathResolution;
 const Context = context.Context;
@@ -72,11 +75,12 @@ pub inline fn expandLambda(
     stack: anytype,
     tag_contents: []const u8,
     escape: Escape,
+    delimiters: Delimiters,
     path_iterator: *std.mem.TokenIterator(u8),
 ) (Allocator.Error || @TypeOf(out_writer).Error)!PathResolution(void) {
     const ExpandLambdaAction = Caller(Allocator.Error || @TypeOf(out_writer).Error, void, expandLambdaAction);
     return try ExpandLambdaAction.call(
-        .{ allocator, stack, tag_contents, escape },
+        .{ allocator, stack, tag_contents, escape, delimiters },
         out_writer,
         data,
         path_iterator,
@@ -401,7 +405,7 @@ inline fn expandLambdaAction(
     value: anytype,
 ) (Allocator.Error || @TypeOf(out_writer).Error)!void {
     comptime {
-        if (!std.meta.trait.isTuple(@TypeOf(params)) and params.len != 4) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
+        if (!std.meta.trait.isTuple(@TypeOf(params)) and params.len != 5) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
         if (!lambda.isLambdaInvoker(@TypeOf(value))) return;
     }
 
@@ -410,12 +414,14 @@ inline fn expandLambdaAction(
     const stack = params.@"1";
     const tag_contents = params.@"2";
     const escape = params.@"3";
+    const delimiters = params.@"4";
 
     const Impl = lambda.LambdaContextImpl(@TypeOf(out_writer));
     var impl = Impl{
         .out_writer = out_writer,
         .stack = stack,
         .escape = escape,
+        .delimiters = delimiters,
     };
 
     const lambda_context = impl.context(allocator, tag_contents);

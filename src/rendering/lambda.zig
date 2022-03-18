@@ -5,9 +5,13 @@ const meta = std.meta;
 const assert = std.debug.assert;
 const testing = std.testing;
 
+const mustache = @import("../mustache.zig");
+const Delimiters = mustache.Delimiters;
+
 const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
+const Render = @import("render.zig").Render;
 
 const escapeWrite = @import("escape.zig").escapeWrite;
 
@@ -25,7 +29,8 @@ pub const LambdaContext = struct {
     tag_contents: []const u8,
 
     const VTable = struct {
-        renderAlloc: fn (*const anyopaque, Allocator, []const u8) Allocator.Error![]u8,
+        renderAlloc: fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
+        render: fn (*const anyopaque, Allocator, []const u8) anyerror!void,
         write: fn (*const anyopaque, []const u8) anyerror!usize,
     };
 
@@ -39,26 +44,18 @@ pub const LambdaContext = struct {
     ///
     /// Renders a template against the current context
     /// Can return anyerror depending on the underlying writer 
-    pub fn render(self: LambdaContext, template_text: []const u8) anyerror!void {
-        const rendered_text = try self.renderAlloc(self.allocator, template_text);
-        defer self.allocator.free(rendered_text);
-
-        self.write(rendered_text);
+    pub inline fn render(self: LambdaContext, template_text: []const u8) anyerror!void {
+        try self.vtable.render(self.ptr, self.allocator, template_text);
     }
 
     ///
     /// Formats a template to be rendered against the current context
     /// Can return anyerror depending on the underlying writer 
     pub fn renderFormat(self: LambdaContext, comptime fmt: []const u8, args: anytype) anyerror!void {
-        const rendered_text = blk: {
-            const template_text = try std.fmt.allocPrint(self.allocator, fmt, args);
-            defer self.allocator.free(template_text);
+        const template_text = try std.fmt.allocPrint(self.allocator, fmt, args);
+        defer self.allocator.free(template_text);
 
-            break :blk try self.renderAlloc(self.allocator, template_text);
-        };
-        defer self.allocator.free(rendered_text);
-
-        self.write(rendered_text);
+        try self.vtable.render(self.ptr, self.allocator, template_text);
     }
 
     ///
@@ -92,10 +89,12 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
 
         out_writer: Writer,
         stack: *const ContextStack,
+        delimiters: Delimiters,
         escape: Escape,
 
         const vtable = LambdaContext.VTable{
             .renderAlloc = renderAlloc,
+            .render = render,
             .write = write,
         };
 
@@ -108,11 +107,24 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             };
         }
 
-        fn renderAlloc(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) Allocator.Error![]u8 {
+        fn renderAlloc(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) anyerror![]u8 {
             _ = ctx;
             _ = template_text;
 
             return try allocator.dupe(u8, "dummy");
+        }
+
+        fn render(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) anyerror!void {
+            var self = getSelf(ctx);
+
+            var template = switch (try mustache.parseTemplate(allocator, template_text, self.delimiters, false)) {
+                .Success => |value| value,
+                .ParseError => return,
+            };
+            defer template.free(allocator);
+
+            const Impl = Render(Writer);
+            try Impl.renderLevel(allocator, self.out_writer, self.stack, template.elements);
         }
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {

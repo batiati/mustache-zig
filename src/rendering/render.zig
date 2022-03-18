@@ -5,6 +5,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
+const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 const Section = mustache.Section;
 const ParseError = mustache.ParseError;
@@ -30,7 +31,7 @@ pub fn renderAllocCached(allocator: Allocator, cached_template: Template, data: 
 }
 
 pub fn renderCached(allocator: Allocator, cached_template: Template, data: anytype, out_writer: anytype) (Allocator.Error || @TypeOf(out_writer).Error)!void {
-    var render = getRender(allocator, out_writer, data);
+    var render = getDataRender(allocator, out_writer, data);
     try render.render(cached_template.elements);
 }
 
@@ -49,7 +50,7 @@ pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: a
     };
     errdefer template.deinit();
 
-    var render = getRender(allocator, out_writer, data);
+    var render = getDataRender(allocator, out_writer, data);
     try template.collectElements(template_text, &render);
 }
 
@@ -59,23 +60,22 @@ pub fn renderFromFile(allocator: Allocator, absolute_template_path: []const u8, 
     };
     errdefer template.deinit();
 
-    var render = getRender(allocator, out_writer, data);
+    var render = getDataRender(allocator, out_writer, data);
     try template.collectElementsFromFile(absolute_template_path, &render);
 }
 
-fn getRender(allocator: Allocator, out_writer: anytype, data: anytype) Render(@TypeOf(out_writer), @TypeOf(data)) {
-    return Render(@TypeOf(out_writer), @TypeOf(data)){
+fn getDataRender(allocator: Allocator, out_writer: anytype, data: anytype) DataRender(@TypeOf(out_writer), @TypeOf(data)) {
+    return DataRender(@TypeOf(out_writer), @TypeOf(data)){
         .allocator = allocator,
         .writer = out_writer,
         .data = data,
     };
 }
 
-fn Render(comptime Writer: type, comptime Data: type) type {
+fn DataRender(comptime Writer: type, comptime Data: type) type {
     return struct {
         const Self = @This();
-        const ContextInterface = Context(Writer);
-        const ContextStack = ContextInterface.ContextStack;
+        const WriterRender = Render(Writer);
 
         pub const Error = Allocator.Error || Writer.Error;
 
@@ -84,39 +84,51 @@ fn Render(comptime Writer: type, comptime Data: type) type {
         data: Data,
 
         pub fn render(self: *Self, elements: []const Element) Error!void {
-            var stack = ContextStack{
+            var stack = WriterRender.ContextStack{
                 .parent = null,
                 .ctx = try context.getContext(self.allocator, self.writer, self.data),
             };
             defer stack.ctx.deinit(self.allocator);
 
-            try self.renderLevel(&stack, elements);
+            try WriterRender.renderLevel(self.allocator, self.writer, &stack, elements);
         }
+    };
+}
 
-        fn renderLevel(self: *Self, stack: *ContextStack, children: ?[]const Element) Error!void {
+pub fn Render(comptime Writer: type) type {
+    return struct {
+        pub const ContextInterface = Context(Writer);
+        pub const ContextStack = ContextInterface.ContextStack;
+
+        pub const Error = Allocator.Error || Writer.Error;
+
+        pub fn renderLevel(allocator: Allocator, writer: Writer, stack: *const ContextStack, children: ?[]const Element) Error!void {
             if (children) |elements| {
                 for (elements) |element| {
                     switch (element) {
-                        .StaticText => |content| try self.writer.writeAll(content),
-                        .Interpolation => |path| try self.interpolate(stack, path, .Escaped),
-                        .UnescapedInterpolation => |path| try self.interpolate(stack, path, .Unescaped),
+                        .StaticText => |content| try writer.writeAll(content),
+                        .Interpolation => |path| try interpolate(allocator, stack, path, .Escaped),
+                        .UnescapedInterpolation => |path| try interpolate(allocator, stack, path, .Unescaped),
                         .Section => |section| {
                             if (try getIterator(stack, section.key)) |*iterator| {
                                 if (iterator.is_lambda) {
-                                    assert(section.inner_text != null);
 
-                                    const expand_result = try iterator.context.expandLambda(self.allocator, stack, section.key, section.inner_text.?, .Unescaped);
+                                    //TODO: Add template options
+                                    assert(section.inner_text != null);
+                                    assert(section.delimiters != null);
+
+                                    const expand_result = try iterator.context.expandLambda(allocator, stack, section.key, section.inner_text.?, .Unescaped, section.delimiters.?);
                                     assert(expand_result == .Lambda);
                                 } else {
-                                    while (try iterator.next(self.allocator)) |item_ctx| {
-                                        defer item_ctx.deinit(self.allocator);
+                                    while (try iterator.next(allocator)) |item_ctx| {
+                                        defer item_ctx.deinit(allocator);
 
                                         var next_level = ContextStack{
                                             .parent = stack,
                                             .ctx = item_ctx,
                                         };
 
-                                        try self.renderLevel(&next_level, section.content);
+                                        try renderLevel(allocator, writer, &next_level, section.content);
                                     }
                                 }
                             }
@@ -129,7 +141,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
 
                             const render_inverted = if (iterator) |it| it.is_lambda == false and it.hasNext() == false else true;
                             if (render_inverted) {
-                                try self.renderLevel(stack, section.content);
+                                try renderLevel(allocator, writer, stack, section.content);
                             }
                         },
 
@@ -140,9 +152,8 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             }
         }
 
-        fn interpolate(self: *Self, stack: *ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
-            var level: ?*ContextStack = stack;
-            _ = self;
+        fn interpolate(allocator: Allocator, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
+            var level: ?*const ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {
                 const path_resolution = try current.ctx.interpolate(path, escape);
@@ -155,7 +166,7 @@ fn Render(comptime Writer: type, comptime Data: type) type {
 
                     .Lambda => {
                         // Expand the lambda against the current context and break the loop
-                        const expand_result = try current.ctx.expandLambda(self.allocator, stack, path, "", escape);
+                        const expand_result = try current.ctx.expandLambda(allocator, stack, path, "", escape, .{});
                         assert(expand_result == .Lambda);
                         break;
                     },
@@ -173,8 +184,8 @@ fn Render(comptime Writer: type, comptime Data: type) type {
             }
         }
 
-        fn getIterator(stack: *ContextStack, path: []const u8) (Allocator.Error || Writer.Error)!?Context(Writer).Iterator {
-            var level: ?*ContextStack = stack;
+        fn getIterator(stack: *const ContextStack, path: []const u8) (Allocator.Error || Writer.Error)!?Context(Writer).Iterator {
+            var level: ?*const ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {
                 switch (current.ctx.iterator(path)) {
@@ -1923,18 +1934,11 @@ const tests = struct {
 
         // A lambda's return value should be parsed.
         test "Interpolation - Expansion" {
-
-            //TODO: implement ctx.renderAlloc
-            if (true) return error.SkipZigTest;
-
             const Data = struct {
                 planet: []const u8,
 
                 pub fn lambda(ctx: mustache.LambdaContext) !void {
-                    const ret = try ctx.renderAlloc(ctx.allocator, "{{planet}}");
-                    defer ctx.allocator.free(ret);
-
-                    try ctx.write(ret);
+                    try ctx.render("{{planet}}");
                 }
             };
 
@@ -1947,18 +1951,11 @@ const tests = struct {
 
         // A lambda's return value should parse with the default delimiters.
         test "Interpolation - Alternate Delimiters" {
-
-            //TODO: implement ctx.renderAlloc
-            if (true) return error.SkipZigTest;
-
             const Data = struct {
                 planet: []const u8,
 
                 pub fn lambda(ctx: mustache.LambdaContext) !void {
-                    const ret = try ctx.renderAlloc(ctx.allocator, "|planet| => {{planet}}");
-                    defer ctx.allocator.free(ret);
-
-                    try ctx.write(ret);
+                    try ctx.render("|planet| => {{planet}}");
                 }
             };
 
@@ -2026,21 +2023,11 @@ const tests = struct {
 
         // Lambdas used for sections should have their results parsed.
         test "Section - Expansion" {
-
-            //TODO: implement ctx.renderAlloc
-            if (true) return error.SkipZigTest;
-
             const Data = struct {
                 planet: []const u8,
 
                 pub fn lambda(ctx: mustache.LambdaContext) !void {
-                    const template = try std.fmt.allocPrint(ctx.allocator, "{s}{s}{s}", .{ ctx.tag_contents, "{{planet}}", ctx.tag_contents });
-                    defer ctx.allocator.free(template);
-
-                    const ret = try ctx.renderAlloc(ctx.allocator, template);
-                    defer ctx.allocator.free(ret);
-
-                    try ctx.write(ret);
+                    try ctx.renderFormat("{s}{s}{s}", .{ ctx.tag_contents, "{{planet}}", ctx.tag_contents });
                 }
             };
 
@@ -2048,6 +2035,38 @@ const tests = struct {
             const expected = "<-Earth->";
 
             var data = Data{ .planet = "Earth" };
+            try expectRender(template_text, data, expected);
+        }
+
+        // Lambdas used for sections should parse with the current delimiters.
+        test "Section - Alternate Delimiters" {
+            const Data = struct {
+                planet: []const u8,
+
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    try ctx.renderFormat("{s}{s}{s}", .{ ctx.tag_contents, "{{planet}} => |planet|", ctx.tag_contents });
+                }
+            };
+
+            const template_text = "{{= | | =}}<|#lambda|-|/lambda|>";
+            const expected = "<-{{planet}} => Earth->";
+
+            var data1 = Data{ .planet = "Earth" };
+            try expectRender(template_text, &data1, expected);
+        }
+
+        // Lambdas used for sections should not be cached.
+        test "Section - Multiple Calls" {
+            const Data = struct {
+                pub fn lambda(ctx: mustache.LambdaContext) !void {
+                    try ctx.renderFormat("__{s}__", .{ctx.tag_contents});
+                }
+            };
+
+            const template_text = "{{#lambda}}FILE{{/lambda}} != {{#lambda}}LINE{{/lambda}}";
+            const expected = "__FILE__ != __LINE__";
+
+            var data = Data{};
             try expectRender(template_text, data, expected);
         }
 

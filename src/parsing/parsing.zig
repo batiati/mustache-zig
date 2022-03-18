@@ -277,7 +277,7 @@ pub fn Parser(comptime parser_options: ParserOptions) type {
                                 .Interpolation => Element{ .Interpolation = key },
                                 .UnescapedInterpolation => Element{ .UnescapedInterpolation = key },
                                 .InvertedSection => Element{ .InvertedSection = .{ .key = key, .content = content } },
-                                .Section => Element{ .Section = .{ .key = key, .content = content, .inner_text = inner_text } },
+                                .Section => Element{ .Section = .{ .key = key, .content = content, .inner_text = inner_text, .delimiters = self.current_level.delimiters } },
                                 .Partial => Element{ .Partial = .{ .key = key, .indentation = indentation } },
                                 .Parent => Element{ .Parent = .{ .key = key, .indentation = indentation, .content = content } },
                                 .Block => Element{ .Block = .{ .key = key, .content = content } },

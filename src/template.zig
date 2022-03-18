@@ -28,6 +28,7 @@ pub const Section = struct {
     key: []const u8,
     content: ?[]const Element,
     inner_text: ?[]const u8,
+    delimiters: ?Delimiters,
 };
 
 pub const InvertedSection = struct {
