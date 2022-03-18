@@ -1975,11 +1975,7 @@ const tests = struct {
 
                 pub fn lambda(self: *@This(), ctx: mustache.LambdaContext) !void {
                     self.calls += 1;
-
-                    const ret = try std.fmt.allocPrint(ctx.allocator, "{}", .{self.calls});
-                    defer ctx.allocator.free(ret);
-
-                    try ctx.write(ret);
+                    try ctx.writeFormat("{}", .{self.calls});
                 }
             };
 
@@ -1992,10 +1988,6 @@ const tests = struct {
 
         // Lambda results should be appropriately escaped.
         test "Escaping" {
-
-            //TODO: implement escaping
-            if (true) return error.SkipZigTest;
-
             const Data = struct {
                 pub fn lambda(ctx: mustache.LambdaContext) !void {
                     try ctx.write(">");

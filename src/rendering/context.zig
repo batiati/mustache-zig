@@ -326,24 +326,16 @@ const struct_tests = struct {
         }
 
         pub fn selfLambda(self: Person, ctx: LambdaContext) !void {
-            const str = try std.fmt.allocPrint(ctx.allocator, "{}", .{self.name.len});
-            defer ctx.allocator.free(str);
-            return try ctx.write(str);
+            try ctx.writeFormat("{}", .{self.name.len});
         }
 
         pub fn selfConstPtrLambda(self: *const Person, ctx: LambdaContext) !void {
-            const str = try std.fmt.allocPrint(ctx.allocator, "{}", .{self.name.len});
-            defer ctx.allocator.free(str);
-
-            return try ctx.write(str);
+            try ctx.writeFormat("{}", .{self.name.len});
         }
 
         pub fn selfMutPtrLambda(self: *Person, ctx: LambdaContext) !void {
             self.counter += 1;
-
-            const str = try std.fmt.allocPrint(ctx.allocator, "{}", .{self.counter});
-            defer ctx.allocator.free(str);
-            return try ctx.write(str);
+            try ctx.writeFormat("{}", .{self.counter});
         }
 
         pub fn willFailStaticLambda(ctx: LambdaContext) error{Expected}!void {

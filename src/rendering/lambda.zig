@@ -9,6 +9,8 @@ const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
 
+const escapeWrite = @import("escape.zig").escapeWrite;
+
 ///
 /// Context for a lambda call,
 /// this type must be accept as parameter by any function intended to be used as a lambda
@@ -24,7 +26,7 @@ pub const LambdaContext = struct {
 
     const VTable = struct {
         renderAlloc: fn (*const anyopaque, Allocator, []const u8) Allocator.Error![]u8,
-        write: fn (*const anyopaque, []const u8) anyerror!void,
+        write: fn (*const anyopaque, []const u8) anyerror!usize,
     };
 
     ///
@@ -35,10 +37,50 @@ pub const LambdaContext = struct {
     }
 
     ///
-    /// Writes the rendered text on the output stream
+    /// Renders a template against the current context
     /// Can return anyerror depending on the underlying writer 
-    pub fn write(self: LambdaContext, rendered_text: []const u8) anyerror!void {
-        try self.vtable.write(self.ptr, rendered_text);
+    pub fn render(self: LambdaContext, template_text: []const u8) anyerror!void {
+        const rendered_text = try self.renderAlloc(self.allocator, template_text);
+        defer self.allocator.free(rendered_text);
+
+        self.write(rendered_text);
+    }
+
+    ///
+    /// Formats a template to be rendered against the current context
+    /// Can return anyerror depending on the underlying writer 
+    pub fn renderFormat(self: LambdaContext, comptime fmt: []const u8, args: anytype) anyerror!void {
+        const rendered_text = blk: {
+            const template_text = try std.fmt.allocPrint(self.allocator, fmt, args);
+            defer self.allocator.free(template_text);
+
+            break :blk try self.renderAlloc(self.allocator, template_text);
+        };
+        defer self.allocator.free(rendered_text);
+
+        self.write(rendered_text);
+    }
+
+    ///
+    /// Writes the raw text on the output stream.
+    /// Can return anyerror depending on the underlying writer 
+    pub fn writeFormat(self: LambdaContext, comptime fmt: []const u8, args: anytype) anyerror!void {
+        var writer = std.io.Writer(LambdaContext, anyerror, writeFn){
+            .context = self,
+        };
+
+        try std.fmt.format(writer, fmt, args);
+    }
+
+    ///
+    /// Writes the raw text on the output stream.
+    /// Can return anyerror depending on the underlying writer 
+    pub fn write(self: LambdaContext, raw_text: []const u8) anyerror!void {
+        _ = try self.vtable.write(self.ptr, raw_text);
+    }
+
+    fn writeFn(self: LambdaContext, bytes: []const u8) anyerror!usize {
+        return try return self.vtable.write(self.ptr, bytes);
     }
 };
 
@@ -73,9 +115,10 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             return try allocator.dupe(u8, "dummy");
         }
 
-        fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!void {
+        fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {
             var self = getSelf(ctx);
-            try self.out_writer.writeAll(rendered_text);
+
+            return try escapeWrite(self.out_writer, rendered_text, self.escape);
         }
 
         inline fn getSelf(ctx: *const anyopaque) *const Self {

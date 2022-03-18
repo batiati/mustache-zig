@@ -14,6 +14,8 @@ const LambdaInvoker = lambda.LambdaInvoker;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+const escapeWrite = @import("escape.zig").escapeWrite;
+
 pub inline fn get(
     allocator: Allocator,
     out_writer: anytype,
@@ -441,16 +443,16 @@ inline fn interpolateAction(
 
         .Struct, .Opaque => {},
 
-        .Bool => return try escapeWrite(out_writer, if (value) "true" else "false", escape),
-        .Int, .ComptimeInt => return try std.fmt.formatInt(value, 10, .lower, .{}, out_writer),
-        .Float, .ComptimeFloat => return try std.fmt.formatFloatDecimal(value, .{}, out_writer),
-        .Enum => return try escapeWrite(out_writer, @tagName(value), escape),
+        .Bool => _ = try escapeWrite(out_writer, if (value) "true" else "false", escape),
+        .Int, .ComptimeInt => try std.fmt.formatInt(value, 10, .lower, .{}, out_writer),
+        .Float, .ComptimeFloat => try std.fmt.formatFloatDecimal(value, .{}, out_writer),
+        .Enum => _ = try escapeWrite(out_writer, @tagName(value), escape),
 
         .Pointer => |info| switch (info.size) {
-            .One => return try interpolateAction(escape, out_writer, value.*),
+            .One => try interpolateAction(escape, out_writer, value.*),
             .Slice => {
                 if (info.child == u8) {
-                    return try escapeWrite(out_writer, value, escape);
+                    _ = try escapeWrite(out_writer, value, escape);
                 }
             },
             .Many => @compileError("[*] pointers not supported"),
@@ -458,58 +460,15 @@ inline fn interpolateAction(
         },
         .Array => |info| {
             if (info.child == u8) {
-                return try escapeWrite(out_writer, &value, escape);
+                _ = try escapeWrite(out_writer, &value, escape);
             }
         },
         .Optional => {
             if (value) |not_null| {
-                return try interpolateAction(escape, out_writer, not_null);
+                try interpolateAction(escape, out_writer, not_null);
             }
         },
         else => {},
-    }
-}
-
-fn escapeWrite(
-    out_writer: anytype,
-    value: []const u8,
-    escape: Escape,
-) @TypeOf(out_writer).Error!void {
-    switch (escape) {
-        .Unescaped => {
-            try out_writer.writeAll(value);
-        },
-
-        .Escaped => {
-            const @"null" = '\x00';
-            const html_null: []const u8 = "\u{fffd}";
-
-            var index: usize = 0;
-
-            for (value) |char, char_index| {
-                const replace = switch (char) {
-                    '"' => "&quot;",
-                    '\'' => "&#39;",
-                    '&' => "&amp;",
-                    '<' => "&lt;",
-                    '>' => "&gt;",
-                    @"null" => html_null,
-                    else => continue,
-                };
-
-                if (char_index > index) {
-                    try out_writer.writeAll(value[index..char_index]);
-                }
-
-                try out_writer.writeAll(replace);
-                index = char_index + 1;
-                if (index == value.len) break;
-            }
-
-            if (index < value.len) {
-                try out_writer.writeAll(value[index..]);
-            }
-        },
     }
 }
 
@@ -529,50 +488,6 @@ fn isOnErrorSet(comptime Error: type, value: anytype) bool {
     }
 
     return false;
-}
-
-test "escapeWrite" {
-    const allocator = testing.allocator;
-    var list = std.ArrayList(u8).init(allocator);
-    defer list.deinit();
-
-    try escapeWrite(list.writer(), ">abc", .Escaped);
-    try testing.expectEqualStrings("&gt;abc", list.items);
-
-    list.clearAndFree();
-
-    try escapeWrite(list.writer(), "abc<", .Escaped);
-    try testing.expectEqualStrings("abc&lt;", list.items);
-
-    list.clearAndFree();
-
-    try escapeWrite(list.writer(), ">abc<", .Escaped);
-    try testing.expectEqualStrings("&gt;abc&lt;", list.items);
-
-    list.clearAndFree();
-
-    try escapeWrite(list.writer(), "ab&cd", .Escaped);
-    try testing.expectEqualStrings("ab&amp;cd", list.items);
-
-    list.clearAndFree();
-
-    try escapeWrite(list.writer(), ">ab&cd", .Escaped);
-    try testing.expectEqualStrings("&gt;ab&amp;cd", list.items);
-
-    list.clearAndFree();
-
-    try escapeWrite(list.writer(), "ab&cd<", .Escaped);
-    try testing.expectEqualStrings("ab&amp;cd&lt;", list.items);
-
-    list.clearAndFree();
-
-    try escapeWrite(list.writer(), ">ab&cd<", .Escaped);
-    try testing.expectEqualStrings("&gt;ab&amp;cd&lt;", list.items);
-
-    list.clearAndFree();
-
-    try escapeWrite(list.writer(), ">ab&cd<", .Unescaped);
-    try testing.expectEqualStrings(">ab&cd<", list.items);
 }
 
 test "isOnErrorSet" {
@@ -605,6 +520,7 @@ test "isOnErrorSet" {
 
 test {
     _ = tests;
+    _ = @import("escape.zig");
 }
 
 const tests = struct {
