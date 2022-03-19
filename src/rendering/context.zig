@@ -72,15 +72,15 @@ pub fn Context(comptime WriteError: type) type {
             ctx: Self,
         };
 
-        ptr: *anyopaque,
+        ptr: *const anyopaque,
         vtable: *const VTable,
 
         pub const VTable = struct {
-            get: fn (*anyopaque, Allocator, []const u8, ?usize) Allocator.Error!PathResolution(Self),
-            interpolate: fn (*anyopaque, []const u8, Escape) WriteError!PathResolution(void),
-            expandLambda: fn (*anyopaque, Allocator, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || WriteError)!PathResolution(void),
-            check: fn (*anyopaque, []const u8, usize) PathResolution(void),
-            deinit: fn (*anyopaque, Allocator) void,
+            get: fn (*const anyopaque, Allocator, []const u8, ?usize) Allocator.Error!PathResolution(Self),
+            interpolate: fn (*const anyopaque, []const u8, Escape) WriteError!PathResolution(void),
+            expandLambda: fn (*const anyopaque, Allocator, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || WriteError)!PathResolution(void),
+            check: fn (*const anyopaque, []const u8, usize) PathResolution(void),
+            deinit: fn (*const anyopaque, Allocator) void,
         };
 
         pub const Iterator = struct {
@@ -227,7 +227,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             };
         }
 
-        fn get(ctx: *anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!PathResolution(ContextInterface) {
+        fn get(ctx: *const anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!PathResolution(ContextInterface) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
@@ -240,7 +240,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             );
         }
 
-        fn check(ctx: *anyopaque, path: []const u8, index: usize) PathResolution(void) {
+        fn check(ctx: *const anyopaque, path: []const u8, index: usize) PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
@@ -251,7 +251,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             );
         }
 
-        fn interpolate(ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
+        fn interpolate(ctx: *const anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
@@ -263,7 +263,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             );
         }
 
-        fn expandLambda(ctx: *anyopaque, allocator: Allocator, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        fn expandLambda(ctx: *const anyopaque, allocator: Allocator, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
@@ -280,15 +280,15 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             );
         }
 
-        fn deinit(ctx: *anyopaque, allocator: Allocator) void {
+        fn deinit(ctx: *const anyopaque, allocator: Allocator) void {
             if (!is_zero_size) {
                 var self = getSelf(ctx);
                 allocator.destroy(self);
             }
         }
 
-        inline fn getSelf(ctx: *anyopaque) *Self {
-            return if (is_zero_size) undefined else @ptrCast(*Self, @alignCast(@alignOf(Self), ctx));
+        inline fn getSelf(ctx: *const anyopaque) *const Self {
+            return if (is_zero_size) undefined else @ptrCast(*const Self, @alignCast(@alignOf(Self), ctx));
         }
     };
 }
