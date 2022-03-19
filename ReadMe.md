@@ -19,7 +19,7 @@
 - [X] Rendering [sections](https://github.com/mustache/spec/blob/master/specs/sections.yml) `{{#foo}} ... {{/foo}}`.
 - [X] [Section iterator](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/sections.yml#L133) over slices, arrays and tuples `{{slice}} ... {{/slice}}`.
 - [X] Rendering [inverted sections](https://github.com/mustache/spec/blob/master/specs/inverted.yml) `{{^foo}} ... {{/foo}}`.
-- [ ] [Lambdas](https://github.com/mustache/spec/blob/master/specs/~lambdas.yml) expansion.
+- [X] [Lambdas](https://github.com/mustache/spec/blob/master/specs/~lambdas.yml) expansion.
 - [ ] Rendering [partials](https://github.com/mustache/spec/blob/master/specs/partials.yml) `{{>file.html}}`.
 - [ ] Rendering [parents and blocks](https://github.com/mustache/spec/blob/master/specs/~inheritance.yml) `{{<file.html}}` and `{{$block}}`.
 
@@ -81,9 +81,10 @@ So, it's important to be able to deal with multi-megabyte inputs without eating 
 
 ```Zig
 
-    // 16KB should be enough memory for this job
+    // 32KB should be enough memory for this job
+    // 16KB if we don't need to support lambdas 😅
     var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){
-        .requested_memory_limit = 16 * 1024,
+        .requested_memory_limit = 32 * 1024,
     };
     defer _ = plenty_of_memory.deinit();
 
