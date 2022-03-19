@@ -29,7 +29,7 @@ pub const LambdaContext = struct {
     inner_text: []const u8,
 
     const VTable = struct {
-        renderAlloc: fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
+        renderAlloc: fn (*const anyopaque, Allocator, Allocator, []const u8) anyerror![]u8,
         render: fn (*const anyopaque, Allocator, []const u8) anyerror!void,
         write: fn (*const anyopaque, []const u8) anyerror!usize,
     };
@@ -38,7 +38,17 @@ pub const LambdaContext = struct {
     /// Renders a template against the current context
     /// Returns an owned mutable slice with the rendered text
     pub inline fn renderAlloc(self: LambdaContext, allocator: Allocator, template_text: []const u8) anyerror![]u8 {
-        return try self.vtable.renderAlloc(self.ptr, allocator, template_text);
+        return try self.vtable.renderAlloc(self.ptr, self.allocator, allocator, template_text);
+    }
+
+    ///
+    /// Formats a template to be rendered against the current context
+    /// Returns an owned mutable slice with the rendered text
+    pub fn renderFormatAlloc(self: LambdaContext, allocator: Allocator, comptime fmt: []const u8, args: anytype) anyerror![]u8 {
+        const template_text = try std.fmt.allocPrint(self.allocator, fmt, args);
+        defer self.allocator.free(template_text);
+
+        return try self.vtable.renderAlloc(self.ptr, self.allocator, allocator, template_text);
     }
 
     ///
@@ -86,8 +96,9 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
         const Self = @This();
         const ContextInterface = Context(Writer);
         const ContextStack = ContextInterface.ContextStack;
+        const OutWriter = ContextInterface.OutWriter;
 
-        out_writer: Writer,
+        out_writer: OutWriter,
         stack: *const ContextStack,
         delimiters: Delimiters,
         escape: Escape,
@@ -107,11 +118,22 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             };
         }
 
-        fn renderAlloc(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) anyerror![]u8 {
-            _ = ctx;
-            _ = template_text;
+        fn renderAlloc(ctx: *const anyopaque, allocator: Allocator, buffer_allocator: Allocator, template_text: []const u8) anyerror![]u8 {
+            var self = getSelf(ctx);
 
-            return try allocator.dupe(u8, "dummy");
+            var template = switch (try mustache.parseTemplate(allocator, template_text, self.delimiters, false)) {
+                .Success => |value| value,
+                .ParseError => |err| return err.error_code,
+            };
+            defer template.free(allocator);
+
+            var buffer = std.ArrayList(u8).init(buffer_allocator);
+            defer buffer.deinit();
+
+            const Impl = Render(Writer);
+            try Impl.renderLevel(allocator, .{ .Buffer = buffer.writer() }, self.stack, template.elements);
+
+            return buffer.toOwnedSlice();
         }
 
         fn render(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) anyerror!void {
@@ -130,7 +152,10 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {
             var self = getSelf(ctx);
 
-            return try escapeWrite(self.out_writer, rendered_text, self.escape);
+            return switch (self.out_writer) {
+                .Writer => |writer| try escapeWrite(writer, rendered_text, self.escape),
+                .Buffer => |buffer| try escapeWrite(buffer, rendered_text, self.escape),
+            };
         }
 
         inline fn getSelf(ctx: *const anyopaque) *const Self {
