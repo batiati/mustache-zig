@@ -26,7 +26,7 @@ pub inline fn get(
     path_iterator: *std.mem.TokenIterator(u8),
     index: ?usize,
 ) Allocator.Error!PathResolution(Context(@TypeOf(out_writer).Error)) {
-    const GetContext = Caller(Allocator.Error, Context(@TypeOf(out_writer).Error), context.getContext);
+    const GetContext = Invoker(Allocator.Error, Context(@TypeOf(out_writer).Error), context.getContext);
     return try GetContext.call(
         allocator,
         out_writer,
@@ -42,7 +42,7 @@ pub inline fn interpolate(
     path_iterator: *std.mem.TokenIterator(u8),
     escape: Escape,
 ) @TypeOf(out_writer).Error!PathResolution(void) {
-    const Interpolate = Caller(@TypeOf(out_writer).Error, void, interpolateAction);
+    const Interpolate = Invoker(@TypeOf(out_writer).Error, void, interpolateAction);
     return try Interpolate.call(
         escape,
         out_writer,
@@ -58,7 +58,7 @@ pub inline fn check(
     index: usize,
 ) PathResolution(void) {
     const null_writer = std.io.null_writer;
-    const CheckAction = Caller(@TypeOf(null_writer).Error, void, checkAction);
+    const CheckAction = Invoker(@TypeOf(null_writer).Error, void, checkAction);
     return try CheckAction.call(
         {},
         null_writer,
@@ -78,7 +78,7 @@ pub inline fn expandLambda(
     delimiters: Delimiters,
     path_iterator: *std.mem.TokenIterator(u8),
 ) (Allocator.Error || @TypeOf(out_writer).Error)!PathResolution(void) {
-    const ExpandLambdaAction = Caller(Allocator.Error || @TypeOf(out_writer).Error, void, expandLambdaAction);
+    const ExpandLambdaAction = Invoker(Allocator.Error || @TypeOf(out_writer).Error, void, expandLambdaAction);
     return try ExpandLambdaAction.call(
         .{ allocator, stack, tag_contents, escape, delimiters },
         out_writer,
@@ -88,7 +88,7 @@ pub inline fn expandLambda(
     );
 }
 
-fn Caller(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
+fn Invoker(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
     const action_type_info = @typeInfo(@TypeOf(action_fn));
     if (action_type_info != .Fn) @compileError("action_fn must be a function");
 
@@ -560,7 +560,7 @@ const tests = struct {
         a_tuple: Tuple = Tuple{ 0, 0, 0 },
     };
 
-    const FooCaller = Caller(error{}, bool, fooAction);
+    const FooCaller = Invoker(error{}, bool, fooAction);
 
     fn fooAction(comptime TExpected: type, out_writer: anytype, value: anytype) error{}!bool {
         _ = out_writer;
