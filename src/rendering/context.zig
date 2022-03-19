@@ -58,12 +58,12 @@ pub const Escape = enum {
     Unescaped,
 };
 
-pub fn getContext(allocator: Allocator, out_writer: anytype, data: anytype) Allocator.Error!Context(@TypeOf(out_writer)) {
+pub fn getContext(allocator: Allocator, out_writer: anytype, data: anytype) Allocator.Error!Context(@TypeOf(out_writer).Error) {
     const Impl = ContextImpl(@TypeOf(out_writer), @TypeOf(data));
     return try Impl.init(allocator, out_writer, data);
 }
 
-pub fn Context(comptime Writer: type) type {
+pub fn Context(comptime WriteError: type) type {
     return struct {
         const Self = @This();
 
@@ -77,8 +77,8 @@ pub fn Context(comptime Writer: type) type {
 
         pub const VTable = struct {
             get: fn (*anyopaque, Allocator, []const u8, ?usize) Allocator.Error!PathResolution(Self),
-            interpolate: fn (*anyopaque, []const u8, Escape) Writer.Error!PathResolution(void),
-            expandLambda: fn (*anyopaque, Allocator, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            interpolate: fn (*anyopaque, []const u8, Escape) WriteError!PathResolution(void),
+            expandLambda: fn (*anyopaque, Allocator, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || WriteError)!PathResolution(void),
             check: fn (*anyopaque, []const u8, usize) PathResolution(void),
             deinit: fn (*anyopaque, Allocator) void,
         };
@@ -173,11 +173,11 @@ pub fn Context(comptime Writer: type) type {
             };
         }
 
-        pub inline fn interpolate(self: Self, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
+        pub inline fn interpolate(self: Self, path: []const u8, escape: Escape) WriteError!PathResolution(void) {
             return try self.vtable.interpolate(self.ptr, path, escape);
         }
 
-        pub inline fn expandLambda(self: Self, allocator: Allocator, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        pub inline fn expandLambda(self: Self, allocator: Allocator, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || WriteError)!PathResolution(void) {
             return try self.vtable.expandLambda(self.ptr, allocator, stack, path, inner_text, escape, delimiters);
         }
 
@@ -189,7 +189,7 @@ pub fn Context(comptime Writer: type) type {
 
 fn ContextImpl(comptime Writer: type, comptime Data: type) type {
     return struct {
-        const ContextInterface = Context(Writer);
+        const ContextInterface = Context(Writer.Error);
         const ContextStack = ContextInterface.ContextStack;
 
         const vtable = ContextInterface.VTable{

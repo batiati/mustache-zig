@@ -97,7 +97,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
 
 pub fn Render(comptime Writer: type) type {
     return struct {
-        pub const ContextInterface = Context(Writer);
+        pub const ContextInterface = Context(Writer.Error);
         pub const ContextStack = ContextInterface.ContextStack;
 
         pub const Error = Allocator.Error || Writer.Error;
@@ -184,7 +184,7 @@ pub fn Render(comptime Writer: type) type {
             }
         }
 
-        fn getIterator(stack: *const ContextStack, path: []const u8) (Allocator.Error || Writer.Error)!?Context(Writer).Iterator {
+        fn getIterator(stack: *const ContextStack, path: []const u8) (Allocator.Error || Writer.Error)!?ContextInterface.Iterator {
             var level: ?*const ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {

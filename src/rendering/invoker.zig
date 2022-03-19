@@ -25,8 +25,8 @@ pub inline fn get(
     data: anytype,
     path_iterator: *std.mem.TokenIterator(u8),
     index: ?usize,
-) Allocator.Error!PathResolution(Context(@TypeOf(out_writer))) {
-    const GetContext = Caller(Allocator.Error, Context(@TypeOf(out_writer)), context.getContext);
+) Allocator.Error!PathResolution(Context(@TypeOf(out_writer).Error)) {
+    const GetContext = Caller(Allocator.Error, Context(@TypeOf(out_writer).Error), context.getContext);
     return try GetContext.call(
         allocator,
         out_writer,
