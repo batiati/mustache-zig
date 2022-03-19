@@ -20,16 +20,16 @@ const assert = std.debug.assert;
 const escapeWrite = @import("escape.zig").escapeWrite;
 
 pub inline fn get(
+    comptime Writer: type,
     allocator: Allocator,
-    out_writer: anytype,
     data: anytype,
     path_iterator: *std.mem.TokenIterator(u8),
     index: ?usize,
-) Allocator.Error!PathResolution(Context(@TypeOf(out_writer).Error)) {
-    const GetContext = Invoker(Allocator.Error, Context(@TypeOf(out_writer).Error), context.getContext);
+) Allocator.Error!PathResolution(Context(Writer)) {
+    const GetContext = Invoker(Allocator.Error, Context(Writer), getAction(Writer));
     return try GetContext.call(
         allocator,
-        out_writer,
+        {},
         data,
         path_iterator,
         index,
@@ -57,11 +57,10 @@ pub inline fn check(
     path_iterator: *std.mem.TokenIterator(u8),
     index: usize,
 ) PathResolution(void) {
-    const null_writer = std.io.null_writer;
-    const CheckAction = Invoker(@TypeOf(null_writer).Error, void, checkAction);
+    const CheckAction = Invoker(error{}, void, checkAction);
     return try CheckAction.call(
         {},
-        null_writer,
+        {},
         data,
         path_iterator,
         index,
@@ -391,9 +390,9 @@ fn Invoker(comptime TError: type, TReturn: type, comptime action_fn: anytype) ty
 
 inline fn checkAction(
     param: void,
-    out_writer: anytype,
+    out_writer: void,
     value: anytype,
-) @TypeOf(out_writer).Error!void {
+) error{}!void {
     _ = param;
     _ = out_writer;
     _ = value;
@@ -432,6 +431,15 @@ inline fn expandLambdaAction(
             return @errSetCast(Error, e);
         }
     };
+}
+
+inline fn getAction(comptime Writer: type) fn (Allocator, void, anytype) Allocator.Error!Context(Writer) {
+    return struct {
+        pub fn action(allocator: Allocator, out_writer: void, value: anytype) Allocator.Error!Context(Writer) {
+            _ = out_writer;
+            return try context.getContext(Writer, allocator, value);
+        }
+    }.action;
 }
 
 inline fn interpolateAction(

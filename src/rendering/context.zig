@@ -58,12 +58,12 @@ pub const Escape = enum {
     Unescaped,
 };
 
-pub fn getContext(allocator: Allocator, out_writer: anytype, data: anytype) Allocator.Error!Context(@TypeOf(out_writer).Error) {
-    const Impl = ContextImpl(@TypeOf(out_writer), @TypeOf(data));
-    return try Impl.init(allocator, out_writer, data);
+pub fn getContext(comptime Writer: type, allocator: Allocator, data: anytype) Allocator.Error!Context(Writer) {
+    const Impl = ContextImpl(Writer, @TypeOf(data));
+    return try Impl.init(allocator, data);
 }
 
-pub fn Context(comptime WriteError: type) type {
+pub fn Context(comptime Writer: type) type {
     return struct {
         const Self = @This();
 
@@ -77,8 +77,8 @@ pub fn Context(comptime WriteError: type) type {
 
         pub const VTable = struct {
             get: fn (*const anyopaque, Allocator, []const u8, ?usize) Allocator.Error!PathResolution(Self),
-            interpolate: fn (*const anyopaque, []const u8, Escape) WriteError!PathResolution(void),
-            expandLambda: fn (*const anyopaque, Allocator, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || WriteError)!PathResolution(void),
+            interpolate: fn (*const anyopaque, Writer, []const u8, Escape) Writer.Error!PathResolution(void),
+            expandLambda: fn (*const anyopaque, Allocator, Writer, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
             check: fn (*const anyopaque, []const u8, usize) PathResolution(void),
             deinit: fn (*const anyopaque, Allocator) void,
         };
@@ -173,12 +173,12 @@ pub fn Context(comptime WriteError: type) type {
             };
         }
 
-        pub inline fn interpolate(self: Self, path: []const u8, escape: Escape) WriteError!PathResolution(void) {
-            return try self.vtable.interpolate(self.ptr, path, escape);
+        pub inline fn interpolate(self: Self, writer: Writer, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
+            return try self.vtable.interpolate(self.ptr, writer, path, escape);
         }
 
-        pub inline fn expandLambda(self: Self, allocator: Allocator, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || WriteError)!PathResolution(void) {
-            return try self.vtable.expandLambda(self.ptr, allocator, stack, path, inner_text, escape, delimiters);
+        pub inline fn expandLambda(self: Self, allocator: Allocator, writer: Writer, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            return try self.vtable.expandLambda(self.ptr, allocator, writer, stack, path, inner_text, escape, delimiters);
         }
 
         pub inline fn deinit(self: Self, allocator: Allocator) void {
@@ -189,7 +189,7 @@ pub fn Context(comptime WriteError: type) type {
 
 fn ContextImpl(comptime Writer: type, comptime Data: type) type {
     return struct {
-        const ContextInterface = Context(Writer.Error);
+        const ContextInterface = Context(Writer);
         const ContextStack = ContextInterface.ContextStack;
 
         const vtable = ContextInterface.VTable{
@@ -203,21 +203,18 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         const PATH_SEPARATOR = ".";
         const Self = @This();
 
-        // If a NullWriter is used with and a zero size Data, we cannot create an pointer
         // Compiler error: '*Self' and '*anyopaque' do not have the same in-memory representation
         // note: '*Self" has no in-memory bits
         // note: '*anyopaque' has in-memory bits
-        const is_zero_size = @sizeOf(Writer) + @sizeOf(Data) == 0;
+        const is_zero_size = @sizeOf(Data) == 0;
 
-        writer: Writer,
         data: Data,
 
-        pub fn init(allocator: Allocator, writer: Writer, data: Data) Allocator.Error!ContextInterface {
+        pub fn init(allocator: Allocator, data: Data) Allocator.Error!ContextInterface {
             return ContextInterface{
                 .ptr = if (is_zero_size) undefined else blk: {
                     var self = try allocator.create(Self);
                     self.* = .{
-                        .writer = writer,
                         .data = data,
                     };
 
@@ -232,8 +229,8 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try invoker.get(
+                Writer,
                 allocator,
-                self.writer,
                 self.data,
                 &path_iterator,
                 index,
@@ -251,26 +248,26 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             );
         }
 
-        fn interpolate(ctx: *const anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
+        fn interpolate(ctx: *const anyopaque, writer: Writer, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try invoker.interpolate(
-                self.writer,
+                writer,
                 self.data,
                 &path_iterator,
                 escape,
             );
         }
 
-        fn expandLambda(ctx: *const anyopaque, allocator: Allocator, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        fn expandLambda(ctx: *const anyopaque, allocator: Allocator, writer: Writer, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
 
             return try invoker.expandLambda(
                 allocator,
-                self.writer,
+                writer,
                 self.data,
                 stack,
                 inner_text,
@@ -431,17 +428,17 @@ const struct_tests = struct {
     fn interpolate(out_writer: anytype, data: anytype, path: []const u8) anyerror!void {
         const allocator = testing.allocator;
 
-        var ctx = try getContext(allocator, out_writer, data);
+        var ctx = try getContext(@TypeOf(out_writer), allocator, data);
         defer ctx.deinit(allocator);
 
-        switch (try ctx.interpolate(path, .Unescaped)) {
+        switch (try ctx.interpolate(out_writer, path, .Unescaped)) {
             .Lambda => {
                 var stack = @TypeOf(ctx).ContextStack{
                     .parent = null,
                     .ctx = ctx,
                 };
 
-                _ = try ctx.expandLambda(allocator, &stack, path, "", .Unescaped, .{});
+                _ = try ctx.expandLambda(allocator, out_writer, &stack, path, "", .Unescaped, .{});
             },
             else => {},
         }
@@ -1002,12 +999,12 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = try getContext(allocator, writer, person);
+        var person_ctx = try getContext(@TypeOf(writer), allocator, person);
         defer person_ctx.deinit(allocator);
 
         list.clearAndFree();
 
-        _ = try person_ctx.interpolate("address.street", .Unescaped);
+        _ = try person_ctx.interpolate(writer, "address.street", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         // Address
@@ -1022,7 +1019,7 @@ const struct_tests = struct {
         defer address_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try address_ctx.interpolate("street", .Unescaped);
+        _ = try address_ctx.interpolate(writer, "street", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         // Street
@@ -1038,12 +1035,12 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try street_ctx.interpolate("", .Unescaped);
+        _ = try street_ctx.interpolate(writer, "", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
 
         list.clearAndFree();
 
-        _ = try street_ctx.interpolate(".", .Unescaped);
+        _ = try street_ctx.interpolate(writer, ".", .Unescaped);
         try testing.expectEqualStrings("nearby", list.items);
     }
 
@@ -1059,12 +1056,12 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = try getContext(allocator, writer, &person);
+        var person_ctx = try getContext(@TypeOf(writer), allocator, &person);
         defer person_ctx.deinit(allocator);
 
         list.clearAndFree();
 
-        _ = try person_ctx.interpolate("indication.address.street", .Unescaped);
+        _ = try person_ctx.interpolate(writer, "indication.address.street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Indication
@@ -1079,7 +1076,7 @@ const struct_tests = struct {
         defer indication_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try indication_ctx.interpolate("address.street", .Unescaped);
+        _ = try indication_ctx.interpolate(writer, "address.street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Address
@@ -1094,7 +1091,7 @@ const struct_tests = struct {
         defer address_ctx.deinit(allocator);
 
         list.clearAndFree();
-        _ = try address_ctx.interpolate("street", .Unescaped);
+        _ = try address_ctx.interpolate(writer, "street", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         // Street
@@ -1110,12 +1107,12 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try street_ctx.interpolate("", .Unescaped);
+        _ = try street_ctx.interpolate(writer, "", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
 
         list.clearAndFree();
 
-        _ = try street_ctx.interpolate(".", .Unescaped);
+        _ = try street_ctx.interpolate(writer, ".", .Unescaped);
         try testing.expectEqualStrings("far away street", list.items);
     }
 
@@ -1126,7 +1123,8 @@ const struct_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var person_ctx = try getContext(allocator, std.io.null_writer, person);
+        const Writer = @TypeOf(std.io.null_writer);
+        var person_ctx = try getContext(Writer, allocator, person);
         defer person_ctx.deinit(allocator);
 
         // Person.address
@@ -1180,7 +1178,7 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Person
-        var ctx = try getContext(allocator, writer, person);
+        var ctx = try getContext(@TypeOf(writer), allocator, person);
         defer ctx.deinit(allocator);
 
         var iterator = switch (ctx.iterator("items")) {
@@ -1199,7 +1197,7 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try item_1.interpolate("name", .Unescaped);
+        _ = try item_1.interpolate(writer, "name", .Unescaped);
         try testing.expectEqualStrings("item 1", list.items);
 
         var item_2 = (try iterator.next(allocator)) orelse {
@@ -1210,7 +1208,7 @@ const struct_tests = struct {
 
         list.clearAndFree();
 
-        _ = try item_2.interpolate("name", .Unescaped);
+        _ = try item_2.interpolate(writer, "name", .Unescaped);
         try testing.expectEqualStrings("item 2", list.items);
 
         var no_more = try iterator.next(allocator);
@@ -1224,7 +1222,8 @@ const struct_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var ctx = try getContext(allocator, std.io.null_writer, person);
+        const Writer = @TypeOf(std.io.null_writer);
+        var ctx = try getContext(Writer, allocator, person);
         defer ctx.deinit(allocator);
 
         {
@@ -1269,7 +1268,8 @@ const struct_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var ctx = try getContext(allocator, std.io.null_writer, person);
+        const Writer = @TypeOf(std.io.null_writer);
+        var ctx = try getContext(Writer, allocator, person);
         defer ctx.deinit(allocator);
 
         {

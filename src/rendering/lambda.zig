@@ -84,7 +84,7 @@ pub const LambdaContext = struct {
 pub fn LambdaContextImpl(comptime Writer: type) type {
     return struct {
         const Self = @This();
-        const ContextInterface = Context(Writer.Error);
+        const ContextInterface = Context(Writer);
         const ContextStack = ContextInterface.ContextStack;
 
         out_writer: Writer,

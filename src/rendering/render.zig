@@ -86,7 +86,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
         pub fn render(self: *Self, elements: []const Element) Error!void {
             var stack = WriterRender.ContextStack{
                 .parent = null,
-                .ctx = try context.getContext(self.allocator, self.writer, self.data),
+                .ctx = try context.getContext(Writer, self.allocator, self.data),
             };
             defer stack.ctx.deinit(self.allocator);
 
@@ -97,7 +97,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
 
 pub fn Render(comptime Writer: type) type {
     return struct {
-        pub const ContextInterface = Context(Writer.Error);
+        pub const ContextInterface = Context(Writer);
         pub const ContextStack = ContextInterface.ContextStack;
 
         pub const Error = Allocator.Error || Writer.Error;
@@ -107,8 +107,8 @@ pub fn Render(comptime Writer: type) type {
                 for (elements) |element| {
                     switch (element) {
                         .StaticText => |content| try writer.writeAll(content),
-                        .Interpolation => |path| try interpolate(allocator, stack, path, .Escaped),
-                        .UnescapedInterpolation => |path| try interpolate(allocator, stack, path, .Unescaped),
+                        .Interpolation => |path| try interpolate(allocator, writer, stack, path, .Escaped),
+                        .UnescapedInterpolation => |path| try interpolate(allocator, writer, stack, path, .Unescaped),
                         .Section => |section| {
                             if (try getIterator(stack, section.key)) |*iterator| {
                                 if (iterator.is_lambda) {
@@ -117,7 +117,7 @@ pub fn Render(comptime Writer: type) type {
                                     assert(section.inner_text != null);
                                     assert(section.delimiters != null);
 
-                                    const expand_result = try iterator.context.expandLambda(allocator, stack, section.key, section.inner_text.?, .Unescaped, section.delimiters.?);
+                                    const expand_result = try iterator.context.expandLambda(allocator, writer, stack, section.key, section.inner_text.?, .Unescaped, section.delimiters.?);
                                     assert(expand_result == .Lambda);
                                 } else {
                                     while (try iterator.next(allocator)) |item_ctx| {
@@ -152,11 +152,11 @@ pub fn Render(comptime Writer: type) type {
             }
         }
 
-        fn interpolate(allocator: Allocator, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
+        fn interpolate(allocator: Allocator, writer: Writer, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
             var level: ?*const ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {
-                const path_resolution = try current.ctx.interpolate(path, escape);
+                const path_resolution = try current.ctx.interpolate(writer, path, escape);
 
                 switch (path_resolution) {
                     .Field => {
@@ -166,7 +166,7 @@ pub fn Render(comptime Writer: type) type {
 
                     .Lambda => {
                         // Expand the lambda against the current context and break the loop
-                        const expand_result = try current.ctx.expandLambda(allocator, stack, path, "", escape, .{});
+                        const expand_result = try current.ctx.expandLambda(allocator, writer, stack, path, "", escape, .{});
                         assert(expand_result == .Lambda);
                         break;
                     },
