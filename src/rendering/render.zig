@@ -2194,6 +2194,53 @@ const tests = struct {
             var data = Data{ .name = "Phill" };
             try expectRender(template_text, data, expected);
         }
+
+        test "Lambda - Pointer and Value" {
+            const Person = struct {
+                const Self = @This();
+
+                first_name: []const u8,
+                last_name: []const u8,
+
+                pub fn name1(self: *Self, ctx: LambdaContext) !void {
+                    try ctx.writeFormat("{s} {s}", .{ self.first_name, self.last_name });
+                }
+
+                pub fn name2(self: Self, ctx: LambdaContext) !void {
+                    try ctx.writeFormat("{s} {s}", .{ self.first_name, self.last_name });
+                }
+            };
+
+            const template_text = "Name1: {{name1}}, Name2: {{name2}}";
+            var data = Person{ .first_name = "John", .last_name = "Smith" };
+
+            // Value
+            try expectRender(template_text, data, "Name1: , Name2: John Smith");
+
+            // Pointer
+            try expectRender(template_text, &data, "Name1: John Smith, Name2: John Smith");
+        }
+
+        test "Lambda - processing" {
+            const Header = struct {
+                id: u32,
+                content: []const u8,
+
+                pub fn hash(ctx: LambdaContext) !void {
+                    var content = try ctx.renderAlloc(ctx.allocator, ctx.inner_text);
+                    defer ctx.allocator.free(content);
+
+                    const hash_value = std.hash.Crc32.hash(content);
+
+                    try ctx.writeFormat("{}", .{hash_value});
+                }
+            };
+
+            const template_text = "<header id='{{id}}' hash='{{#hash}}{{id}}{{content}}{{/hash}}'/>";
+
+            var header = Header{ .id = 100, .content = "This is some content" };
+            try expectRender(template_text, header, "<header id='100' hash='4174482081'/>");
+        }
     };
 
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
