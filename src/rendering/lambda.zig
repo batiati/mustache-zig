@@ -37,7 +37,7 @@ pub const LambdaContext = struct {
     ///
     /// Renders a template against the current context
     /// Returns an owned mutable slice with the rendered text
-    pub inline fn renderAlloc(self: LambdaContext, allocator: Allocator, template_text: []const u8) Allocator.Error![]u8 {
+    pub inline fn renderAlloc(self: LambdaContext, allocator: Allocator, template_text: []const u8) anyerror![]u8 {
         return try self.vtable.renderAlloc(self.ptr, allocator, template_text);
     }
 

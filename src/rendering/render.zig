@@ -2123,6 +2123,30 @@ const tests = struct {
 
             try expectRender(template_text, Data{}, expected_text);
         }
+
+        test "Lambda - lower" {
+            if (true) return error.SkipZigTest;
+
+            const Data = struct {
+                name: []const u8,
+
+                pub fn lower(ctx: LambdaContext) !void {
+                    var text = try ctx.renderAlloc(ctx.allocator, ctx.inner_text);
+                    defer ctx.allocator.free(text);
+
+                    for (text) |char, i| {
+                        text[i] = std.ascii.toLower(char);
+                    }
+
+                    try ctx.write(text);
+                }
+            };
+
+            const template_text = "{{#lower}}NAME={{name}}{{/lower}}";
+            const expected = "name=phill";
+            var data = Data{ .name = "Phill" };
+            try expectRender(template_text, data, expected);
+        }
     };
 
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {

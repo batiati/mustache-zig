@@ -231,21 +231,36 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return try invoker.get(allocator, self.writer, self.data, &path_iterator, index);
+            return try invoker.get(
+                allocator,
+                self.writer,
+                self.data,
+                &path_iterator,
+                index,
+            );
         }
 
         fn check(ctx: *anyopaque, path: []const u8, index: usize) PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return invoker.check(self.data, &path_iterator, index);
+            return invoker.check(
+                self.data,
+                &path_iterator,
+                index,
+            );
         }
 
         fn interpolate(ctx: *anyopaque, path: []const u8, escape: Escape) Writer.Error!PathResolution(void) {
             var self = getSelf(ctx);
 
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return try invoker.interpolate(self.writer, self.data, &path_iterator, escape);
+            return try invoker.interpolate(
+                self.writer,
+                self.data,
+                &path_iterator,
+                escape,
+            );
         }
 
         fn expandLambda(ctx: *anyopaque, allocator: Allocator, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
