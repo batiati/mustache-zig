@@ -106,21 +106,30 @@ pub fn TextScanner(comptime options: Options) type {
                     //
                     // Requesting a new buffer must preserve some parts of the current slice that are still needed
                     const adjust: struct { off_set: usize, preserve: ?usize } = adjust: {
+
+                        // block_index: initial index of the current TextBlock, the minimum part needed
+                        // bookmark.starting_mark: index of the last starting mark '{{', used to determine the inner_text between two tags
+                        const last_index = if (self.bookmark.stack == null) self.block_index else std.math.min(self.block_index, self.bookmark.starting_mark);
+
                         if (self.stream.preserve) |preserve| {
-                            if (preserve < self.block_index) {
+
+                            // Only when reading from Stream
+                            // stream.preserve: is the index of the first pending bookmark
+
+                            if (preserve < last_index) {
                                 break :adjust .{
                                     .off_set = preserve,
                                     .preserve = 0,
                                 };
                             } else {
                                 break :adjust .{
-                                    .off_set = self.block_index,
-                                    .preserve = preserve - self.block_index,
+                                    .off_set = last_index,
+                                    .preserve = preserve - last_index,
                                 };
                             }
                         } else {
                             break :adjust .{
-                                .off_set = self.block_index,
+                                .off_set = last_index,
                                 .preserve = null,
                             };
                         }
@@ -138,7 +147,11 @@ pub fn TextScanner(comptime options: Options) type {
                     self.index -= adjust.off_set;
                     self.block_index -= adjust.off_set;
 
-                    adjustBookmarkOffset(self.bookmark.stack, adjust.off_set);
+                    if (self.bookmark.stack != null) {
+                        adjustBookmarkOffset(self.bookmark.stack, adjust.off_set);
+                        self.bookmark.starting_mark -= adjust.off_set;
+                    }
+
                     self.stream.preserve = adjust.preserve;
                 }
             }

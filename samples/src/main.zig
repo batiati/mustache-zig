@@ -36,8 +36,8 @@ var ctx = .{
 };
 
 pub fn main() anyerror!void {
-    //try renderFromString();
-    //try renderFromCachedTemplate();
+    try renderFromString();
+    try renderFromCachedTemplate();
     try renderFromFile();
 }
 
@@ -85,7 +85,7 @@ pub fn renderFromFile() anyerror!void {
 
     // 16KB should be enough memory for this job
     var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){
-        //.requested_memory_limit = 32 * 1024,
+        .requested_memory_limit = 16 * 1024,
     };
     defer _ = plenty_of_memory.deinit();
 
@@ -104,7 +104,7 @@ pub fn renderFromFile() anyerror!void {
         defer file.close();
         var repeat: u32 = 0;
 
-        // Writing the same template 10k times on a file
+        // Writing the same template 100K times on a file
         while (repeat < 10_000) : (repeat += 1) {
             try file.writeAll(template_text);
         }
@@ -112,6 +112,6 @@ pub fn renderFromFile() anyerror!void {
 
     var out = std.io.getStdOut();
 
-    // Rendering this large template with only 32Kb of RAM
+    // Rendering this large template with only 16KB of RAM
     try mustache.renderFromFile(allocator, path_to_template, ctx, out.writer());
 }
