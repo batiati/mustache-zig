@@ -45,14 +45,14 @@ pub fn TextScanner(comptime options: Options) type {
             .Stream => struct {
                 reader: *FileReader(options),
                 ref_counter: RefCounter = .{},
-                preserve: ?usize = null,
+                preserve_bookmark: ?usize = null,
             },
             .String => void,
         } = undefined,
 
         bookmark: struct {
             stack: ?*Bookmark = null,
-            starting_mark: usize = 0,
+            last_starting_mark: usize = 0,
         } = .{},
 
         content: []const u8 = &.{},
@@ -108,13 +108,13 @@ pub fn TextScanner(comptime options: Options) type {
                     const adjust: struct { off_set: usize, preserve: ?usize } = adjust: {
 
                         // block_index: initial index of the current TextBlock, the minimum part needed
-                        // bookmark.starting_mark: index of the last starting mark '{{', used to determine the inner_text between two tags
-                        const last_index = if (self.bookmark.stack == null) self.block_index else std.math.min(self.block_index, self.bookmark.starting_mark);
+                        // bookmark.last_starting_mark: index of the last starting mark '{{', used to determine the inner_text between two tags
+                        const last_index = if (self.bookmark.stack == null) self.block_index else std.math.min(self.block_index, self.bookmark.last_starting_mark);
 
-                        if (self.stream.preserve) |preserve| {
+                        if (self.stream.preserve_bookmark) |preserve| {
 
                             // Only when reading from Stream
-                            // stream.preserve: is the index of the first pending bookmark
+                            // stream.preserve_bookmark: is the index of the pending bookmark
 
                             if (preserve < last_index) {
                                 break :adjust .{
@@ -149,10 +149,10 @@ pub fn TextScanner(comptime options: Options) type {
 
                     if (self.bookmark.stack != null) {
                         adjustBookmarkOffset(self.bookmark.stack, adjust.off_set);
-                        self.bookmark.starting_mark -= adjust.off_set;
+                        self.bookmark.last_starting_mark -= adjust.off_set;
                     }
 
-                    self.stream.preserve = adjust.preserve;
+                    self.stream.preserve_bookmark = adjust.preserve;
                 }
             }
         }
@@ -196,7 +196,7 @@ pub fn TextScanner(comptime options: Options) type {
                             increment = mark.delimiter_len;
 
                             if (mark.mark_type == .Starting) {
-                                self.bookmark.starting_mark = self.index;
+                                self.bookmark.last_starting_mark = self.index;
                             }
 
                             const tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null;
@@ -245,10 +245,10 @@ pub fn TextScanner(comptime options: Options) type {
 
             self.bookmark.stack = bookmark;
             if (options.source == .Stream) {
-                if (self.stream.preserve) |preserve| {
+                if (self.stream.preserve_bookmark) |preserve| {
                     assert(preserve <= self.index);
                 } else {
-                    self.stream.preserve = self.index;
+                    self.stream.preserve_bookmark = self.index;
                 }
             }
         }
@@ -258,17 +258,17 @@ pub fn TextScanner(comptime options: Options) type {
                 defer {
                     self.bookmark.stack = bookmark.prev;
                     if (options.source == .Stream and bookmark.prev == null) {
-                        self.stream.preserve = null;
+                        self.stream.preserve_bookmark = null;
                     }
                     allocator.destroy(bookmark);
                 }
 
                 assert(bookmark.index < self.content.len);
-                assert(bookmark.index <= self.bookmark.starting_mark);
-                assert(self.bookmark.starting_mark < self.content.len);
+                assert(bookmark.index <= self.bookmark.last_starting_mark);
+                assert(self.bookmark.last_starting_mark < self.content.len);
 
                 return RefCountedSlice{
-                    .content = self.content[bookmark.index..self.bookmark.starting_mark],
+                    .content = self.content[bookmark.index..self.bookmark.last_starting_mark],
                     .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
                 };
             } else {
