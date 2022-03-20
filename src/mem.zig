@@ -11,36 +11,38 @@ pub const RefCountedSlice = struct {
 };
 
 pub const RefCounter = struct {
+    const Self = @This();
+
     const State = struct {
         counter: u32,
         buffer: []const u8,
     };
 
-    pub const nullRef = RefCounter{};
+    pub const null_ref = Self{};
 
     state: ?*State = null,
 
-    pub fn init(allocator: Allocator, buffer: []const u8) Allocator.Error!RefCounter {
-        var state = try allocator.create(RefCounter.State);
+    pub fn init(allocator: Allocator, buffer: []const u8) Allocator.Error!Self {
+        var state = try allocator.create(State);
         state.* = .{
             .counter = 1,
             .buffer = buffer,
         };
 
-        return RefCounter{ .state = state };
+        return Self{ .state = state };
     }
 
-    pub fn ref(self: RefCounter) RefCounter {
+    pub fn ref(self: Self) Self {
         if (self.state) |state| {
             assert(state.counter != 0);
             state.counter += 1;
             return .{ .state = state };
         } else {
-            return RefCounter.nullRef;
+            return null_ref;
         }
     }
 
-    pub fn free(self: *RefCounter, allocator: Allocator) void {
+    pub fn free(self: *Self, allocator: Allocator) void {
         if (self.state) |state| {
             assert(state.counter != 0);
             self.state = null;
@@ -98,6 +100,7 @@ pub const RefCounter = struct {
 };
 
 pub const RefCounterHolder = struct {
+    const Self = @This();
     const HashMap = std.AutoHashMapUnmanaged(usize, void);
     group: HashMap = .{},
 
@@ -112,7 +115,7 @@ pub const RefCounterHolder = struct {
         }
     };
 
-    pub fn add(self: *RefCounterHolder, allocator: Allocator, ref_counter: RefCounter) Allocator.Error!void {
+    pub fn add(self: *Self, allocator: Allocator, ref_counter: RefCounter) Allocator.Error!void {
         if (ref_counter.state) |state| {
             var prev = try self.group.fetchPut(allocator, @ptrToInt(state), {});
             if (prev == null) {
@@ -121,13 +124,13 @@ pub const RefCounterHolder = struct {
         }
     }
 
-    pub fn iterator(self: *const RefCounterHolder) Iterator {
+    pub fn iterator(self: *const Self) Iterator {
         return Iterator{
             .hash_map_iterator = self.group.keyIterator(),
         };
     }
 
-    pub fn free(self: *RefCounterHolder, allocator: Allocator) void {
+    pub fn free(self: *Self, allocator: Allocator) void {
         defer {
             self.group.deinit(allocator);
             self.group = .{};
