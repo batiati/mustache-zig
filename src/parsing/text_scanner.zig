@@ -53,7 +53,6 @@ pub fn TextScanner(comptime options: Options) type {
         bookmark: struct {
             stack: ?*Bookmark = null,
             starting_mark: usize = 0,
-            ending_mark: usize = 0,
         } = .{},
 
         content: []const u8 = &.{},
@@ -183,9 +182,8 @@ pub fn TextScanner(comptime options: Options) type {
                             self.state = .{ .ExpectingMark = if (expected_mark == .Starting) .Ending else .Starting };
                             increment = mark.delimiter_len;
 
-                            switch (mark.mark_type) {
-                                .Starting => self.bookmark.starting_mark = self.index,
-                                .Ending => self.bookmark.ending_mark = self.index + mark.delimiter_len,
+                            if (mark.mark_type == .Starting) {
+                                self.bookmark.starting_mark = self.index;
                             }
 
                             const tail = if (self.index > self.block_index) self.content[self.block_index..self.index] else null;
@@ -229,15 +227,15 @@ pub fn TextScanner(comptime options: Options) type {
             var bookmark = try allocator.create(Bookmark);
             bookmark.* = .{
                 .prev = self.bookmark.stack,
-                .index = self.bookmark.ending_mark,
+                .index = self.index,
             };
 
             self.bookmark.stack = bookmark;
             if (options.source == .Stream) {
                 if (self.stream.preserve) |preserve| {
-                    assert(preserve <= self.bookmark.ending_mark);
+                    assert(preserve <= self.index);
                 } else {
-                    self.stream.preserve = self.bookmark.ending_mark;
+                    self.stream.preserve = self.index;
                 }
             }
         }
