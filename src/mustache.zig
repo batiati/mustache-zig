@@ -7,7 +7,7 @@ const rendering = @import("rendering/render.zig");
 pub const ParseError = template.ParseError;
 pub const LastError = template.LastError;
 
-pub const TemplateOptions = template.TemplateOptions;
+pub const Options = template.Options;
 pub const Delimiters = template.Delimiters;
 pub const Element = template.Element;
 pub const Section = template.Section;

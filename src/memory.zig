@@ -5,12 +5,25 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 const testing = std.testing;
 
-pub const RefCountedSlice = struct {
-    content: []const u8,
-    ref_counter: RefCounter,
-};
+const mustache = @import("mustache.zig");
+const Options = mustache.Options;
 
-pub const RefCounter = struct {
+pub fn RefCountedSlice(comptime options: Options) type {
+    return struct {
+        content: []const u8,
+        ref_counter: RefCounter(options),
+    };
+}
+
+pub fn RefCounter(comptime options: Options) type {
+    return if (options.isRefCounted()) RefCounterImpl else NoOpRefCounter;
+}
+
+pub fn RefCounterHolder(comptime options: Options) type {
+    return if (options.isRefCounted()) RefCounterHolderImpl else NoOpRefCounterHolder;
+}
+
+const RefCounterImpl = struct {
     const Self = @This();
 
     const State = struct {
@@ -60,7 +73,7 @@ pub const RefCounter = struct {
         // No defer here, should be freed by the ref_counter
         const some_text = try allocator.dupe(u8, "some text");
 
-        var counter_1 = try RefCounter.init(allocator, some_text);
+        var counter_1 = try RefCounterImpl.init(allocator, some_text);
         var counter_2 = counter_1.ref();
         var counter_3 = counter_2.ref();
 
@@ -99,7 +112,7 @@ pub const RefCounter = struct {
     }
 };
 
-pub const RefCounterHolder = struct {
+const RefCounterHolderImpl = struct {
     const Self = @This();
     const HashMap = std.AutoHashMapUnmanaged(usize, void);
     group: HashMap = .{},
@@ -107,15 +120,15 @@ pub const RefCounterHolder = struct {
     pub const Iterator = struct {
         hash_map_iterator: HashMap.KeyIterator,
 
-        pub fn next(self: *Iterator) ?RefCounter {
+        pub fn next(self: *Iterator) ?RefCounterImpl {
             return if (self.hash_map_iterator.next()) |item| blk: {
-                var state = @intToPtr(*RefCounter.State, item.*);
-                break :blk RefCounter{ .state = state };
+                var state = @intToPtr(*RefCounterImpl.State, item.*);
+                break :blk RefCounterImpl{ .state = state };
             } else null;
         }
     };
 
-    pub fn add(self: *Self, allocator: Allocator, ref_counter: RefCounter) Allocator.Error!void {
+    pub fn add(self: *Self, allocator: Allocator, ref_counter: RefCounterImpl) Allocator.Error!void {
         if (ref_counter.state) |state| {
             var prev = try self.group.fetchPut(allocator, @ptrToInt(state), {});
             if (prev == null) {
@@ -148,7 +161,7 @@ pub const RefCounterHolder = struct {
         // No defer here, should be freed by the ref_counter
         const some_text = try allocator.dupe(u8, "some text");
 
-        var counter_1 = try RefCounter.init(allocator, some_text);
+        var counter_1 = try RefCounterImpl.init(allocator, some_text);
         defer counter_1.free(allocator);
 
         var counter_2 = counter_1.ref();
@@ -166,7 +179,7 @@ pub const RefCounterHolder = struct {
         try testing.expect(counter_3.state != null);
         try testing.expect(counter_3.state.?.counter == 3);
 
-        var holder = RefCounterHolder{};
+        var holder = RefCounterHolderImpl{};
 
         // Adding a ref_counter to the Holder, increases the counter
         try holder.add(allocator, counter_1);
@@ -189,6 +202,55 @@ pub const RefCounterHolder = struct {
         try testing.expect(counter_1.state.?.counter == 3);
         try testing.expect(counter_2.state.?.counter == 3);
         try testing.expect(counter_3.state.?.counter == 3);
+    }
+};
+
+const NoOpRefCounter = struct {
+    const Self = @This();
+
+    pub const null_ref = Self{};
+
+    pub inline fn init(allocator: Allocator, buffer: []const u8) Allocator.Error!Self {
+        _ = allocator;
+        _ = buffer;
+        return null_ref;
+    }
+
+    pub inline fn ref(self: Self) Self {
+        _ = self;
+        return null_ref;
+    }
+
+    pub inline fn free(self: *Self, allocator: Allocator) void {
+        _ = self;
+        _ = allocator;
+    }
+};
+
+const NoOpRefCounterHolder = struct {
+    const Self = @This();
+
+    pub const Iterator = struct {
+        pub fn next(self: *Iterator) ?NoOpRefCounter {
+            _ = self;
+            return null;
+        }
+    };
+
+    pub inline fn add(self: *Self, allocator: Allocator, ref_counter: NoOpRefCounter) Allocator.Error!void {
+        _ = self;
+        _ = allocator;
+        _ = ref_counter;
+    }
+
+    pub inline fn iterator(self: *const Self) Iterator {
+        _ = self;
+        return .{};
+    }
+
+    pub inline fn free(self: *Self, allocator: Allocator) void {
+        _ = self;
+        _ = allocator;
     }
 };
 

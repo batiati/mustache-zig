@@ -5,6 +5,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
+const Options = mustache.Options;
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 const Section = mustache.Section;
@@ -45,7 +46,12 @@ pub fn renderAllocFromString(allocator: Allocator, template_text: []const u8, da
 }
 
 pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || @TypeOf(out_writer).Error)!void {
-    var template = TemplateLoader(.{ .owns_string = false }){
+    const options = Options{
+        .source = .{ .String = .{ .copy_strings = false } },
+        .output = .Render,
+    };
+
+    var template = TemplateLoader(options){
         .allocator = allocator,
     };
     errdefer template.deinit();
@@ -55,7 +61,12 @@ pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: a
 }
 
 pub fn renderFromFile(allocator: Allocator, absolute_template_path: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(out_writer).Error)!void {
-    var template = TemplateLoader(.{ .owns_string = false }){
+    const options = Options{
+        .source = .{ .Stream = .{} },
+        .output = .Render,
+    };
+
+    var template = TemplateLoader(options){
         .allocator = allocator,
     };
     errdefer template.deinit();

@@ -9,7 +9,10 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
+const Options = mustache.Options;
 const ParseError = mustache.ParseError;
+
+const memory = @import("../memory.zig");
 
 const parsing = @import("parsing.zig");
 const Event = parsing.Event;
@@ -17,20 +20,17 @@ const Mark = parsing.Mark;
 const MarkType = parsing.MarkType;
 const DelimiterType = parsing.DelimiterType;
 const Delimiters = parsing.Delimiters;
-const TextBlock = parsing.TextBlock;
-const Trimmer = parsing.Trimmer;
 const FileReader = parsing.FileReader;
+const Trimmer = parsing.Trimmer;
 
-const mem = @import("../mem.zig");
-const RefCounter = mem.RefCounter;
-const RefCounterHolder = mem.RefCounterHolder;
-const RefCountedSlice = mem.RefCountedSlice;
+pub fn TextScanner(comptime options: Options) type {
+    const RefCounter = memory.RefCounter(options);
+    const RefCountedSlice = memory.RefCountedSlice(options);
+    const TextBlock = parsing.TextBlock(options);
 
-pub const TextSource = enum { String, File };
-
-pub fn TextScanner(comptime source: TextSource) type {
     return struct {
         const Self = @This();
+
         const State = union(enum) {
             Finished,
             ExpectingMark: MarkType,
@@ -41,11 +41,14 @@ pub fn TextScanner(comptime source: TextSource) type {
             index: usize,
         };
 
-        stream: if (source == .File) struct {
-            reader: *FileReader,
-            ref_counter: RefCounter = .{},
-            preserve: ?usize = null,
-        } else void = undefined,
+        stream: switch (options.source) {
+            .Stream => struct {
+                reader: *FileReader(options),
+                ref_counter: RefCounter = .{},
+                preserve: ?usize = null,
+            },
+            .String => void,
+        } = undefined,
 
         bookmark: struct {
             stack: ?*Bookmark = null,
@@ -67,21 +70,21 @@ pub fn TextScanner(comptime source: TextSource) type {
         ///
         /// Should be the template content if source == .String
         /// or the absolute path if source == .File
-        pub fn init(allocator: Allocator, template: []const u8) if (source == .String) Allocator.Error!Self else FileReader.Error!Self {
-            switch (source) {
+        pub fn init(allocator: Allocator, template: []const u8) if (options.source == .String) Allocator.Error!Self else FileReader(options).Error!Self {
+            switch (options.source) {
                 .String => return Self{
                     .content = template,
                 },
-                .File => return Self{
+                .Stream => return Self{
                     .stream = .{
-                        .reader = try FileReader.initFromPath(allocator, template, 4 * 1024),
+                        .reader = try FileReader(options).initFromPath(allocator, template),
                     },
                 },
             }
         }
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            if (source == .File) {
+            if (options.source == .Stream) {
                 self.stream.ref_counter.free(allocator);
                 self.stream.reader.deinit(allocator);
 
@@ -98,13 +101,13 @@ pub fn TextScanner(comptime source: TextSource) type {
         }
 
         fn requestContent(self: *Self, allocator: Allocator) !void {
-            if (source == .File) {
+            if (options.source == .Stream) {
                 if (!self.stream.reader.finished()) {
 
                     //
                     // Requesting a new buffer must preserve some parts of the current slice that are still needed
-                    const adjust: struct { off_set: usize, preserve: if (source == .File) ?usize else void } = adjust: {
-                        if (if (source == .File) self.stream.preserve else null) |preserve| {
+                    const adjust: struct { off_set: usize, preserve: ?usize } = adjust: {
+                        if (self.stream.preserve) |preserve| {
                             if (preserve < self.block_index) {
                                 break :adjust .{
                                     .off_set = preserve,
@@ -119,7 +122,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                         } else {
                             break :adjust .{
                                 .off_set = self.block_index,
-                                .preserve = if (source == .File) null else {},
+                                .preserve = null,
                             };
                         }
                     };
@@ -135,10 +138,9 @@ pub fn TextScanner(comptime source: TextSource) type {
                     self.content = read.content;
                     self.index -= adjust.off_set;
                     self.block_index -= adjust.off_set;
-                    if (source == .File) {
-                        adjustBookmarkOffset(self.bookmark.stack, adjust.off_set);
-                        self.stream.preserve = adjust.preserve;
-                    }
+
+                    adjustBookmarkOffset(self.bookmark.stack, adjust.off_set);
+                    self.stream.preserve = adjust.preserve;
                 }
             }
         }
@@ -150,12 +152,12 @@ pub fn TextScanner(comptime source: TextSource) type {
                 .Finished => return null,
                 .ExpectingMark => |expected_mark| {
                     self.block_index = self.index;
-                    var trimmer = Trimmer(source){ .text_scanner = self };
+                    var trimmer = Trimmer(Self){ .text_scanner = self };
 
                     while (self.index < self.content.len or
-                        (source == .File and !self.stream.reader.finished()))
+                        (options.source == .Stream and !self.stream.reader.finished()))
                     {
-                        if (source == .File) {
+                        if (options.source == .Stream) {
                             // Request a new slice if near to the end
                             if (self.content.len == 0 or
                                 self.index + self.delimiter_max_size + 1 >= self.content.len)
@@ -190,7 +192,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                             return TextBlock{
                                 .event = .{ .Mark = mark },
                                 .tail = tail,
-                                .ref_counter = if (source == .File and tail != null) self.stream.ref_counter.ref() else .{},
+                                .ref_counter = if (options.source == .Stream and tail != null) self.stream.ref_counter.ref() else .{},
                                 .lin = self.lin,
                                 .col = self.col,
                                 .left_trimming = trimmer.getLeftTrimmingIndex(),
@@ -213,7 +215,7 @@ pub fn TextScanner(comptime source: TextSource) type {
                     return TextBlock{
                         .event = .Eof,
                         .tail = tail,
-                        .ref_counter = if (source == .File and tail != null) self.stream.ref_counter.ref() else .{},
+                        .ref_counter = if (options.source == .Stream and tail != null) self.stream.ref_counter.ref() else .{},
                         .lin = self.lin,
                         .col = self.col,
                         .left_trimming = trimmer.getLeftTrimmingIndex(),
@@ -231,7 +233,7 @@ pub fn TextScanner(comptime source: TextSource) type {
             };
 
             self.bookmark.stack = bookmark;
-            if (source == .File) {
+            if (options.source == .Stream) {
                 if (self.stream.preserve) |preserve| {
                     assert(preserve <= self.bookmark.ending_mark);
                 } else {
@@ -244,7 +246,7 @@ pub fn TextScanner(comptime source: TextSource) type {
             if (self.bookmark.stack) |bookmark| {
                 defer {
                     self.bookmark.stack = bookmark.prev;
-                    if (source == .File and bookmark.prev == null) {
+                    if (options.source == .Stream and bookmark.prev == null) {
                         self.stream.preserve = null;
                     }
                     allocator.destroy(bookmark);
@@ -256,7 +258,7 @@ pub fn TextScanner(comptime source: TextSource) type {
 
                 return RefCountedSlice{
                     .content = self.content[bookmark.index..self.bookmark.starting_mark],
-                    .ref_counter = if (source == .File) self.stream.ref_counter.ref() else .{},
+                    .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
                 };
             } else {
                 return null;
@@ -303,6 +305,11 @@ pub fn TextScanner(comptime source: TextSource) type {
     };
 }
 
+const TestTextScanner = TextScanner(.{
+    .source = .{ .String = .{} },
+    .output = .Render,
+});
+
 test "basic tests" {
     const content =
         \\Hello{{tag1}}
@@ -311,7 +318,7 @@ test "basic tests" {
 
     const allocator = testing.allocator;
 
-    var reader = try TextScanner(.String).init(allocator, content);
+    var reader = try TestTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
@@ -385,7 +392,7 @@ test "custom tags" {
 
     const allocator = testing.allocator;
 
-    var reader = try TextScanner(.String).init(allocator, content);
+    var reader = try TestTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
@@ -436,7 +443,7 @@ test "EOF" {
 
     const allocator = testing.allocator;
 
-    var reader = try TextScanner(.String).init(allocator, content);
+    var reader = try TestTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
@@ -470,7 +477,7 @@ test "EOF custom tags" {
 
     const allocator = testing.allocator;
 
-    var reader = try TextScanner(.String).init(allocator, content);
+    var reader = try TestTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
@@ -507,7 +514,7 @@ test "bookmarks" {
     const content = "{{#section1}}begin_content1{{#section2}}content2{{/section2}}end_content1{{/section1}}";
     const allocator = testing.allocator;
 
-    var reader = try TextScanner(.String).init(allocator, content);
+    var reader = try TestTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});

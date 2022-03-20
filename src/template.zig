@@ -259,16 +259,17 @@ const ParseTemplateResult = union(enum) {
 ///   Use this same allocator to free the returned template
 /// template_text: utf-8 encoded template text to be parsed
 /// delimiters: define custom delimiters, or use .{} for the default
-/// owns_string: comptime bool indicating if the cached template shoud owns its strings.
+/// copy_strings: comptime bool indicating if the cached template shoud copy its strings.
 ///   When true, all strings will be copied to the template and the "template_text" slice can be freed by the caller 
 ///   When false, the "template_text" slice must be static or be valid during the template lifetime.
 pub fn parseTemplate(
     allocator: Allocator,
     template_text: []const u8,
     delimiters: Delimiters,
-    comptime owns_string: bool,
+    comptime copy_strings: bool,
 ) Allocator.Error!ParseTemplateResult {
-    return try parse(.String, owns_string, allocator, template_text, delimiters);
+    const source = Options.Source{ .String = .{ .copy_strings = copy_strings } };
+    return try parse(source, allocator, template_text, delimiters);
 }
 
 pub fn parseTemplateFromFile(
@@ -276,19 +277,17 @@ pub fn parseTemplateFromFile(
     template_absolute_path: []const u8,
     delimiters: Delimiters,
 ) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseTemplateResult {
-    return try parse(.File, true, allocator, template_absolute_path, delimiters);
+    const source = Options.Source{ .Stream = .{} };
+    return try parse(source, allocator, template_absolute_path, delimiters);
 }
 
 inline fn parse(
-    comptime source: parsing.TextSource,
-    comptime owns_string: bool,
+    comptime source: Options.Source,
     allocator: Allocator,
     source_content: []const u8,
     delimiters: Delimiters,
 ) !ParseTemplateResult {
-    const options = TemplateOptions{
-        .owns_string = owns_string,
-    };
+    const options = Options{ .source = source, .output = .Parse };
 
     var template = TemplateLoader(options){
         .allocator = allocator,
@@ -298,22 +297,16 @@ inline fn parse(
     errdefer template.deinit();
 
     switch (source) {
-        .File => try template.loadFromFile(source_content),
+        .Stream => try template.loadFromFile(source_content),
         .String => try template.load(source_content),
     }
 
     switch (template.result) {
         .Error => |last_error| return ParseTemplateResult{ .ParseError = last_error },
-        .Elements => |elements| return ParseTemplateResult{ .Success = .{ .elements = elements, .owns_string = owns_string } },
+        .Elements => |elements| return ParseTemplateResult{ .Success = .{ .elements = elements, .owns_string = if (source == .String) source.String.copy_strings else false } },
         .NotLoaded => unreachable,
     }
 }
-
-pub const TemplateOptions = struct {
-    read_buffer_size: usize = 4 * 1024,
-    owns_string: bool = true,
-    allow_lambdas: bool = true,
-};
 
 ///
 /// General options for processing a mustache template
@@ -321,7 +314,18 @@ pub const Options = struct {
 
     ///
     /// Template source options
-    source: union(enum) {
+    source: Source,
+
+    ///
+    /// Template output options
+    output: Output,
+
+    ///
+    /// Those options affect both performance and supported Mustache features.
+    /// Defaults to full-spec compatible.
+    features: Features = .{},
+
+    pub const Source = union(enum) {
 
         ///
         /// Loads a template from string
@@ -340,11 +344,9 @@ pub const Options = struct {
             /// Define the buffer size for reading the stream
             read_buffer_size: usize = 4 * 1024,
         },
-    },
+    };
 
-    ///
-    /// Template output options
-    output: enum {
+    pub const Output = enum {
 
         ///
         /// Parses a template
@@ -356,12 +358,9 @@ pub const Options = struct {
         /// Parses just enough to render directly, without storing the template.
         /// This option saves memory.
         Render,
-    },
+    };
 
-    ///
-    /// Those options affect both performance and supported Mustache features.
-    /// Defaults to full-spec compatible.
-    features: struct {
+    pub const Features = struct {
 
         ///
         /// Default delimiters are '{{' and '}}'
@@ -385,60 +384,48 @@ pub const Options = struct {
 
         ///
         /// Lambda expansion support
-        lambdas: union(enum) {
+        lambdas: Lambdas = .{ .Enabled = .{} },
+    };
+
+    pub const Lambdas = union(enum) {
+
+        ///
+        /// Use this option if your data source does not implement lambda functions
+        /// Disabling lambda support saves memory and speeds up the parsing process
+        Disabled,
+
+        ///
+        /// Use this option to support lambda functions in your data sources
+        Enabled: struct {
 
             ///
-            /// Use this option if your data source does not implement lambda functions
-            /// Disabling lambda support saves memory and speeds up the parsing process
-            Disabled,
+            /// Lambdas can expand to new tags, including another lambda
+            /// Defines the max recursion depth to avoid infinite recursion when evaluating lambdas
+            /// A recursive lambda will interpolate as an empty string, without erros
+            max_recursion: comptime_int = 100,
+        },
+    };
 
-            ///
-            /// Use this option to support lambda functions in your data sources
-            Enabled: struct {
+    pub fn isRefCounted(comptime self: @This()) bool {
+        return self.source == .Stream;
+    }
 
-                ///
-                /// Lambdas can expand to new tags, including another lambda
-                /// Defines the max recursion depth to avoid infinite recursion when evaluating lambdas
-                /// A recursive lambda will interpolate as an empty string, without erros
-                max_recursion: comptime_int = 100,
+    pub fn copyStrings(comptime self: @This()) bool {
+        return switch (self.output) {
+            .Render => false,
+            .Parse => switch (self.source) {
+                .String => |option| option.copy_strings,
+                .Stream => true,
             },
-        } = .{ .Enabled = .{} },
-    } = .{},
+        };
+    }
 };
 
-pub fn TemplateLoader(comptime options: TemplateOptions) type {
-    const FileCachedParser = parsing.Parser(.{
-        .source = .File,
-        .owns_string = options.owns_string,
-        .output = .Cached,
-        .allow_lambdas = options.allow_lambdas,
-    });
-
-    const StringCachedParser = parsing.Parser(.{
-        .source = .String,
-        .owns_string = options.owns_string,
-        .output = .Cached,
-        .allow_lambdas = options.allow_lambdas,
-    });
-
-    const StringStreamedParser = parsing.Parser(.{
-        .source = .String,
-        .owns_string = options.owns_string,
-        .output = .Streamed,
-        .allow_lambdas = options.allow_lambdas,
-    });
-
-    const FileStreamedParser = parsing.Parser(.{
-        .source = .File,
-        .owns_string = options.owns_string,
-        .output = .Streamed,
-        .allow_lambdas = options.allow_lambdas,
-    });
-
+pub fn TemplateLoader(comptime options: Options) type {
     return struct {
         const Self = @This();
 
-        const template_options = options;
+        const Parser = parsing.Parser(options);
 
         const Collector = struct {
             pub const Error = Allocator.Error;
@@ -458,8 +445,8 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             NotLoaded,
         } = .NotLoaded,
 
-        pub fn load(self: *Self, template_text: []const u8) StringCachedParser.LoadError!void {
-            var parser = try StringCachedParser.init(self.allocator, template_text, self.delimiters);
+        pub fn load(self: *Self, template_text: []const u8) Parser.LoadError!void {
+            var parser = try Parser.init(self.allocator, template_text, self.delimiters);
             defer parser.deinit();
 
             var collector = Collector{};
@@ -470,8 +457,8 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             };
         }
 
-        pub fn loadFromFile(self: *Self, absolute_path: []const u8) FileCachedParser.LoadError!void {
-            var parser = try FileCachedParser.init(self.allocator, absolute_path, self.delimiters);
+        pub fn loadFromFile(self: *Self, absolute_path: []const u8) Parser.LoadError!void {
+            var parser = try Parser.init(self.allocator, absolute_path, self.delimiters);
             defer parser.deinit();
 
             var collector = Collector{};
@@ -482,15 +469,15 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             };
         }
 
-        pub fn collectElements(self: *Self, template_text: []const u8, out_render: anytype) ErrorSet(StringStreamedParser, @TypeOf(out_render))!void {
-            var parser = try StringStreamedParser.init(self.allocator, template_text, self.delimiters);
+        pub fn collectElements(self: *Self, template_text: []const u8, out_render: anytype) ErrorSet(Parser, @TypeOf(out_render))!void {
+            var parser = try Parser.init(self.allocator, template_text, self.delimiters);
             defer parser.deinit();
 
             try self.produceElements(&parser, out_render);
         }
 
-        pub fn collectElementsFromFile(self: *Self, absolute_path: []const u8, out_render: anytype) ErrorSet(FileStreamedParser, @TypeOf(out_render))!void {
-            var parser = try FileStreamedParser.init(self.allocator, absolute_path, self.delimiters);
+        pub fn collectElementsFromFile(self: *Self, absolute_path: []const u8, out_render: anytype) ErrorSet(Parser, @TypeOf(out_render))!void {
+            var parser = try Parser.init(self.allocator, absolute_path, self.delimiters);
             defer parser.deinit();
 
             try self.produceElements(&parser, out_render);
@@ -498,17 +485,12 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
 
         fn produceElements(
             self: *Self,
-            parser: anytype,
+            parser: *Parser,
             out_render: anytype,
-        ) ErrorSet(@TypeOf(parser), @TypeOf(out_render))!void {
-            const TParser = @typeInfo(@TypeOf(parser)).Pointer.child;
-
+        ) ErrorSet(Parser, @TypeOf(out_render))!void {
             while (true) {
                 var parse_result = try parser.parse();
-
-                // When parsing from a file, all read buffer must be freed after producing the nodes
-                const is_ref_counted = @TypeOf(parser.ref_counter_holder) != void;
-                defer if (is_ref_counted) parser.ref_counter_holder.free(self.allocator);
+                defer parser.ref_counter_holder.free(self.allocator);
 
                 switch (parse_result) {
                     .Error => |err| {
@@ -523,7 +505,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
                             error.ParserAbortedError => return,
                             else => return @errSetCast(ErrorSet(@TypeOf(parser), @TypeOf(out_render)), err),
                         };
-                        defer if (TParser.options.output == .Streamed) Element.freeMany(self.allocator, options.owns_string, elements);
+                        defer if (options.output == .Render) Element.freeMany(self.allocator, options.copyStrings(), elements);
                         try out_render.render(elements);
                     },
                     .Done => break,
@@ -533,7 +515,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
 
         pub fn deinit(self: *Self) void {
             switch (self.result) {
-                .Elements => |elements| Element.freeMany(self.allocator, options.owns_string, elements),
+                .Elements => |elements| Element.freeMany(self.allocator, options.copyStrings(), elements),
                 .Error, .NotLoaded => {},
             }
         }
@@ -575,10 +557,15 @@ const tests = struct {
         _ = lambdas;
     }
 
-    pub fn getTemplate(template_text: []const u8) !TemplateLoader(.{}) {
+    const options = Options{
+        .source = .{ .String = .{} },
+        .output = .Parse,
+    };
+
+    pub fn getTemplate(template_text: []const u8) !TemplateLoader(options) {
         const allocator = testing.allocator;
 
-        var template = TemplateLoader(.{}){
+        var template = TemplateLoader(options){
             .allocator = allocator,
         };
         errdefer template.deinit();
@@ -2379,14 +2366,8 @@ const tests = struct {
             \\World
         ;
 
-        const allocator = testing.allocator;
-
-        var template = TemplateLoader(.{}){
-            .allocator = allocator,
-        };
+        var template = try getTemplate(template_text);
         defer template.deinit();
-
-        try template.load(template_text);
 
         try testing.expect(template.result == .Elements);
         const elements = template.result.Elements;
@@ -2466,9 +2447,15 @@ const tests = struct {
 
         // Read from a file, assuring that this text should read four times from the buffer
         const read_buffer_size = (template_text.len / 4);
-        var template = TemplateLoader(.{ .read_buffer_size = read_buffer_size }){
+        const SmallBufferTemplateloader = TemplateLoader(.{
+            .source = .{ .Stream = .{ .read_buffer_size = read_buffer_size } },
+            .output = .Parse,
+        });
+
+        var template = SmallBufferTemplateloader{
             .allocator = allocator,
         };
+
         defer template.deinit();
 
         try template.loadFromFile(absolute_file_path);
@@ -2570,7 +2557,8 @@ const tests = struct {
         // Strings are not ownned by the template,
         // Use this option when creating templates from a static string or when rendering direct to a stream
         const RefStringsTemplate = TemplateLoader(.{
-            .owns_string = false,
+            .source = .{ .Stream = .{} },
+            .output = .Render,
         });
 
         // Create a template to parse and render this 10MB file, with only 16KB of memory

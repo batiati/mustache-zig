@@ -5,76 +5,83 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 const testing = std.testing;
 
-const OpenError = std.fs.File.OpenError;
-const ReadError = std.fs.File.ReadError;
-const FileError = OpenError || ReadError;
+const mustache = @import("../mustache.zig");
+const Options = mustache.Options;
 
-pub const Error = Allocator.Error || FileError;
-
-const mem = @import("../mem.zig");
-const RefCounter = mem.RefCounter;
-const RefCountedSlice = mem.RefCountedSlice;
+const memory = @import("../memory.zig");
 
 const File = std.fs.File;
 
-const Self = @This();
-
-file: File,
-eof: bool = false,
-read_buffer_size: usize,
-
-pub fn initFromPath(allocator: Allocator, absolute_path: []const u8, read_buffer_size: usize) Error!*Self {
-    var file = try std.fs.openFileAbsolute(absolute_path, .{});
-    return Self.init(allocator, file, read_buffer_size);
-}
-
-pub fn init(allocator: Allocator, file: File, read_buffer_size: usize) Allocator.Error!*Self {
-    var self = try allocator.create(Self);
-    self.* = .{
-        .file = file,
-        .read_buffer_size = read_buffer_size,
+pub fn FileReader(comptime options: Options) type {
+    const read_buffer_size = switch (options.source) {
+        .Stream => |stream| stream.read_buffer_size,
+        .String => return void,
     };
 
-    return self;
-}
+    const RefCounter = memory.RefCounter(options);
+    const RefCountedSlice = memory.RefCountedSlice(options);
 
-pub fn read(self: *Self, allocator: Allocator, prepend: []const u8) Error!RefCountedSlice {
-    var buffer = try allocator.alloc(u8, self.read_buffer_size + prepend.len);
-    errdefer allocator.free(buffer);
+    return struct {
+        const Self = @This();
 
-    if (prepend.len > 0) {
-        std.mem.copy(u8, buffer, prepend);
-    }
+        const OpenError = std.fs.File.OpenError;
+        const ReadError = std.fs.File.ReadError;
+        const FileError = OpenError || ReadError;
 
-    var size = try self.file.read(buffer[prepend.len..]);
+        pub const Error = Allocator.Error || FileError;
 
-    if (size < self.read_buffer_size) {
-        const full_size = prepend.len + size;
+        file: File,
+        eof: bool = false,
 
-        assert(full_size < buffer.len);
-        buffer = allocator.shrink(buffer, full_size);
-        self.eof = true;
-    } else {
-        self.eof = false;
-    }
+        pub fn initFromPath(allocator: Allocator, absolute_path: []const u8) Error!*Self {
+            var file = try std.fs.openFileAbsolute(absolute_path, .{});
+            return Self.init(allocator, file);
+        }
 
-    return RefCountedSlice{
-        .content = buffer,
-        .ref_counter = try RefCounter.init(allocator, buffer),
+        pub fn init(allocator: Allocator, file: File) Allocator.Error!*Self {
+            var self = try allocator.create(Self);
+            self.* = .{
+                .file = file,
+            };
+
+            return self;
+        }
+
+        pub fn read(self: *Self, allocator: Allocator, prepend: []const u8) Error!RefCountedSlice {
+            var buffer = try allocator.alloc(u8, read_buffer_size + prepend.len);
+            errdefer allocator.free(buffer);
+
+            if (prepend.len > 0) {
+                std.mem.copy(u8, buffer, prepend);
+            }
+
+            var size = try self.file.read(buffer[prepend.len..]);
+
+            if (size < read_buffer_size) {
+                const full_size = prepend.len + size;
+
+                assert(full_size < buffer.len);
+                buffer = allocator.shrink(buffer, full_size);
+                self.eof = true;
+            } else {
+                self.eof = false;
+            }
+
+            return RefCountedSlice{
+                .content = buffer,
+                .ref_counter = try RefCounter.init(allocator, buffer),
+            };
+        }
+
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            self.file.close();
+            allocator.destroy(self);
+        }
+
+        pub fn finished(self: *Self) bool {
+            return self.eof;
+        }
     };
-}
-
-pub fn deinit(self: *Self, allocator: Allocator) void {
-    self.file.close();
-    allocator.destroy(self);
-}
-
-pub fn finished(self: *Self) bool {
-    return self.eof;
-}
-
-test {
-    testing.refAllDecls(@This());
 }
 
 test "StreamReader.Slices" {
@@ -85,7 +92,8 @@ test "StreamReader.Slices" {
     // So we can parse many tokens on a single read, and read a new slice containing only the lasts unparsed bytes
     //
     // Just 5 chars in our test
-    const read_buffer_len: usize = 5;
+    const SlicedReader = FileReader(.{ .source = .{ .Stream = .{ .read_buffer_size = 5 } }, .output = .Parse });
+
     //
     //                           Block index
     //              First slice  | Second slice
@@ -105,7 +113,7 @@ test "StreamReader.Slices" {
     file.close();
     defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
 
-    var reader = try initFromPath(allocator, absolute_file_path, read_buffer_len);
+    var reader = try SlicedReader.initFromPath(allocator, absolute_file_path);
     defer reader.deinit(allocator);
 
     var slice: []const u8 = &.{};
@@ -118,7 +126,7 @@ test "StreamReader.Slices" {
     slice = result_1.content;
 
     try testing.expectEqual(false, reader.finished());
-    try testing.expectEqual(read_buffer_len, slice.len);
+    try testing.expectEqual(@as(usize, 5), slice.len);
     try testing.expectEqualStrings("{{nam", slice);
 
     // Second read,
