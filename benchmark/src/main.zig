@@ -89,7 +89,7 @@ fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comp
     var repeat: u32 = 0;
     const start = std.time.nanoTimestamp();
     while (repeat < TIMES) : (repeat += 1) {
-        const result = try mustache.renderAllocCached(allocator, template, data);
+        const result = try mustache.renderAllocCached(allocator, template, &data);
         total_bytes += result.len;
         allocator.free(result);
     }
@@ -107,7 +107,7 @@ fn runTemplateNotParsed(allocator: Allocator, comptime caption: []const u8, comp
     var repeat: u32 = 0;
     const start = std.time.nanoTimestamp();
     while (repeat < TIMES) : (repeat += 1) {
-        const result = try mustache.renderAllocFromString(allocator, template_text, data);
+        const result = try mustache.renderAllocFromString(allocator, template_text, &data);
         total_bytes += result.len;
         allocator.free(result);
     }
