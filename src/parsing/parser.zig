@@ -22,15 +22,15 @@ const BlockType = parsing.BlockType;
 const FileReader = parsing.FileReader;
 
 const memory = @import("../memory.zig");
-const EpochArena = memory.EpochArena;
 
 pub fn Parser(comptime options: mustache.Options) type {
     const copy_string = options.copyStrings();
 
-    return struct {
-        const RefCounter = memory.RefCounter(options);
-        const RefCounterHolder = memory.RefCounterHolder(options);
+    const RefCounter = memory.RefCounter(options);
+    const RefCounterHolder = memory.RefCounterHolder(options);
+    const EpochArena = memory.EpochArena(options);
 
+    return struct {
         const Level = parsing.Level(options);
         const Node = parsing.Node(options);
         const TextBlock = parsing.TextBlock(options);
@@ -50,9 +50,9 @@ pub fn Parser(comptime options: mustache.Options) type {
         /// General purpose allocator
         gpa: Allocator,
 
-        /// When in streamed render mode, this combines two arenas, allowing to free memory each time the parser produces
+        /// When `options.output == .Render`, EpochArena combines two arenas, allowing to free memory each time the parser produces
         /// When the "nextEpoch" function is called, the current arena is reserved and a new one is initialized for use.
-        arena: if (options.output == .Render) EpochArena else ArenaAllocator,
+        epoch_arena: EpochArena,
 
         /// Text scanner instance, shoud not be accessed directly
         text_scanner: TextScanner,
@@ -70,15 +70,14 @@ pub fn Parser(comptime options: mustache.Options) type {
         ref_counter_holder: RefCounterHolder = .{},
 
         pub fn init(gpa: Allocator, template: []const u8, delimiters: Delimiters) if (options.source == .String) Allocator.Error!Self else FileReader(options).Error!Self {
-            const Arena = if (options.output == .Render) EpochArena else ArenaAllocator;
-            var arena = Arena.init(gpa);
-            errdefer arena.deinit();
+            var epoch_arena = EpochArena.init(gpa);
+            errdefer epoch_arena.deinit();
 
-            var root = try Level.init(arena.allocator(), delimiters);
+            var root = try Level.init(epoch_arena.allocator(), delimiters);
 
             return Self{
                 .gpa = gpa,
-                .arena = arena,
+                .epoch_arena = epoch_arena,
                 .text_scanner = try TextScanner.init(gpa, template),
                 .root = root,
                 .current_level = root,
@@ -87,7 +86,7 @@ pub fn Parser(comptime options: mustache.Options) type {
 
         pub fn deinit(self: *Self) void {
             self.text_scanner.deinit(self.gpa);
-            self.arena.deinit();
+            self.epoch_arena.deinit();
             self.ref_counter_holder.free(self.gpa);
         }
 
@@ -240,7 +239,7 @@ pub fn Parser(comptime options: mustache.Options) type {
                 };
             }
 
-            const arena = self.arena.allocator();
+            const arena = self.epoch_arena.allocator();
             var static_text_block: ?*Node = null;
 
             while (try self.text_scanner.next(self.gpa)) |*text_block| {
@@ -300,8 +299,8 @@ pub fn Parser(comptime options: mustache.Options) type {
 
                                     const nodes = self.root.list.toOwnedSlice(arena);
 
-                                    self.arena.nextEpoch();
-                                    const new_arena = self.arena.allocator();
+                                    self.epoch_arena.nextEpoch();
+                                    const new_arena = self.epoch_arena.allocator();
 
                                     var root = try Level.init(new_arena, self.root.delimiters);
                                     self.root = root;
@@ -364,11 +363,8 @@ pub fn Parser(comptime options: mustache.Options) type {
             } else {
                 const nodes = self.root.list.toOwnedSlice(arena);
 
-                if (options.output == .Render) {
-                    self.arena.nextEpoch();
-                }
-
-                const new_arena = self.arena.allocator();
+                self.epoch_arena.nextEpoch();
+                const new_arena = self.epoch_arena.allocator();
                 var root = try Level.init(new_arena, self.root.delimiters);
                 self.root = root;
                 self.current_level = root;

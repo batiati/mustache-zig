@@ -66,50 +66,6 @@ const RefCounterImpl = struct {
             }
         }
     }
-
-    test "ref and free" {
-        const allocator = testing.allocator;
-
-        // No defer here, should be freed by the ref_counter
-        const some_text = try allocator.dupe(u8, "some text");
-
-        var counter_1 = try RefCounterImpl.init(allocator, some_text);
-        var counter_2 = counter_1.ref();
-        var counter_3 = counter_2.ref();
-
-        try testing.expect(counter_1.state != null);
-        try testing.expect(counter_1.state.?.counter == 3);
-
-        try testing.expect(counter_2.state != null);
-        try testing.expect(counter_2.state.?.counter == 3);
-
-        try testing.expect(counter_3.state != null);
-        try testing.expect(counter_3.state.?.counter == 3);
-
-        counter_1.free(allocator);
-
-        try testing.expect(counter_1.state == null);
-
-        try testing.expect(counter_2.state != null);
-        try testing.expect(counter_2.state.?.counter == 2);
-
-        try testing.expect(counter_3.state != null);
-        try testing.expect(counter_3.state.?.counter == 2);
-
-        counter_2.free(allocator);
-
-        try testing.expect(counter_1.state == null);
-        try testing.expect(counter_2.state == null);
-
-        try testing.expect(counter_3.state != null);
-        try testing.expect(counter_3.state.?.counter == 1);
-
-        counter_3.free(allocator);
-
-        try testing.expect(counter_1.state == null);
-        try testing.expect(counter_2.state == null);
-        try testing.expect(counter_3.state == null);
-    }
 };
 
 const RefCounterHolderImpl = struct {
@@ -153,55 +109,6 @@ const RefCounterHolderImpl = struct {
         while (it.next()) |*ref_counter| {
             ref_counter.free(allocator);
         }
-    }
-
-    test "group" {
-        const allocator = testing.allocator;
-
-        // No defer here, should be freed by the ref_counter
-        const some_text = try allocator.dupe(u8, "some text");
-
-        var counter_1 = try RefCounterImpl.init(allocator, some_text);
-        defer counter_1.free(allocator);
-
-        var counter_2 = counter_1.ref();
-        defer counter_2.free(allocator);
-
-        var counter_3 = counter_2.ref();
-        defer counter_3.free(allocator);
-
-        try testing.expect(counter_1.state != null);
-        try testing.expect(counter_1.state.?.counter == 3);
-
-        try testing.expect(counter_2.state != null);
-        try testing.expect(counter_2.state.?.counter == 3);
-
-        try testing.expect(counter_3.state != null);
-        try testing.expect(counter_3.state.?.counter == 3);
-
-        var holder = RefCounterHolderImpl{};
-
-        // Adding a ref_counter to the Holder, increases the counter
-        try holder.add(allocator, counter_1);
-        try testing.expect(counter_1.state.?.counter == 4);
-        try testing.expect(counter_2.state.?.counter == 4);
-        try testing.expect(counter_3.state.?.counter == 4);
-
-        // Adding a ref_counter to the same buffer, keeps the counter unchanged
-        try holder.add(allocator, counter_1);
-        try holder.add(allocator, counter_2);
-        try holder.add(allocator, counter_3);
-
-        try testing.expect(counter_1.state.?.counter == 4);
-        try testing.expect(counter_2.state.?.counter == 4);
-        try testing.expect(counter_3.state.?.counter == 4);
-
-        // Free should decrease the counter
-        holder.free(allocator);
-
-        try testing.expect(counter_1.state.?.counter == 3);
-        try testing.expect(counter_2.state.?.counter == 3);
-        try testing.expect(counter_3.state.?.counter == 3);
     }
 };
 
@@ -254,64 +161,175 @@ const NoOpRefCounterHolder = struct {
     }
 };
 
-pub const EpochArena = struct {
-    current_arena: ArenaAllocator,
-    last_epoch_arena: ArenaAllocator.State,
+pub fn EpochArena(comptime options: Options) type {
+    const is_epoch_arena = options.output == .Render;
 
-    pub fn init(child_allocator: Allocator) EpochArena {
-        return .{
-            .current_arena = ArenaAllocator.init(child_allocator),
-            .last_epoch_arena = .{},
-        };
-    }
+    return struct {
+        const Self = @This();
 
-    pub inline fn allocator(self: *EpochArena) Allocator {
-        return self.current_arena.allocator();
-    }
+        current_arena: ArenaAllocator,
+        last_epoch_arena: if (is_epoch_arena) ArenaAllocator.State else void,
 
-    pub fn nextEpoch(self: *EpochArena) void {
-        const child_allocator = self.current_arena.child_allocator;
+        pub fn init(child_allocator: Allocator) Self {
+            return .{
+                .current_arena = ArenaAllocator.init(child_allocator),
+                .last_epoch_arena = if (is_epoch_arena) .{} else {},
+            };
+        }
 
-        var last_arena = self.last_epoch_arena.promote(child_allocator);
-        last_arena.deinit();
+        pub inline fn allocator(self: *Self) Allocator {
+            return self.current_arena.allocator();
+        }
 
-        self.last_epoch_arena = self.current_arena.state;
-        self.current_arena = ArenaAllocator.init(child_allocator);
-    }
+        pub fn nextEpoch(self: *Self) void {
+            if (is_epoch_arena) {
+                const child_allocator = self.current_arena.child_allocator;
 
-    pub fn deinit(self: *EpochArena) void {
-        self.nextEpoch();
-        self.nextEpoch();
-    }
+                var last_arena = self.last_epoch_arena.promote(child_allocator);
+                last_arena.deinit();
 
-    test "epoch" {
-        var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
-        var epoch_arena = EpochArena.init(gpa.allocator());
+                self.last_epoch_arena = self.current_arena.state;
+                self.current_arena = ArenaAllocator.init(child_allocator);
+            }
+        }
 
-        // First epoch,
-        const arena = epoch_arena.allocator();
-        var chunk = try arena.alloc(u8, 1024);
-        const total_mem_1 = gpa.total_requested_bytes;
-        try testing.expect(total_mem_1 >= chunk.len);
+        pub fn deinit(self: *Self) void {
+            if (is_epoch_arena) {
+                var last_arena = self.last_epoch_arena.promote(self.current_arena.child_allocator);
+                last_arena.deinit();
+            }
 
-        // Second epoch, must keep previous epoch
-        epoch_arena.nextEpoch();
-        const new_arena = epoch_arena.allocator();
-        var new_chunk = try new_arena.alloc(u8, 512);
-        const total_mem_2 = gpa.total_requested_bytes;
-        try testing.expect(total_mem_2 > total_mem_1);
-        try testing.expect(total_mem_2 >= chunk.len + new_chunk.len);
+            self.current_arena.deinit();
+        }
+    };
+}
 
-        // Third epoch, must keep previous epoch and free the oldest one
-        epoch_arena.nextEpoch();
-        const total_mem_3 = gpa.total_requested_bytes;
-        try testing.expect(total_mem_3 < total_mem_1);
-        try testing.expect(total_mem_3 < total_mem_2);
-        try testing.expect(total_mem_3 >= new_chunk.len);
-
-        // Last epoch allocated nothing, so the total_mem must be zero
-        epoch_arena.nextEpoch();
-        const total_mem_4 = gpa.total_requested_bytes;
-        try testing.expect(total_mem_4 == 0);
-    }
+const testing_options = Options{
+    .source = .{ .Stream = .{} },
+    .output = .Render,
 };
+
+test "group" {
+    const allocator = testing.allocator;
+
+    // No defer here, should be freed by the ref_counter
+    const some_text = try allocator.dupe(u8, "some text");
+
+    var counter_1 = try RefCounter(testing_options).init(allocator, some_text);
+    defer counter_1.free(allocator);
+
+    var counter_2 = counter_1.ref();
+    defer counter_2.free(allocator);
+
+    var counter_3 = counter_2.ref();
+    defer counter_3.free(allocator);
+
+    try testing.expect(counter_1.state != null);
+    try testing.expect(counter_1.state.?.counter == 3);
+
+    try testing.expect(counter_2.state != null);
+    try testing.expect(counter_2.state.?.counter == 3);
+
+    try testing.expect(counter_3.state != null);
+    try testing.expect(counter_3.state.?.counter == 3);
+
+    var holder = RefCounterHolder(testing_options){};
+
+    // Adding a ref_counter to the Holder, increases the counter
+    try holder.add(allocator, counter_1);
+    try testing.expect(counter_1.state.?.counter == 4);
+    try testing.expect(counter_2.state.?.counter == 4);
+    try testing.expect(counter_3.state.?.counter == 4);
+
+    // Adding a ref_counter to the same buffer, keeps the counter unchanged
+    try holder.add(allocator, counter_1);
+    try holder.add(allocator, counter_2);
+    try holder.add(allocator, counter_3);
+
+    try testing.expect(counter_1.state.?.counter == 4);
+    try testing.expect(counter_2.state.?.counter == 4);
+    try testing.expect(counter_3.state.?.counter == 4);
+
+    // Free should decrease the counter
+    holder.free(allocator);
+
+    try testing.expect(counter_1.state.?.counter == 3);
+    try testing.expect(counter_2.state.?.counter == 3);
+    try testing.expect(counter_3.state.?.counter == 3);
+}
+
+test "ref and free" {
+    const allocator = testing.allocator;
+
+    // No defer here, should be freed by the ref_counter
+    const some_text = try allocator.dupe(u8, "some text");
+
+    var counter_1 = try RefCounter(testing_options).init(allocator, some_text);
+    var counter_2 = counter_1.ref();
+    var counter_3 = counter_2.ref();
+
+    try testing.expect(counter_1.state != null);
+    try testing.expect(counter_1.state.?.counter == 3);
+
+    try testing.expect(counter_2.state != null);
+    try testing.expect(counter_2.state.?.counter == 3);
+
+    try testing.expect(counter_3.state != null);
+    try testing.expect(counter_3.state.?.counter == 3);
+
+    counter_1.free(allocator);
+
+    try testing.expect(counter_1.state == null);
+
+    try testing.expect(counter_2.state != null);
+    try testing.expect(counter_2.state.?.counter == 2);
+
+    try testing.expect(counter_3.state != null);
+    try testing.expect(counter_3.state.?.counter == 2);
+
+    counter_2.free(allocator);
+
+    try testing.expect(counter_1.state == null);
+    try testing.expect(counter_2.state == null);
+
+    try testing.expect(counter_3.state != null);
+    try testing.expect(counter_3.state.?.counter == 1);
+
+    counter_3.free(allocator);
+
+    try testing.expect(counter_1.state == null);
+    try testing.expect(counter_2.state == null);
+    try testing.expect(counter_3.state == null);
+}
+
+test "epoch" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
+
+    var epoch_arena = EpochArena(testing_options).init(gpa.allocator());
+
+    // First epoch,
+    const arena = epoch_arena.allocator();
+    var chunk = try arena.alloc(u8, 1024);
+    const total_mem_1 = gpa.total_requested_bytes;
+    try testing.expect(total_mem_1 >= chunk.len);
+
+    // Second epoch, must keep previous epoch
+    epoch_arena.nextEpoch();
+    const new_arena = epoch_arena.allocator();
+    var new_chunk = try new_arena.alloc(u8, 512);
+    const total_mem_2 = gpa.total_requested_bytes;
+    try testing.expect(total_mem_2 > total_mem_1);
+    try testing.expect(total_mem_2 >= chunk.len + new_chunk.len);
+
+    // Third epoch, must keep previous epoch and free the oldest one
+    epoch_arena.nextEpoch();
+    const total_mem_3 = gpa.total_requested_bytes;
+    try testing.expect(total_mem_3 < total_mem_1);
+    try testing.expect(total_mem_3 < total_mem_2);
+    try testing.expect(total_mem_3 >= new_chunk.len);
+
+    // Last epoch allocated nothing, so the total_mem must be zero
+    epoch_arena.nextEpoch();
+    const total_mem_4 = gpa.total_requested_bytes;
+    try testing.expect(total_mem_4 == 0);
+}
