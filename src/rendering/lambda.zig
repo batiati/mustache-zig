@@ -13,7 +13,7 @@ const Context = context.Context;
 const Escape = context.Escape;
 const Render = @import("render.zig").Render;
 
-const escapeWrite = @import("escape.zig").escapeWrite;
+const escapedWrite = @import("escape.zig").escapedWrite;
 
 ///
 /// Context for a lambda call,
@@ -153,8 +153,8 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             var self = getSelf(ctx);
 
             return switch (self.out_writer) {
-                .Writer => |writer| try escapeWrite(writer, rendered_text, self.escape),
-                .Buffer => |buffer| try escapeWrite(buffer, rendered_text, self.escape),
+                .Writer => |writer| try escapedWrite(writer, rendered_text, self.escape),
+                .Buffer => |buffer| try escapedWrite(buffer, rendered_text, self.escape),
             };
         }
 

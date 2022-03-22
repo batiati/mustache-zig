@@ -17,7 +17,7 @@ const LambdaInvoker = lambda.LambdaInvoker;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const escapeWrite = @import("escape.zig").escapeWrite;
+const escapedWrite = @import("escape.zig").escapedWrite;
 
 pub fn Invoker(comptime Writer: type) type {
     return struct {
@@ -469,16 +469,16 @@ pub fn Invoker(comptime Writer: type) type {
 
                 .Struct, .Opaque => {},
 
-                .Bool => _ = try escapeWrite(writer, if (value) "true" else "false", escape),
+                .Bool => _ = try escapedWrite(writer, if (value) "true" else "false", escape),
                 .Int, .ComptimeInt => try std.fmt.formatInt(value, 10, .lower, .{}, writer),
                 .Float, .ComptimeFloat => try std.fmt.formatFloatDecimal(value, .{}, writer),
-                .Enum => _ = try escapeWrite(writer, @tagName(value), escape),
+                .Enum => _ = try escapedWrite(writer, @tagName(value), escape),
 
                 .Pointer => |info| switch (info.size) {
                     .One => try write(writer, value.*, escape),
                     .Slice => {
                         if (info.child == u8) {
-                            _ = try escapeWrite(writer, value, escape);
+                            _ = try escapedWrite(writer, value, escape);
                         }
                     },
                     .Many => @compileError("[*] pointers not supported"),
@@ -486,7 +486,7 @@ pub fn Invoker(comptime Writer: type) type {
                 },
                 .Array => |info| {
                     if (info.child == u8) {
-                        _ = try escapeWrite(writer, &value, escape);
+                        _ = try escapedWrite(writer, &value, escape);
                     }
                 },
                 .Optional => {

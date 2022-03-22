@@ -8,14 +8,14 @@ const Escape = context.Escape;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-pub fn escapeWrite(
-    out_writer: anytype,
+pub fn escapedWrite(
+    writer: anytype,
     value: []const u8,
     escape: Escape,
-) @TypeOf(out_writer).Error!usize {
+) @TypeOf(writer).Error!usize {
     switch (escape) {
         .Unescaped => {
-            try out_writer.writeAll(value);
+            try writer.writeAll(value);
             return value.len;
         },
 
@@ -39,11 +39,11 @@ pub fn escapeWrite(
 
                 if (char_index > index) {
                     const slice = value[index..char_index];
-                    try out_writer.writeAll(slice);
+                    try writer.writeAll(slice);
                     written_bytes += slice.len;
                 }
 
-                try out_writer.writeAll(replace);
+                try writer.writeAll(replace);
                 written_bytes += replace.len;
 
                 index = char_index + 1;
@@ -52,7 +52,7 @@ pub fn escapeWrite(
 
             if (index < value.len) {
                 const slice = value[index..];
-                try out_writer.writeAll(slice);
+                try writer.writeAll(slice);
                 written_bytes += slice.len;
             }
 
@@ -81,7 +81,7 @@ fn write(expected: []const u8, value: []const u8, escape: Escape) !void {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var written_bytes = try escapeWrite(list.writer(), value, escape);
+    var written_bytes = try escapedWrite(list.writer(), value, escape);
     try testing.expectEqualStrings(expected, list.items);
     try testing.expectEqual(expected.len, written_bytes);
 }
