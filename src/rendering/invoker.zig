@@ -111,7 +111,7 @@ pub fn Invoker(comptime Writer: type) type {
                     return try find(.Root, action_param, out_writer, data, path_iterator, index);
                 }
 
-                inline fn find(
+                fn find(
                     depth: Depth,
                     action_param: anytype,
                     out_writer: anytype,
@@ -170,7 +170,7 @@ pub fn Invoker(comptime Writer: type) type {
                     }
                 }
 
-                inline fn recursiveFind(
+                fn recursiveFind(
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
@@ -217,7 +217,7 @@ pub fn Invoker(comptime Writer: type) type {
                     return if (depth == .Root) .NotFoundInContext else .ChainBroken;
                 }
 
-                inline fn findFieldPath(
+                fn findFieldPath(
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
@@ -237,7 +237,7 @@ pub fn Invoker(comptime Writer: type) type {
                     }
                 }
 
-                inline fn findLambdaPath(
+                fn findLambdaPath(
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
@@ -265,7 +265,7 @@ pub fn Invoker(comptime Writer: type) type {
                     }
                 }
 
-                inline fn getLambda(
+                fn getLambda(
                     action_param: anytype,
                     out_writer: anytype,
                     data: anytype,
@@ -294,7 +294,7 @@ pub fn Invoker(comptime Writer: type) type {
                     }
                 }
 
-                inline fn iterateAt(
+                fn iterateAt(
                     action_param: anytype,
                     out_writer: anytype,
                     data: anytype,
