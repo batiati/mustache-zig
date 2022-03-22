@@ -140,7 +140,7 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
         };
 }
 
-const testing_options = Options {
+const testing_options = Options{
     .source = .{ .String = .{} },
     .output = .Render,
 };

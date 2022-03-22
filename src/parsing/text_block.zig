@@ -19,7 +19,6 @@ const Mark = parsing.Mark;
 const Delimiters = parsing.Delimiters;
 
 pub fn TextBlock(comptime options: Options) type {
-    
     const RefCounter = memory.RefCounter(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 

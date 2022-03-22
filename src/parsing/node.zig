@@ -47,6 +47,8 @@ pub fn Node(comptime options: Options) type {
         }
 
         pub fn trimStandAlone(self: *Self) void {
+            if (!options.features.preseve_line_breaks_and_indentation) return;
+
             if (self.block_type == .StaticText) {
                 if (self.prev_node) |prev_node| {
                     switch (self.text_block.left_trimming) {
@@ -67,6 +69,8 @@ pub fn Node(comptime options: Options) type {
         }
 
         pub fn trimLast(self: *Self, last_node: *Self) void {
+            if (!options.features.preseve_line_breaks_and_indentation) return;
+
             if (self.block_type == .StaticText) {
                 if (self == last_node) return;
 
@@ -87,13 +91,18 @@ pub fn Node(comptime options: Options) type {
         }
 
         pub fn getIndentation(self: *const Self) ?[]const u8 {
-            return switch (self.block_type) {
-                .Partial, .Parent => getPreviousNodeIndentation(self.prev_node),
-                else => null,
-            };
+            return if (options.features.preseve_line_breaks_and_indentation)
+                switch (self.block_type) {
+                    .Partial, .Parent => getPreviousNodeIndentation(self.prev_node),
+                    else => null,
+                }
+            else
+                null;
         }
 
         fn trimPreviousNodesRight(parent_node: ?*Self) bool {
+            if (!options.features.preseve_line_breaks_and_indentation) return false;
+
             if (parent_node) |node| {
                 if (node.block_type == .StaticText) {
                     switch (node.text_block.right_trimming) {
@@ -129,6 +138,8 @@ pub fn Node(comptime options: Options) type {
         }
 
         fn getPreviousNodeIndentation(parent_node: ?*const Self) ?[]const u8 {
+            if (!options.features.preseve_line_breaks_and_indentation) return null;
+
             if (parent_node) |node| {
                 return switch (node.block_type) {
                     .StaticText => node.text_block.indentation,
