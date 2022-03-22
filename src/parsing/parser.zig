@@ -137,12 +137,12 @@ pub fn Parser(comptime options: mustache.Options) type {
 
                         .CloseSection => {
                             const parent_key_value = parent_key orelse {
-                                return self.setLastError(ParseError.UnexpectedCloseSection, &node.text_block, null);
+                                return self.abort(ParseError.UnexpectedCloseSection, &node.text_block, null);
                             };
 
                             const key = try self.parseIdentificator(&node.text_block);
                             if (!std.mem.eql(u8, parent_key_value, key)) {
-                                return self.setLastError(ParseError.ClosingTagMismatch, &node.text_block, null);
+                                return self.abort(ParseError.ClosingTagMismatch, &node.text_block, null);
                             }
 
                             break :blk null;
@@ -215,7 +215,7 @@ pub fn Parser(comptime options: mustache.Options) type {
             if (delimiter) |ret| {
                 return ret;
             } else {
-                return self.setLastError(ParseError.InvalidDelimiters, text_block, null);
+                return self.abort(ParseError.InvalidDelimiters, text_block, null);
             }
         }
 
@@ -229,13 +229,13 @@ pub fn Parser(comptime options: mustache.Options) type {
                 }
             }
 
-            return self.setLastError(ParseError.InvalidIdentifier, text_block, null);
+            return self.abort(ParseError.InvalidIdentifier, text_block, null);
         }
 
         fn parseTree(self: *Self) (AbortError || LoadError)!?[]*Node {
             if (self.text_scanner.delimiter_max_size == 0) {
                 self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
-                    return self.setLastError(err, null, null);
+                    return self.abort(err, null, null);
                 };
             }
 
@@ -266,7 +266,7 @@ pub fn Parser(comptime options: mustache.Options) type {
                         const new_delimiters = try self.parseDelimiters(text_block);
 
                         self.text_scanner.setDelimiters(new_delimiters) catch |err| {
-                            return self.setLastError(err, text_block, null);
+                            return self.abort(err, text_block, null);
                         };
 
                         self.current_level.delimiters = new_delimiters;
@@ -327,7 +327,7 @@ pub fn Parser(comptime options: mustache.Options) type {
 
                     .CloseSection => {
                         const ret = self.current_level.endLevel(arena) catch |err| {
-                            return self.setLastError(err, text_block, null);
+                            return self.abort(err, text_block, null);
                         };
 
                         self.current_level = ret.level;
@@ -340,7 +340,7 @@ pub fn Parser(comptime options: mustache.Options) type {
                         // Restore parent delimiters
 
                         self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
-                            return self.setLastError(err, text_block, null);
+                            return self.abort(err, text_block, null);
                         };
                     },
 
@@ -349,7 +349,7 @@ pub fn Parser(comptime options: mustache.Options) type {
             }
 
             if (self.current_level != self.root) {
-                return self.setLastError(ParseError.UnexpectedEof, null, null);
+                return self.abort(ParseError.UnexpectedEof, null, null);
             }
 
             if (static_text_block) |static_text| {
@@ -373,7 +373,7 @@ pub fn Parser(comptime options: mustache.Options) type {
             }
         }
 
-        fn setLastError(self: *Self, err: ParseError, text_block: ?*const TextBlock, detail: ?[]const u8) AbortError {
+        fn abort(self: *Self, err: ParseError, text_block: ?*const TextBlock, detail: ?[]const u8) AbortError {
             self.last_error = LastError{
                 .error_code = err,
                 .lin = if (text_block) |p| p.lin else 0,
