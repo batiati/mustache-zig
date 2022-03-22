@@ -17,10 +17,11 @@ const Event = parsing.Event;
 const BlockType = parsing.BlockType;
 const Mark = parsing.Mark;
 const Delimiters = parsing.Delimiters;
-const TrimmingIndex = parsing.TrimmingIndex;
 
 pub fn TextBlock(comptime options: Options) type {
+    
     const RefCounter = memory.RefCounter(options);
+    const TrimmingIndex = parsing.TrimmingIndex(options);
 
     return struct {
         const Self = @This();

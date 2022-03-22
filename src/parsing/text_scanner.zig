@@ -27,6 +27,7 @@ pub fn TextScanner(comptime options: Options) type {
     const RefCounter = memory.RefCounter(options);
     const RefCountedSlice = memory.RefCountedSlice(options);
     const TextBlock = parsing.TextBlock(options);
+    const TrimmingIndex = parsing.TrimmingIndex(options);
 
     return struct {
         const Self = @This();
@@ -164,7 +165,7 @@ pub fn TextScanner(comptime options: Options) type {
                 .Finished => return null,
                 .ExpectingMark => |expected_mark| {
                     self.block_index = self.index;
-                    var trimmer = Trimmer(Self){ .text_scanner = self };
+                    var trimmer = Trimmer(Self, TrimmingIndex).init(self);
 
                     while (self.index < self.content.len or
                         (options.source == .Stream and !self.stream.reader.finished()))

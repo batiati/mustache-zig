@@ -86,14 +86,19 @@ pub const Event = union(enum) {
     Eof,
 };
 
-pub const TrimmingIndex = union(enum) {
-    PreserveWhitespaces,
-    AllowTrimming: struct {
-        index: u32,
-        stand_alone: bool,
-    },
-    Trimmed,
-};
+pub fn TrimmingIndex(comptime options: Options) type {
+    return if (options.features.preseve_line_breaks_and_indentation)
+        union(enum) {
+            PreserveWhitespaces,
+            AllowTrimming: struct {
+                index: u32,
+                stand_alone: bool,
+            },
+            Trimmed,
+        }
+    else
+        enum { PreserveWhitespaces };
+}
 
 pub const Level = @import("level.zig").Level;
 pub const Node = @import("node.zig").Node;
