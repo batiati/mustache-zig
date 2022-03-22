@@ -103,7 +103,7 @@ pub fn Parser(comptime options: mustache.Options) type {
             }
         }
 
-        inline fn dupe(self: *Self, ref_counter: RefCounter, slice: []const u8) Allocator.Error![]const u8 {
+        fn dupe(self: *Self, ref_counter: RefCounter, slice: []const u8) Allocator.Error![]const u8 {
             if (copy_string) {
                 return try self.gpa.dupe(u8, slice);
             } else {

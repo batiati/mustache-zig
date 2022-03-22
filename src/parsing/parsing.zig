@@ -39,7 +39,7 @@ pub const BlockType = enum {
     Parent,
     Block,
 
-    pub inline fn canBeStandAlone(self: BlockType) bool {
+    pub fn canBeStandAlone(self: BlockType) bool {
         return switch (self) {
             .StaticText,
             .Interpolation,
@@ -49,7 +49,7 @@ pub const BlockType = enum {
         };
     }
 
-    pub inline fn ignoreStaticText(self: BlockType) bool {
+    pub fn ignoreStaticText(self: BlockType) bool {
         return switch (self) {
             .Parent => true,
             else => false,

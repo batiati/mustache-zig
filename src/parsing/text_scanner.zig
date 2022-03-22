@@ -300,7 +300,7 @@ pub fn TextScanner(comptime options: Options) type {
             };
         }
 
-        inline fn matchTagMarkType(comptime mark_type: MarkType, slice: []const u8, delimiter: []const u8) ?Mark {
+        fn matchTagMarkType(comptime mark_type: MarkType, slice: []const u8, delimiter: []const u8) ?Mark {
             const match = std.mem.startsWith(u8, slice, delimiter);
             if (match) {
                 const is_triple_mustache = slice.len > delimiter.len and slice[delimiter.len] == if (mark_type == .Starting) '{' else '}';

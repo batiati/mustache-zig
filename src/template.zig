@@ -281,7 +281,7 @@ pub fn parseTemplateFromFile(
     return try parse(source, allocator, template_absolute_path, delimiters);
 }
 
-inline fn parse(
+fn parse(
     comptime source: Options.Source,
     allocator: Allocator,
     source_content: []const u8,
