@@ -364,11 +364,6 @@ pub fn Parser(comptime options: mustache.Options) type {
                 const nodes = self.root.list.toOwnedSlice(arena);
 
                 self.epoch_arena.nextEpoch();
-                const new_arena = self.epoch_arena.allocator();
-                var root = try Level.init(new_arena, self.root.delimiters);
-                self.root = root;
-                self.current_level = root;
-
                 return nodes;
             }
         }

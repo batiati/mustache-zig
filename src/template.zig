@@ -506,6 +506,10 @@ pub fn TemplateLoader(comptime options: Options) type {
                         };
                         defer if (options.output == .Render) Element.freeMany(self.allocator, options.copyStrings(), elements);
                         try out_render.render(elements);
+
+                        // No need for loop again 
+                        // when output == .Parse, all nodes are produced at once
+                        if (options.output == .Parse) break; 
                     },
                     .Done => break,
                 }
