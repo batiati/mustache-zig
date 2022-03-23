@@ -19,8 +19,8 @@ pub const ParseError = error{
 
 pub const LastError = struct {
     error_code: ParseError,
-    lin: usize = 0,
-    col: usize = 0,
+    lin: u32 = 0,
+    col: u32 = 0,
 };
 
 pub const Section = struct {

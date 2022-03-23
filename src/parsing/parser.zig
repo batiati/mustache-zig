@@ -245,7 +245,7 @@ pub fn Parser(comptime options: mustache.Options) type {
             while (try self.text_scanner.next(self.gpa)) |*text_block| {
                 errdefer text_block.unRef(self.gpa);
 
-                var block_type = text_block.matchBlockType() orelse {
+                var block_type = (try self.matchBlockType(text_block)) orelse {
                     text_block.unRef(self.gpa);
                     continue;
                 };
@@ -373,20 +373,49 @@ pub fn Parser(comptime options: mustache.Options) type {
             }
         }
 
+        ///
+        /// Matches the BlockType produced so far
+        fn matchBlockType(self: *Self, text_block: *TextBlock) !?BlockType {
+            switch (text_block.event) {
+                .Mark => |tag_mark| {
+                    switch (tag_mark.mark_type) {
+                        .Starting => {
+
+                            // If there is no current action, any content is a static text
+                            if (text_block.tail != null) {
+                                return .StaticText;
+                            }
+                        },
+
+                        .Ending => {
+                            const is_triple_mustache = tag_mark.delimiter_type == .NoScapeDelimiter;
+                            if (is_triple_mustache) {
+                                return .UnescapedInterpolation;
+                            } else {
+
+                                // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, <, $, =, &, /)
+                                return text_block.readBlockType() orelse .Interpolation;
+                            }
+                        },
+                    }
+                },
+                .Eof => {
+                    switch (self.text_scanner.state) {
+                        .Finished => if (text_block.tail != null) return .StaticText,
+                        else => return self.abort(ParseError.UnexpectedEof, text_block),
+                    }
+                },
+            }
+
+            return null;
+        }
+
         fn abort(self: *Self, err: ParseError, text_block: ?*const TextBlock) AbortError {
             self.last_error = LastError{
                 .error_code = err,
                 .lin = if (text_block) |p| p.lin else 0,
                 .col = if (text_block) |p| p.col else 0,
             };
-
-            std.log.err(
-                \\
-                \\=================================
-                \\Line {} col {}
-                \\Err {}
-                \\=================================
-            , .{ self.last_error.?.lin, self.last_error.?.col, self.last_error.?.error_code });
 
             return AbortError.ParserAbortedError;
         }
@@ -571,6 +600,115 @@ test "Scan delimiters Tags" {
     try testing.expect(no_more == null);
 }
 
+test "Parse - UnexpectedEof " {
+
+    //                              Eof
+    //                              ↓
+    const template_text = "{{missing";
+
+    const allocator = testing.allocator;
+
+    var parser = try StreamedParser.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    const err = try testParseError(&parser);
+    try testing.expectEqual(ParseError.UnexpectedEof, err.error_code);
+    try testing.expectEqual(@as(u32, 1), err.lin);
+    try testing.expectEqual(@as(u32, 10), err.col);
+}
+
+test "Parse - Malformed " {
+
+    // It's considered a valid static text, and not an error
+    // A tag should start with '{{' and contains anything except an '}}'
+    const template_text = "missing}}";
+
+    const allocator = testing.allocator;
+
+    var parser = try StreamedParser.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    const first_block = try testParseTree(&parser);
+    if (first_block) |nodes| {
+        defer StreamedParser.Node.unRefMany(allocator, nodes);
+
+        try testing.expectEqual(@as(usize, 1), nodes.len);
+
+        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
+        try testing.expectEqualStrings("missing}}", nodes[0].text_block.tail.?);
+    } else {
+        try testing.expect(false);
+    }
+}
+
+test "Parse - UnexpectedCloseSection " {
+
+    //                                     Close section
+    //                                     ↓
+    const template_text = "hello{{/section}}";
+
+    const allocator = testing.allocator;
+
+    var parser = try StreamedParser.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    const err = try testParseError(&parser);
+    try testing.expectEqual(ParseError.UnexpectedCloseSection, err.error_code);
+    try testing.expectEqual(@as(u32, 1), err.lin);
+    try testing.expectEqual(@as(u32, 16), err.col);
+}
+
+test "Parse - InvalidDelimiters " {
+
+    //                                               Close section
+    //                                               ↓
+    const template_text = "{{= not valid delimiter =}}";
+
+    const allocator = testing.allocator;
+
+    var parser = try StreamedParser.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    const err = try testParseError(&parser);
+    try testing.expectEqual(ParseError.InvalidDelimiters, err.error_code);
+    try testing.expectEqual(@as(u32, 1), err.lin);
+    try testing.expectEqual(@as(u32, 26), err.col);
+}
+
+test "Parse - InvalidDelimiters " {
+
+    //                                               Close section
+    //                                               ↓
+    const template_text = "{{ not a valid identifier }}";
+
+    const allocator = testing.allocator;
+
+    var parser = try StreamedParser.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    const err = try testParseError(&parser);
+    try testing.expectEqual(ParseError.InvalidIdentifier, err.error_code);
+    try testing.expectEqual(@as(u32, 1), err.lin);
+    try testing.expectEqual(@as(u32, 27), err.col);
+}
+
+test "Parse - ClosingTagMismatch " {
+
+    //                                          Close section
+    //                                          ↓
+    const template_text = "{{#hello}}...{{/world}}";
+
+    const allocator = testing.allocator;
+
+    var parser = try StreamedParser.init(allocator, template_text, .{});
+    defer parser.deinit();
+
+    const err = try testParseError(&parser);
+    try testing.expectEqual(ParseError.ClosingTagMismatch, err.error_code);
+    try testing.expectEqual(@as(u32, 1), err.lin);
+    try testing.expectEqual(@as(u32, 22), err.col);
+}
+
 fn testParseTree(parser: anytype) !?[]*StreamedParser.Node {
     return parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
@@ -580,4 +718,26 @@ fn testParseTree(parser: anytype) !?[]*StreamedParser.Node {
 
         return e;
     };
+}
+
+fn testParseError(parser: anytype) !LastError {
+    const nodes = parser.parseTree() catch |e| {
+        if (parser.last_error) |err| {
+            return err;
+        } else {
+            return e;
+        }
+    };
+
+    try testing.expect(nodes != null);
+    _ = parser.createElements(null, nodes.?) catch |e| {
+        if (parser.last_error) |err| {
+            return err;
+        } else {
+            return e;
+        }
+    };
+
+    try testing.expect(false);
+    unreachable;
 }

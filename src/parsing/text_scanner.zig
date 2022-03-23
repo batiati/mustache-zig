@@ -172,9 +172,8 @@ pub fn TextScanner(comptime options: Options) type {
                     {
                         if (options.source == .Stream) {
                             // Request a new slice if near to the end
-                            if (self.content.len == 0 or
-                                self.index + self.delimiter_max_size + 1 >= self.content.len)
-                            {
+                            const look_ahead = self.index + self.delimiter_max_size + 1;
+                            if (look_ahead >= self.content.len) {
                                 try self.requestContent(allocator);
                             }
                         }
@@ -182,14 +181,15 @@ pub fn TextScanner(comptime options: Options) type {
                         // Increment the index on defer
                         var increment: u32 = 1;
                         defer {
-                            if (self.content[self.index] == '\n') {
+                            const current_char = self.content[self.index];
+                            self.index += increment;
+
+                            if (current_char == '\n') {
                                 self.lin += 1;
                                 self.col = 1;
                             } else {
                                 self.col += increment;
                             }
-
-                            self.index += increment;
                         }
 
                         if (self.matchTagMark(expected_mark)) |mark| {
@@ -221,7 +221,7 @@ pub fn TextScanner(comptime options: Options) type {
                     }
 
                     // EOF reached, no more parts left
-                    self.state = .Finished;
+                    if (expected_mark == .Starting) self.state = .Finished;
 
                     const tail = if (self.block_index < self.content.len) self.content[self.block_index..] else null;
                     return TextBlock{

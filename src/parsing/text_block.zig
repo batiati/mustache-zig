@@ -160,41 +160,5 @@ pub fn TextBlock(comptime options: Options) type {
                 },
             }
         }
-
-        ///
-        /// Matches the BlockType produced so far
-        pub fn matchBlockType(self: *Self) ?BlockType {
-            switch (self.event) {
-                .Mark => |tag_mark| {
-                    switch (tag_mark.mark_type) {
-                        .Starting => {
-
-                            // If there is no current action, any content is a static text
-                            if (self.tail != null) {
-                                return .StaticText;
-                            }
-                        },
-
-                        .Ending => {
-                            const is_triple_mustache = tag_mark.delimiter_type == .NoScapeDelimiter;
-                            if (is_triple_mustache) {
-                                return .UnescapedInterpolation;
-                            } else {
-
-                                // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, <, $, =, &, /)
-                                return self.readBlockType() orelse .Interpolation;
-                            }
-                        },
-                    }
-                },
-                .Eof => {
-                    if (self.tail != null) {
-                        return .StaticText;
-                    }
-                },
-            }
-
-            return null;
-        }
     };
 }
