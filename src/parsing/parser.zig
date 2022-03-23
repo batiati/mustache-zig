@@ -185,7 +185,7 @@ pub fn Parser(comptime options: mustache.Options) type {
                 };
 
                 if (element) |valid| {
-                    try list.append(self.gpa, valid);
+                    list.appendAssumeCapacity(valid);
                 }
             }
 
