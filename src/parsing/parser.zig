@@ -41,7 +41,7 @@ pub fn Parser(comptime options: mustache.Options) type {
 
         pub const ParseResult = union(enum) {
             Error: LastError,
-            Nodes: []*Node,
+            Node: *Node,
             Done,
         };
 
@@ -96,8 +96,8 @@ pub fn Parser(comptime options: mustache.Options) type {
                 else => return @errSetCast(LoadError, err),
             };
 
-            if (ret) |nodes| {
-                return ParseResult{ .Nodes = nodes };
+            if (ret) |node| {
+                return ParseResult{ .Node = node };
             } else {
                 return ParseResult.Done;
             }
@@ -112,12 +112,12 @@ pub fn Parser(comptime options: mustache.Options) type {
             }
         }
 
-        pub fn createElements(self: *Self, parent_key: ?[]const u8, nodes: []*Node) (AbortError || LoadError)![]Element {
-            var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, nodes.len);
+        pub fn createElements(self: *Self, parent_key: ?[]const u8, iterator: *Node.Iterator) (AbortError || LoadError)![]Element {
+            var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, iterator.len());
             errdefer list.deinit(self.gpa);
-            defer Node.unRefMany(self.gpa, nodes);
+            defer Node.unRefMany(self.gpa, iterator);
 
-            for (nodes) |node| {
+            while (iterator.next()) |node| {
                 const element = blk: {
                     switch (node.block_type) {
                         .StaticText => {
@@ -157,7 +157,10 @@ pub fn Parser(comptime options: mustache.Options) type {
                             const key = try self.dupe(node.text_block.ref_counter, try self.parseIdentificator(&node.text_block));
                             errdefer if (copy_string) self.gpa.free(key);
 
-                            const content = if (node.children) |children| try self.createElements(key, children) else null;
+                            const content = if (node.link.child == null) null else content: {
+                                var children = node.children();
+                                break :content try self.createElements(key, &children);
+                            };
                             errdefer if (content) |content_value| Element.freeMany(self.gpa, copy_string, content_value);
 
                             const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
@@ -232,7 +235,7 @@ pub fn Parser(comptime options: mustache.Options) type {
             return self.abort(ParseError.InvalidIdentifier, text_block);
         }
 
-        fn parseTree(self: *Self) (AbortError || LoadError)!?[]*Node {
+        fn parseTree(self: *Self) (AbortError || LoadError)!?*Node {
             if (self.text_scanner.delimiter_max_size == 0) {
                 self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
                     return self.abort(err, null);
@@ -287,17 +290,17 @@ pub fn Parser(comptime options: mustache.Options) type {
 
                         static_text_block.?.trimStandAlone();
 
-                        // When running on streamed mode,
+                        // When options.output = .Render,
                         // A stand-alone line in the root level indicates that the previous produced nodes can be rendered
                         if (options.output == .Render) {
-                            if (self.current_level == self.root and self.root.list.items.len > 1) {
-                                if (static_text_block.?.text_block.left_trimming != .PreserveWhitespaces) {
+                            if (self.current_level == self.root and
+                                static_text_block.?.text_block.left_trimming != .PreserveWhitespaces)
+                            {
 
-                                    // This text_block is independent from the rest and can be yelded later
-                                    // Let's produce the elements parsed until now
-                                    _ = self.root.list.pop();
-
-                                    const nodes = self.root.list.toOwnedSlice(arena);
+                                // This text_block is independent from the rest and can be yelded later
+                                // Let's produce the elements parsed until now
+                                if (self.root.list.removeLast()) {
+                                    const node = self.root.list.finish();
 
                                     self.epoch_arena.nextEpoch();
                                     const new_arena = self.epoch_arena.allocator();
@@ -308,7 +311,7 @@ pub fn Parser(comptime options: mustache.Options) type {
 
                                     // Adding it again for the next iteration,
                                     try self.current_level.addNode(new_arena, block_type, static_text_block.?.text_block);
-                                    return nodes;
+                                    return node;
                                 }
                             }
                         }
@@ -326,7 +329,7 @@ pub fn Parser(comptime options: mustache.Options) type {
                     },
 
                     .CloseSection => {
-                        const ret = self.current_level.endLevel(arena) catch |err| {
+                        const ret = self.current_level.endLevel() catch |err| {
                             return self.abort(err, text_block);
                         };
 
@@ -358,14 +361,9 @@ pub fn Parser(comptime options: mustache.Options) type {
                 }
             }
 
-            if (self.root.list.items.len == 0) {
-                return null;
-            } else {
-                const nodes = self.root.list.toOwnedSlice(arena);
-
-                self.epoch_arena.nextEpoch();
-                return nodes;
-            }
+            const node = self.root.list.finish();
+            self.epoch_arena.nextEpoch();
+            return node;
         }
 
         ///
@@ -439,11 +437,12 @@ test "Basic parse" {
     var first_block = try testParseTree(&parser);
 
     // The parser produces only the minimun amount of tags that can be render at once
-    if (first_block) |nodes| {
-        defer StreamedParser.Node.unRefMany(allocator, nodes);
+    if (first_block) |node| {
+        var siblings = node.siblings();
+        defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
-        try testing.expectEqual(@as(usize, 1), nodes.len);
-        try testing.expectEqual(BlockType.Comment, nodes[0].block_type);
+        try testing.expectEqual(@as(usize, 1), siblings.len());
+        try testing.expectEqual(BlockType.Comment, siblings.next().?.block_type);
     } else {
         try testing.expect(false);
     }
@@ -451,37 +450,50 @@ test "Basic parse" {
     var second_block = try testParseTree(&parser);
 
     // Nested tags must be produced together
-    if (second_block) |nodes| {
-        defer StreamedParser.Node.unRefMany(allocator, nodes);
+    if (second_block) |node| {
+        var siblings = node.siblings();
+        defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
-        try testing.expectEqual(@as(usize, 2), nodes.len);
+        try testing.expectEqual(@as(usize, 2), siblings.len());
 
-        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
-        try testing.expectEqualStrings("  Hello\n", nodes[0].text_block.tail.?);
+        const node_0 = siblings.next().?;
+        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
+        try testing.expectEqualStrings("  Hello\n", node_0.text_block.tail.?);
 
-        try testing.expectEqual(BlockType.Section, nodes[1].block_type);
+        const node_1 = siblings.next().?;
+        try testing.expectEqual(BlockType.Section, node_1.block_type);
 
-        if (nodes[1].children) |section| {
-            try testing.expectEqual(@as(usize, 8), section.len);
-            try testing.expectEqual(BlockType.StaticText, section[0].block_type);
+        if (node_1.link.child != null) {
+            var children = node_1.children();
+            try testing.expectEqual(@as(usize, 8), children.len());
 
-            try testing.expectEqual(BlockType.Interpolation, section[1].block_type);
-            try testing.expectEqualStrings("name", section[1].text_block.tail.?);
+            const section_0 = children.next().?;
+            try testing.expectEqual(BlockType.StaticText, section_0.block_type);
 
-            try testing.expectEqual(BlockType.StaticText, section[2].block_type);
+            const section_1 = children.next().?;
+            try testing.expectEqual(BlockType.Interpolation, section_1.block_type);
+            try testing.expectEqualStrings("name", section_1.text_block.tail.?);
 
-            try testing.expectEqual(BlockType.UnescapedInterpolation, section[3].block_type);
-            try testing.expectEqualStrings("comments", section[3].text_block.tail.?);
+            const section_2 = children.next().?;
+            try testing.expectEqual(BlockType.StaticText, section_2.block_type);
 
-            try testing.expectEqual(BlockType.StaticText, section[4].block_type);
-            try testing.expectEqualStrings("\n", section[4].text_block.tail.?);
+            const section_3 = children.next().?;
+            try testing.expectEqual(BlockType.UnescapedInterpolation, section_3.block_type);
+            try testing.expectEqualStrings("comments", section_3.text_block.tail.?);
 
-            try testing.expectEqual(BlockType.InvertedSection, section[5].block_type);
+            const section_4 = children.next().?;
+            try testing.expectEqual(BlockType.StaticText, section_4.block_type);
+            try testing.expectEqualStrings("\n", section_4.text_block.tail.?);
 
-            try testing.expectEqual(BlockType.StaticText, section[6].block_type);
-            try testing.expectEqualStrings("\n", section[6].text_block.tail.?);
+            const section_5 = children.next().?;
+            try testing.expectEqual(BlockType.InvertedSection, section_5.block_type);
 
-            try testing.expectEqual(BlockType.CloseSection, section[7].block_type);
+            const section_6 = children.next().?;
+            try testing.expectEqual(BlockType.StaticText, section_6.block_type);
+            try testing.expectEqualStrings("\n", section_6.text_block.tail.?);
+
+            const section_7 = children.next().?;
+            try testing.expectEqual(BlockType.CloseSection, section_7.block_type);
         } else {
             try testing.expect(false);
         }
@@ -491,13 +503,15 @@ test "Basic parse" {
 
     var third_block = try testParseTree(&parser);
 
-    if (third_block) |nodes| {
-        defer StreamedParser.Node.unRefMany(allocator, nodes);
+    if (third_block) |node| {
+        var siblings = node.siblings();
+        defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
-        try testing.expectEqual(@as(usize, 1), nodes.len);
+        try testing.expectEqual(@as(usize, 1), siblings.len());
 
-        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
-        try testing.expectEqualStrings("World", nodes[0].text_block.tail.?);
+        const node_0 = siblings.next().?;
+        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
+        try testing.expectEqualStrings("World", node_0.text_block.tail.?);
     } else {
         try testing.expect(false);
     }
@@ -522,27 +536,32 @@ test "Scan standAlone tags" {
     var first_block = try testParseTree(&parser);
 
     // The parser produces only the minimun amount of tags that can be render at once
-    if (first_block) |nodes| {
-        defer StreamedParser.Node.unRefMany(allocator, nodes);
+    if (first_block) |node| {
+        var siblings = node.siblings();
+        defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
-        try testing.expectEqual(@as(usize, 2), nodes.len);
+        try testing.expectEqual(@as(usize, 2), siblings.len());
 
-        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
-        try testing.expect(nodes[0].text_block.tail == null);
+        const node_0 = siblings.next().?;
+        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
+        try testing.expect(node_0.text_block.tail == null);
 
-        try testing.expectEqual(BlockType.Comment, nodes[1].block_type);
+        const node_1 = siblings.next().?;
+        try testing.expectEqual(BlockType.Comment, node_1.block_type);
     } else {
         try testing.expect(false);
     }
 
     var second_block = try testParseTree(&parser);
-    if (second_block) |nodes| {
-        defer StreamedParser.Node.unRefMany(allocator, nodes);
+    if (second_block) |node| {
+        var siblings = node.siblings();
+        defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
-        try testing.expectEqual(@as(usize, 1), nodes.len);
+        try testing.expectEqual(@as(usize, 1), siblings.len());
 
-        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
-        try testing.expectEqualStrings("Hello", nodes[0].text_block.tail.?);
+        const node_0 = siblings.next().?;
+        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
+        try testing.expectEqualStrings("Hello", node_0.text_block.tail.?);
     } else {
         try testing.expect(false);
     }
@@ -565,28 +584,33 @@ test "Scan delimiters Tags" {
     // The parser produces only the minimun amount of tags that can be render at once
 
     var first_block = try testParseTree(&parser);
-    if (first_block) |nodes| {
-        defer StreamedParser.Node.unRefMany(allocator, nodes);
+    if (first_block) |node| {
+        var siblings = node.siblings();
+        defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
-        try testing.expectEqual(@as(usize, 1), nodes.len);
+        try testing.expectEqual(@as(usize, 1), siblings.len());
 
-        try testing.expectEqual(BlockType.Delimiters, nodes[0].block_type);
-        try testing.expectEqualStrings("[ ]", nodes[0].text_block.tail.?);
+        const node_0 = siblings.next().?;
+        try testing.expectEqual(BlockType.Delimiters, node_0.block_type);
+        try testing.expectEqualStrings("[ ]", node_0.text_block.tail.?);
     } else {
         try testing.expect(false);
     }
 
     var second_block = try testParseTree(&parser);
-    if (second_block) |nodes| {
-        defer StreamedParser.Node.unRefMany(allocator, nodes);
+    if (second_block) |node| {
+        var siblings = node.siblings();
+        defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
-        try testing.expectEqual(@as(usize, 2), nodes.len);
+        try testing.expectEqual(@as(usize, 2), siblings.len());
 
-        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
-        try testing.expect(nodes[0].text_block.tail == null);
+        const node_0 = siblings.next().?;
+        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
+        try testing.expect(node_0.text_block.tail == null);
 
-        try testing.expectEqual(BlockType.Interpolation, nodes[1].block_type);
-        try testing.expectEqualStrings("interpolation", nodes[1].text_block.tail.?);
+        const node_1 = siblings.next().?;
+        try testing.expectEqual(BlockType.Interpolation, node_1.block_type);
+        try testing.expectEqualStrings("interpolation", node_1.text_block.tail.?);
     } else {
         try testing.expect(false);
     }
@@ -624,13 +648,16 @@ test "Parse - Malformed " {
     defer parser.deinit();
 
     const first_block = try testParseTree(&parser);
-    if (first_block) |nodes| {
-        defer StreamedParser.Node.unRefMany(allocator, nodes);
+    if (first_block) |node| {
+        var siblings = node.siblings();
+        defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
-        try testing.expectEqual(@as(usize, 1), nodes.len);
+        try testing.expectEqual(@as(usize, 1), siblings.len());
 
-        try testing.expectEqual(BlockType.StaticText, nodes[0].block_type);
-        try testing.expectEqualStrings("missing}}", nodes[0].text_block.tail.?);
+        const node_0 = siblings.next();
+        try testing.expect(node_0 != null);
+        try testing.expectEqual(BlockType.StaticText, node_0.?.block_type);
+        try testing.expectEqualStrings("missing}}", node_0.?.text_block.tail.?);
     } else {
         try testing.expect(false);
     }
@@ -704,7 +731,7 @@ test "Parse - ClosingTagMismatch " {
     try testing.expectEqual(@as(u32, 22), err.col);
 }
 
-fn testParseTree(parser: anytype) !?[]*StreamedParser.Node {
+fn testParseTree(parser: anytype) !?*StreamedParser.Node {
     return parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
             std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.lin, err.col });
@@ -716,7 +743,7 @@ fn testParseTree(parser: anytype) !?[]*StreamedParser.Node {
 }
 
 fn testParseError(parser: anytype) !LastError {
-    const nodes = parser.parseTree() catch |e| {
+    const node = parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
             return err;
         } else {
@@ -724,8 +751,9 @@ fn testParseError(parser: anytype) !LastError {
         }
     };
 
-    try testing.expect(nodes != null);
-    _ = parser.createElements(null, nodes.?) catch |e| {
+    try testing.expect(node != null);
+    var siblings = node.?.siblings();
+    _ = parser.createElements(null, &siblings) catch |e| {
         if (parser.last_error) |err| {
             return err;
         } else {

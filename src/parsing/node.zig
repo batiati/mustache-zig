@@ -16,23 +16,86 @@ pub fn Node(comptime options: Options) type {
     const RefCountedSlice = memory.RefCountedSlice(options);
     const TextBlock = parsing.TextBlock(options);
 
+    const has_trimming = options.features.preseve_line_breaks_and_indentation;
+
     return struct {
         const Self = @This();
 
         block_type: BlockType,
         text_block: TextBlock,
         inner_text: ?RefCountedSlice = null,
-        prev_node: ?*Self = null,
-        children: ?[]*Self = null,
+
+        ///
+        /// Pointers used to navigate during the parse process
+        link: struct {
+
+            ///
+            /// Previous node in the same order they appear on the template text
+            /// It's used for calculating trimming, indentation and stand alone tags
+            prev: if (has_trimming) ?*Self else void = if (has_trimming) null else {},
+
+            ///
+            /// Next node on the same hierarchy
+            next_sibling: ?*Self = null,
+
+            ///
+            /// First child node
+            child: ?*Self = null,
+        } = .{},
+
+        pub const Iterator = struct {
+            first: ?*Self,
+            current: ?*Self,
+
+            pub fn next(self: *@This()) ?*Self {
+                if (self.current) |current| {
+                    defer self.current = current.link.next_sibling;
+                    return current;
+                } else {
+                    return null;
+                }
+            }
+
+            pub fn reset(self: *@This()) void {
+                self.current = self.first;
+            }
+
+            pub fn len(self: @This()) usize {
+                const counter = struct {
+                    fn action(current: ?*Self, count: usize) usize {
+                        if (current) |value| {
+                            return action(value.link.next_sibling, count + 1);
+                        } else {
+                            return count;
+                        }
+                    }
+                }.action;
+
+                return counter(self.current, 0);
+            }
+        };
+
+        pub fn children(self: *Self) Iterator {
+            return .{
+                .first = self.link.child,
+                .current = self.link.child,
+            };
+        }
+
+        pub fn siblings(self: *Self) Iterator {
+            return .{
+                .first = self,
+                .current = self,
+            };
+        }
 
         ///
         /// A node holds a RefCounter to the underlying text buffer
         /// This function unref a list of nodes and free the buffer if no other Node references it
-        pub fn unRefMany(allocator: Allocator, nodes: ?[]*Self) void {
-            if (nodes) |items| {
-                for (items) |item| {
-                    item.unRef(allocator);
-                }
+        pub fn unRefMany(allocator: Allocator, iterator: *Iterator) void {
+            iterator.reset();
+            while (iterator.next()) |item| {
+                item.unRef(allocator);
             }
         }
 
@@ -50,7 +113,7 @@ pub fn Node(comptime options: Options) type {
             if (!options.features.preseve_line_breaks_and_indentation) return;
 
             if (self.block_type == .StaticText) {
-                if (self.prev_node) |prev_node| {
+                if (self.link.prev) |prev_node| {
                     switch (self.text_block.left_trimming) {
                         .PreserveWhitespaces => {},
                         .Trimmed => assert(false),
@@ -77,12 +140,12 @@ pub fn Node(comptime options: Options) type {
                 var node = last_node;
                 while (node != self) {
                     assert(node.block_type != .StaticText);
-                    assert(node.prev_node != null);
+                    assert(node.link.prev != null);
 
                     if (!node.block_type.canBeStandAlone()) {
                         return;
                     } else {
-                        node = node.prev_node.?;
+                        node = node.link.prev.?;
                     }
                 }
 
@@ -93,7 +156,7 @@ pub fn Node(comptime options: Options) type {
         pub fn getIndentation(self: *const Self) ?[]const u8 {
             return if (options.features.preseve_line_breaks_and_indentation)
                 switch (self.block_type) {
-                    .Partial, .Parent => getPreviousNodeIndentation(self.prev_node),
+                    .Partial, .Parent => getPreviousNodeIndentation(self.link.prev),
                     else => null,
                 }
             else
@@ -109,7 +172,7 @@ pub fn Node(comptime options: Options) type {
                         .AllowTrimming => |trimming| {
 
                             // Non standalone tags must check the previous node
-                            const can_trim = trimming.stand_alone or trimPreviousNodesRight(node.prev_node);
+                            const can_trim = trimming.stand_alone or trimPreviousNodesRight(node.link.prev);
                             if (can_trim) {
                                 node.text_block.trimRight();
                                 return true;
@@ -126,7 +189,7 @@ pub fn Node(comptime options: Options) type {
                     }
                 } else if (node.block_type.canBeStandAlone()) {
                     // Depends on the previous node
-                    return trimPreviousNodesRight(node.prev_node);
+                    return trimPreviousNodesRight(node.link.prev);
                 } else {
                     // Interpolation tags must preserve whitespaces
                     return false;
@@ -143,7 +206,7 @@ pub fn Node(comptime options: Options) type {
             if (parent_node) |node| {
                 return switch (node.block_type) {
                     .StaticText => node.text_block.indentation,
-                    else => getPreviousNodeIndentation(node.prev_node),
+                    else => getPreviousNodeIndentation(node.link.prev),
                 };
             } else {
                 return null;
