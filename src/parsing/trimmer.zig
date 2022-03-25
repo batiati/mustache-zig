@@ -119,7 +119,7 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
         struct {
             const Self = @This();
 
-            pub inline fn init(text_scanner: *TestingTextScanner) Self {
+            pub inline fn init(text_scanner: *TextScanner) Self {
                 _ = text_scanner;
                 return .{};
             }
