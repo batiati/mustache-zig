@@ -25,6 +25,7 @@ const memory = @import("../memory.zig");
 
 pub fn Parser(comptime options: mustache.Options) type {
     const copy_string = options.copyStrings();
+    const allow_lambdas = options.features.lambdas == .Enabled;
 
     const RefCounter = memory.RefCounter(options);
     const RefCounterHolder = memory.RefCounterHolder(options);
@@ -166,7 +167,14 @@ pub fn Parser(comptime options: mustache.Options) type {
                             const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
                             errdefer if (copy_string) if (indentation) |indentation_value| self.gpa.free(indentation_value);
 
-                            const inner_text: ?[]const u8 = if (node.inner_text) |*node_inner_text| try self.dupe(node_inner_text.ref_counter, node_inner_text.content) else null;
+                            const inner_text: ?[]const u8 = inner_text: {
+                                if (allow_lambdas) {
+                                    if (node.inner_text) |*node_inner_text| {
+                                        break :inner_text try self.dupe(node_inner_text.ref_counter, node_inner_text.content);
+                                    }
+                                }
+                                break :inner_text null;
+                            };
                             errdefer if (copy_string) if (inner_text) |inner_text_value| self.gpa.free(inner_text_value);
 
                             break :blk switch (block_type) {
@@ -334,7 +342,7 @@ pub fn Parser(comptime options: mustache.Options) type {
                         };
 
                         self.current_level = ret.level;
-                        if (ret.parent_node.block_type == .Section) {
+                        if (allow_lambdas and ret.parent_node.block_type == .Section) {
                             if (try self.text_scanner.endBookmark(self.gpa)) |bookmark| {
                                 ret.parent_node.inner_text = bookmark;
                             }

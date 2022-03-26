@@ -17,13 +17,14 @@ pub fn Node(comptime options: Options) type {
     const TextBlock = parsing.TextBlock(options);
 
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
+    const allow_lambdas = options.features.lambdas == .Enabled;
 
     return struct {
         const Self = @This();
 
         block_type: BlockType,
         text_block: TextBlock,
-        inner_text: ?RefCountedSlice = null,
+        inner_text: if (allow_lambdas) ?RefCountedSlice else void = if (allow_lambdas) null else {},
 
         ///
         /// Pointers used to navigate during the parse process
@@ -104,8 +105,10 @@ pub fn Node(comptime options: Options) type {
         /// This functions unref the counter and free the buffer if no other Node references it
         pub fn unRef(self: *Self, allocator: Allocator) void {
             self.text_block.unRef(allocator);
-            if (self.inner_text) |*inner_text| {
-                inner_text.ref_counter.free(allocator);
+            if (allow_lambdas) {
+                if (self.inner_text) |*inner_text| {
+                    inner_text.ref_counter.free(allocator);
+                }
             }
         }
 

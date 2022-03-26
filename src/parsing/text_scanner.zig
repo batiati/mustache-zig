@@ -29,6 +29,8 @@ pub fn TextScanner(comptime options: Options) type {
     const TextBlock = parsing.TextBlock(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 
+    const allow_lambdas = options.features.lambdas == .Enabled;
+
     return struct {
         const Self = @This();
 
@@ -51,10 +53,10 @@ pub fn TextScanner(comptime options: Options) type {
             .String => void,
         } = undefined,
 
-        bookmark: struct {
+        bookmark: if (allow_lambdas) struct {
             stack: ?*Bookmark = null,
             last_starting_mark: usize = 0,
-        } = .{},
+        } else void = if (allow_lambdas) .{} else {},
 
         content: []const u8 = &.{},
         index: usize = 0,
@@ -148,12 +150,14 @@ pub fn TextScanner(comptime options: Options) type {
                     self.index -= adjust.off_set;
                     self.block_index -= adjust.off_set;
 
-                    if (self.bookmark.stack != null) {
-                        adjustBookmarkOffset(self.bookmark.stack, adjust.off_set);
-                        self.bookmark.last_starting_mark -= adjust.off_set;
-                    }
+                    if (allow_lambdas) {
+                        if (self.bookmark.stack != null) {
+                            adjustBookmarkOffset(self.bookmark.stack, adjust.off_set);
+                            self.bookmark.last_starting_mark -= adjust.off_set;
+                        }
 
-                    self.stream.preserve_bookmark = adjust.preserve;
+                        self.stream.preserve_bookmark = adjust.preserve;
+                    }
                 }
             }
         }
@@ -196,7 +200,7 @@ pub fn TextScanner(comptime options: Options) type {
                             self.state = .{ .ExpectingMark = if (expected_mark == .Starting) .Ending else .Starting };
                             increment = mark.delimiter_len;
 
-                            if (mark.mark_type == .Starting) {
+                            if (allow_lambdas and mark.mark_type == .Starting) {
                                 self.bookmark.last_starting_mark = self.index;
                             }
 
@@ -238,57 +242,65 @@ pub fn TextScanner(comptime options: Options) type {
         }
 
         pub fn beginBookmark(self: *Self, allocator: Allocator) Allocator.Error!void {
-            var bookmark = try allocator.create(Bookmark);
-            bookmark.* = .{
-                .prev = self.bookmark.stack,
-                .index = self.index,
-            };
+            if (allow_lambdas) {
+                var bookmark = try allocator.create(Bookmark);
+                bookmark.* = .{
+                    .prev = self.bookmark.stack,
+                    .index = self.index,
+                };
 
-            self.bookmark.stack = bookmark;
-            if (options.source == .Stream) {
-                if (self.stream.preserve_bookmark) |preserve| {
-                    assert(preserve <= self.index);
-                } else {
-                    self.stream.preserve_bookmark = self.index;
+                self.bookmark.stack = bookmark;
+                if (options.source == .Stream) {
+                    if (self.stream.preserve_bookmark) |preserve| {
+                        assert(preserve <= self.index);
+                    } else {
+                        self.stream.preserve_bookmark = self.index;
+                    }
                 }
             }
         }
 
         pub fn endBookmark(self: *Self, allocator: Allocator) Allocator.Error!?RefCountedSlice {
-            if (self.bookmark.stack) |bookmark| {
-                defer {
-                    self.bookmark.stack = bookmark.prev;
-                    if (options.source == .Stream and bookmark.prev == null) {
-                        self.stream.preserve_bookmark = null;
+            if (allow_lambdas) {
+                if (self.bookmark.stack) |bookmark| {
+                    defer {
+                        self.bookmark.stack = bookmark.prev;
+                        if (options.source == .Stream and bookmark.prev == null) {
+                            self.stream.preserve_bookmark = null;
+                        }
+                        allocator.destroy(bookmark);
                     }
-                    allocator.destroy(bookmark);
+
+                    assert(bookmark.index < self.content.len);
+                    assert(bookmark.index <= self.bookmark.last_starting_mark);
+                    assert(self.bookmark.last_starting_mark < self.content.len);
+
+                    return RefCountedSlice{
+                        .content = self.content[bookmark.index..self.bookmark.last_starting_mark],
+                        .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                    };
                 }
-
-                assert(bookmark.index < self.content.len);
-                assert(bookmark.index <= self.bookmark.last_starting_mark);
-                assert(self.bookmark.last_starting_mark < self.content.len);
-
-                return RefCountedSlice{
-                    .content = self.content[bookmark.index..self.bookmark.last_starting_mark],
-                    .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
-                };
-            } else {
-                return null;
             }
+
+            return null;
         }
 
         fn adjustBookmarkOffset(bookmark: ?*Bookmark, off_set: usize) void {
-            if (bookmark) |current| {
-                assert(current.index >= off_set);
-                current.index -= off_set;
-                adjustBookmarkOffset(current.prev, off_set);
+            if (allow_lambdas) {
+                if (bookmark) |current| {
+                    assert(current.index >= off_set);
+                    current.index -= off_set;
+                    adjustBookmarkOffset(current.prev, off_set);
+                }
             }
         }
 
         fn freeBookmarks(allocator: Allocator, bookmark: ?*Bookmark) void {
-            if (bookmark) |current| {
-                freeBookmarks(allocator, current.prev);
-                allocator.destroy(current);
+            if (allow_lambdas) {
+                if (bookmark) |current| {
+                    freeBookmarks(allocator, current.prev);
+                    allocator.destroy(current);
+                }
             }
         }
 
