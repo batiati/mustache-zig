@@ -74,7 +74,7 @@ pub fn Parser(comptime options: mustache.Options) type {
             var epoch_arena = EpochArena.init(gpa);
             errdefer epoch_arena.deinit();
 
-            var root = try Level.init(epoch_arena.allocator(), delimiters);
+            var root = try Level.create(epoch_arena.allocator(), delimiters);
 
             return Self{
                 .gpa = gpa,
@@ -313,7 +313,7 @@ pub fn Parser(comptime options: mustache.Options) type {
                                     self.epoch_arena.nextEpoch();
                                     const new_arena = self.epoch_arena.allocator();
 
-                                    var root = try Level.init(new_arena, self.root.delimiters);
+                                    var root = try Level.create(new_arena, self.root.delimiters);
                                     self.root = root;
                                     self.current_level = root;
 

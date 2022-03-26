@@ -60,7 +60,7 @@ pub const Escape = enum {
 
 pub fn getContext(comptime Writer: type, allocator: Allocator, data: anytype) Allocator.Error!Context(Writer) {
     const Impl = ContextImpl(Writer, @TypeOf(data));
-    return try Impl.init(allocator, data);
+    return try Impl.create(allocator, data);
 }
 
 pub fn Context(comptime Writer: type) type {
@@ -95,7 +95,7 @@ pub fn Context(comptime Writer: type) type {
             interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
             expandLambda: fn (*const anyopaque, Allocator, OutWriter, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
             check: fn (*const anyopaque, []const u8, usize) PathResolution(void),
-            deinit: fn (*const anyopaque, Allocator) void,
+            destroy: fn (*const anyopaque, Allocator) void,
         };
 
         pub const Iterator = struct {
@@ -196,8 +196,8 @@ pub fn Context(comptime Writer: type) type {
             return try self.vtable.expandLambda(self.ptr, allocator, out_writer, stack, path, inner_text, escape, delimiters);
         }
 
-        pub inline fn deinit(self: Self, allocator: Allocator) void {
-            return self.vtable.deinit(self.ptr, allocator);
+        pub inline fn destroy(self: Self, allocator: Allocator) void {
+            return self.vtable.destroy(self.ptr, allocator);
         }
     };
 }
@@ -214,7 +214,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             .check = check,
             .interpolate = interpolate,
             .expandLambda = expandLambda,
-            .deinit = deinit,
+            .destroy = destroy,
         };
 
         const PATH_SEPARATOR = ".";
@@ -227,7 +227,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
 
         data: Data,
 
-        pub fn init(allocator: Allocator, data: Data) Allocator.Error!ContextInterface {
+        pub fn create(allocator: Allocator, data: Data) Allocator.Error!ContextInterface {
             return ContextInterface{
                 .ptr = if (is_zero_size) undefined else blk: {
                     var self = try allocator.create(Self);
@@ -293,7 +293,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             );
         }
 
-        fn deinit(ctx: *const anyopaque, allocator: Allocator) void {
+        fn destroy(ctx: *const anyopaque, allocator: Allocator) void {
             if (!is_zero_size) {
                 var self = getSelf(ctx);
                 allocator.destroy(self);
@@ -446,7 +446,7 @@ const struct_tests = struct {
 
         const Writer = @TypeOf(writer);
         var ctx = try getContext(Writer, allocator, data);
-        defer ctx.deinit(allocator);
+        defer ctx.destroy(allocator);
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
@@ -1026,7 +1026,7 @@ const struct_tests = struct {
         // Person
 
         var person_ctx = try getContext(@TypeOf(writer), allocator, person);
-        defer person_ctx.deinit(allocator);
+        defer person_ctx.destroy(allocator);
 
         list.clearAndFree();
 
@@ -1042,7 +1042,7 @@ const struct_tests = struct {
                 unreachable;
             },
         };
-        defer address_ctx.deinit(allocator);
+        defer address_ctx.destroy(allocator);
 
         list.clearAndFree();
         try interpolateCtx(writer, address_ctx, "street", .Unescaped);
@@ -1057,7 +1057,7 @@ const struct_tests = struct {
                 unreachable;
             },
         };
-        defer street_ctx.deinit(allocator);
+        defer street_ctx.destroy(allocator);
 
         list.clearAndFree();
 
@@ -1083,7 +1083,7 @@ const struct_tests = struct {
         // Person
 
         var person_ctx = try getContext(@TypeOf(writer), allocator, &person);
-        defer person_ctx.deinit(allocator);
+        defer person_ctx.destroy(allocator);
 
         list.clearAndFree();
 
@@ -1099,7 +1099,7 @@ const struct_tests = struct {
                 unreachable;
             },
         };
-        defer indication_ctx.deinit(allocator);
+        defer indication_ctx.destroy(allocator);
 
         list.clearAndFree();
         try interpolateCtx(writer, indication_ctx, "address.street", .Unescaped);
@@ -1114,7 +1114,7 @@ const struct_tests = struct {
                 unreachable;
             },
         };
-        defer address_ctx.deinit(allocator);
+        defer address_ctx.destroy(allocator);
 
         list.clearAndFree();
         try interpolateCtx(writer, address_ctx, "street", .Unescaped);
@@ -1129,7 +1129,7 @@ const struct_tests = struct {
                 unreachable;
             },
         };
-        defer street_ctx.deinit(allocator);
+        defer street_ctx.destroy(allocator);
 
         list.clearAndFree();
 
@@ -1151,7 +1151,7 @@ const struct_tests = struct {
 
         const Writer = @TypeOf(std.io.null_writer);
         var person_ctx = try getContext(Writer, allocator, person);
-        defer person_ctx.deinit(allocator);
+        defer person_ctx.destroy(allocator);
 
         // Person.address
         var address_ctx = switch (try person_ctx.get(allocator, "address")) {
@@ -1161,7 +1161,7 @@ const struct_tests = struct {
                 unreachable;
             },
         };
-        defer address_ctx.deinit(allocator);
+        defer address_ctx.destroy(allocator);
 
         var wrong_address = try person_ctx.get(allocator, "wrong_address");
         try testing.expect(wrong_address == .NotFoundInContext);
@@ -1174,7 +1174,7 @@ const struct_tests = struct {
                 unreachable;
             },
         };
-        defer street_ctx.deinit(allocator);
+        defer street_ctx.destroy(allocator);
 
         var wrong_street = try address_ctx.get(allocator, "wrong_street");
         try testing.expect(wrong_street == .NotFoundInContext);
@@ -1187,7 +1187,7 @@ const struct_tests = struct {
                 unreachable;
             },
         };
-        defer street_len_ctx.deinit(allocator);
+        defer street_len_ctx.destroy(allocator);
 
         var wrong_len = try street_ctx.get(allocator, "wrong_len");
         try testing.expect(wrong_len == .NotFoundInContext);
@@ -1205,7 +1205,7 @@ const struct_tests = struct {
 
         // Person
         var ctx = try getContext(@TypeOf(writer), allocator, person);
-        defer ctx.deinit(allocator);
+        defer ctx.destroy(allocator);
 
         var iterator = switch (ctx.iterator("items")) {
             .Field => |found| found,
@@ -1219,7 +1219,7 @@ const struct_tests = struct {
             try testing.expect(false);
             return;
         };
-        defer item_1.deinit(allocator);
+        defer item_1.destroy(allocator);
 
         list.clearAndFree();
 
@@ -1230,7 +1230,7 @@ const struct_tests = struct {
             try testing.expect(false);
             return;
         };
-        defer item_2.deinit(allocator);
+        defer item_2.destroy(allocator);
 
         list.clearAndFree();
 
@@ -1250,7 +1250,7 @@ const struct_tests = struct {
 
         const Writer = @TypeOf(std.io.null_writer);
         var ctx = try getContext(Writer, allocator, person);
-        defer ctx.deinit(allocator);
+        defer ctx.destroy(allocator);
 
         {
             // iterator over true
@@ -1266,7 +1266,7 @@ const struct_tests = struct {
                 try testing.expect(false);
                 return;
             };
-            defer item_1.deinit(allocator);
+            defer item_1.destroy(allocator);
 
             var no_more = try iterator.next(allocator);
             try testing.expect(no_more == null);
@@ -1296,7 +1296,7 @@ const struct_tests = struct {
 
         const Writer = @TypeOf(std.io.null_writer);
         var ctx = try getContext(Writer, allocator, person);
-        defer ctx.deinit(allocator);
+        defer ctx.destroy(allocator);
 
         {
             // iterator over true
@@ -1312,7 +1312,7 @@ const struct_tests = struct {
                 try testing.expect(false);
                 return;
             };
-            defer item_1.deinit(allocator);
+            defer item_1.destroy(allocator);
 
             var no_more = try iterator.next(allocator);
             try testing.expect(no_more == null);

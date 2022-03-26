@@ -86,7 +86,7 @@ pub fn Level(comptime options: Options) type {
 
         list: List = .{},
 
-        pub fn init(arena: Allocator, delimiters: Delimiters) Allocator.Error!*Self {
+        pub fn create(arena: Allocator, delimiters: Delimiters) Allocator.Error!*Self {
             var self = try arena.create(Self);
             self.* = .{
                 .parent = null,
@@ -139,7 +139,7 @@ pub fn Level(comptime options: Options) type {
 
             const allocator = arena.allocator();
 
-            var level = try Self.init(allocator, .{});
+            var level = try Self.create(allocator, .{});
             try testing.expect(level.current_node == null);
 
             try level.addNode(allocator, undefined, undefined);

@@ -104,7 +104,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
                 .parent = null,
                 .ctx = try context.getContext(Writer, self.allocator, self.data),
             };
-            defer stack.ctx.deinit(self.allocator);
+            defer stack.ctx.destroy(self.allocator);
 
             try WriterRender.renderLevel(self.allocator, self.out_writer, &stack, elements);
         }
@@ -138,7 +138,7 @@ pub fn Render(comptime Writer: type) type {
                                     assert(expand_result == .Lambda);
                                 } else {
                                     while (try iterator.next(allocator)) |item_ctx| {
-                                        defer item_ctx.deinit(allocator);
+                                        defer item_ctx.destroy(allocator);
 
                                         var next_level = ContextStack{
                                             .parent = stack,
