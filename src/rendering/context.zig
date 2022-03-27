@@ -76,6 +76,8 @@ pub fn Context(comptime Writer: type) type {
         /// Provides the ability to choose between two writers
         /// while keeping the static dispatch interface. 
         pub const OutWriter = union(enum) {
+            pub const Buffer = std.ArrayList(u8);
+            pub const Counter = std.io.CountingWriter(@TypeOf(std.io.null_writer)).Writer;
 
             ///
             /// Render directly to the underlying stream
@@ -84,7 +86,12 @@ pub fn Context(comptime Writer: type) type {
             ///
             /// Render to a intermediate buffer
             /// for processing lambda expansions
-            Buffer: std.ArrayList(u8).Writer,
+            Buffer: *Buffer,
+
+            ///
+            /// Counts how much capacity is _likely_ required to render
+            /// Lambdas are not expanded
+            CapacityHint: Counter,
         };
 
         ptr: *const anyopaque,

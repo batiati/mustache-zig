@@ -23,12 +23,15 @@ const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
 
 pub fn renderAllocCached(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![]const u8 {
-    var builder = std.ArrayList(u8).init(allocator);
-    errdefer builder.deinit();
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
 
-    try renderCached(allocator, cached_template, data, builder.writer());
+    var render = getDataRender(allocator, std.io.null_writer, data);
+    render.out_writer = .{ .Buffer = &list };
 
-    return builder.toOwnedSlice();
+    try render.render(cached_template.elements);
+
+    return list.toOwnedSlice();
 }
 
 pub fn renderCached(allocator: Allocator, cached_template: Template, data: anytype, out_writer: anytype) (Allocator.Error || @TypeOf(out_writer).Error)!void {
@@ -106,6 +109,14 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
             };
             defer stack.ctx.destroy(self.allocator);
 
+            if (self.out_writer == .Buffer) {
+                var counter = std.io.countingWriter(std.io.null_writer);
+                try WriterRender.renderLevel(self.allocator, .{ .CapacityHint = counter.writer() }, &stack, elements);
+
+                var list = self.out_writer.Buffer;
+                try list.ensureUnusedCapacity(counter.bytes_written);
+            }
+
             try WriterRender.renderLevel(self.allocator, self.out_writer, &stack, elements);
         }
     };
@@ -127,8 +138,11 @@ pub fn Render(comptime Writer: type) type {
                         .Interpolation => |path| try interpolate(allocator, out_writer, stack, path, .Escaped),
                         .UnescapedInterpolation => |path| try interpolate(allocator, out_writer, stack, path, .Unescaped),
                         .Section => |section| {
-                            if (try getIterator(stack, section.key)) |*iterator| {
+                            if (getIterator(stack, section.key)) |*iterator| {
                                 if (iterator.is_lambda) {
+
+                                    // Lambdas are not evaluated during the capacity hint
+                                    if (out_writer == .CapacityHint) continue;
 
                                     //TODO: Add template options
                                     assert(section.inner_text != null);
@@ -151,7 +165,7 @@ pub fn Render(comptime Writer: type) type {
                             }
                         },
                         .InvertedSection => |section| {
-                            var iterator = try getIterator(stack, section.key);
+                            var iterator = getIterator(stack, section.key);
 
                             // Lambdas aways evaluate as "true" for inverted section
                             // Broken paths, empty lists, null and false evaluates as "false"
@@ -169,6 +183,49 @@ pub fn Render(comptime Writer: type) type {
             }
         }
 
+        pub fn capacityHint(children: ?[]const Element) usize {
+            var capacity_hint: usize = 0;
+
+            if (children) |elements| {
+                for (elements) |element| {
+                    switch (element) {
+                        .StaticText => |content| capacity_hint += content.len,
+                        .Section => |section| capacity_hint += capacityHint(section.content),
+                        .InvertedSection => |section| capacity_hint += capacityHint(section.content),
+
+                        //TODO Partial, Parent, Block
+                        else => {},
+                    }
+                }
+            }
+
+            return capacity_hint;
+        }
+
+        fn getCapacityHint(stack: *const ContextStack, path: []const u8) usize {
+            var level: ?*const ContextStack = stack;
+
+            while (level) |current| : (level = current.parent) {
+                const path_resolution = current.ctx.capacityHint(path);
+
+                switch (path_resolution) {
+                    .Field => |value| return value,
+                    .Lambda => {
+                        //TODO
+                        break;
+                    },
+                    .IteratorConsumed, .ChainBroken => break,
+
+                    .NotFoundInContext => {
+                        // Not rendered, should try against the parent context
+                        continue;
+                    },
+                }
+            }
+
+            return 0;
+        }
+
         fn interpolate(allocator: Allocator, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
             var level: ?*const ContextStack = stack;
 
@@ -182,6 +239,10 @@ pub fn Render(comptime Writer: type) type {
                     },
 
                     .Lambda => {
+
+                        // Lambdas are not evaluated during the capacity hint
+                        if (out_writer == .CapacityHint) break;
+
                         // Expand the lambda against the current context and break the loop
                         const expand_result = try current.ctx.expandLambda(allocator, out_writer, stack, path, "", escape, .{});
                         assert(expand_result == .Lambda);
@@ -204,11 +265,12 @@ pub fn Render(comptime Writer: type) type {
         fn writeAll(out_writer: OutWriter, content: []const u8) (Allocator.Error || Writer.Error)!void {
             switch (out_writer) {
                 .Writer => |writer| try writer.writeAll(content),
-                .Buffer => |buffer| try buffer.writeAll(content),
+                .Buffer => |list| try list.appendSlice(content),
+                .CapacityHint => |counter| try counter.writeAll(content),
             }
         }
 
-        fn getIterator(stack: *const ContextStack, path: []const u8) (Allocator.Error || Writer.Error)!?ContextInterface.Iterator {
+        fn getIterator(stack: *const ContextStack, path: []const u8) ?ContextInterface.Iterator {
             var level: ?*const ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {

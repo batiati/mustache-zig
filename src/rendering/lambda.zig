@@ -131,7 +131,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             defer buffer.deinit();
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(allocator, .{ .Buffer = buffer.writer() }, self.stack, template.elements);
+            try Impl.renderLevel(allocator, .{ .Buffer = &buffer }, self.stack, template.elements);
 
             return buffer.toOwnedSlice();
         }
@@ -152,10 +152,14 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {
             var self = getSelf(ctx);
 
-            return switch (self.out_writer) {
-                .Writer => |writer| try escapedWrite(writer, rendered_text, self.escape),
-                .Buffer => |buffer| try escapedWrite(buffer, rendered_text, self.escape),
-            };
+            switch (self.out_writer) {
+                .Writer => |writer| return try escapedWrite(writer, rendered_text, self.escape),
+                .Buffer => |list| {
+                    try list.ensureUnusedCapacity(rendered_text.len);
+                    return try escapedWrite(list.writer(), rendered_text, self.escape);
+                },
+                .CapacityHint => |counter| return try escapedWrite(counter, rendered_text, self.escape),
+            }
         }
 
         inline fn getSelf(ctx: *const anyopaque) *const Self {
