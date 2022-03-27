@@ -416,7 +416,6 @@ pub fn Invoker(comptime Writer: type) type {
             switch (out_writer) {
                 .Writer => |writer| try write(writer, value, escape),
                 .Buffer => |list| try write(list.writer(), value, escape),
-                .CapacityHint => |counter| try write(counter, value, escape),
             }
         }
 

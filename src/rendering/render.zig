@@ -110,11 +110,9 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
             defer stack.ctx.destroy(self.allocator);
 
             if (self.out_writer == .Buffer) {
-                var counter = std.io.countingWriter(std.io.null_writer);
-                try WriterRender.renderLevel(self.allocator, .{ .CapacityHint = counter.writer() }, &stack, elements);
-
                 var list = self.out_writer.Buffer;
-                try list.ensureUnusedCapacity(counter.bytes_written);
+                const capacity_hint = WriterRender.capacityHint(elements);
+                try list.ensureUnusedCapacity(capacity_hint);
             }
 
             try WriterRender.renderLevel(self.allocator, self.out_writer, &stack, elements);
@@ -140,9 +138,6 @@ pub fn Render(comptime Writer: type) type {
                         .Section => |section| {
                             if (getIterator(stack, section.key)) |*iterator| {
                                 if (iterator.is_lambda) {
-
-                                    // Lambdas are not evaluated during the capacity hint
-                                    if (out_writer == .CapacityHint) continue;
 
                                     //TODO: Add template options
                                     assert(section.inner_text != null);
@@ -199,31 +194,7 @@ pub fn Render(comptime Writer: type) type {
                 }
             }
 
-            return capacity_hint;
-        }
-
-        fn getCapacityHint(stack: *const ContextStack, path: []const u8) usize {
-            var level: ?*const ContextStack = stack;
-
-            while (level) |current| : (level = current.parent) {
-                const path_resolution = current.ctx.capacityHint(path);
-
-                switch (path_resolution) {
-                    .Field => |value| return value,
-                    .Lambda => {
-                        //TODO
-                        break;
-                    },
-                    .IteratorConsumed, .ChainBroken => break,
-
-                    .NotFoundInContext => {
-                        // Not rendered, should try against the parent context
-                        continue;
-                    },
-                }
-            }
-
-            return 0;
+            return capacity_hint + (capacity_hint / 2 + 8);
         }
 
         fn interpolate(allocator: Allocator, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
@@ -239,9 +210,6 @@ pub fn Render(comptime Writer: type) type {
                     },
 
                     .Lambda => {
-
-                        // Lambdas are not evaluated during the capacity hint
-                        if (out_writer == .CapacityHint) break;
 
                         // Expand the lambda against the current context and break the loop
                         const expand_result = try current.ctx.expandLambda(allocator, out_writer, stack, path, "", escape, .{});
@@ -266,7 +234,6 @@ pub fn Render(comptime Writer: type) type {
             switch (out_writer) {
                 .Writer => |writer| try writer.writeAll(content),
                 .Buffer => |list| try list.appendSlice(content),
-                .CapacityHint => |counter| try counter.writeAll(content),
             }
         }
 

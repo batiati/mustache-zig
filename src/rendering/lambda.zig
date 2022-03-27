@@ -158,7 +158,6 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
                     try list.ensureUnusedCapacity(rendered_text.len);
                     return try escapedWrite(list.writer(), rendered_text, self.escape);
                 },
-                .CapacityHint => |counter| return try escapedWrite(counter, rendered_text, self.escape),
             }
         }
 
