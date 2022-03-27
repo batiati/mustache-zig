@@ -8,7 +8,7 @@ const mustache = @import("mustache");
 const TIMES = 1_000_000;
 
 pub fn main() anyerror!void {
-    try simpleTemplate(std.heap.c_allocator);
+    try simpleTemplate(std.heap.raw_c_allocator);
 }
 
 pub fn simpleTemplate(allocator: Allocator) !void {
