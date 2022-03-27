@@ -50,15 +50,18 @@ fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize) void {
 
 fn zigFmt(allocator: Allocator, comptime fmt_template: []const u8, data: anytype) !usize {
     const ret = try std.fmt.allocPrint(allocator, fmt_template, data);
+    defer allocator.free(ret);
     return ret.len;
 }
 
 fn preParsed(allocator: Allocator, template: mustache.Template, data: anytype) !usize {
     const ret = try mustache.renderAllocCached(allocator, template, data);
+    defer allocator.free(ret);
     return ret.len;
 }
 
 fn notParsed(allocator: Allocator, template_text: []const u8, data: anytype) !usize {
     const ret = try mustache.renderAllocFromString(allocator, template_text, data);
+    defer allocator.free(ret);
     return ret.len;
 }
