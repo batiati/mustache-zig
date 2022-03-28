@@ -180,7 +180,7 @@ pub fn Invoker(comptime Writer: type) type {
 
                                 //Slice supports the "len" field,
                                 if (std.mem.eql(u8, "len", path)) {
-                                    return try find(.Leaf, action_param, out_writer, data.len, path_iterator, index);
+                                    return try find(.Leaf, action_param, out_writer, lenOf(data), path_iterator, index);
                                 }
                             },
 
@@ -188,21 +188,75 @@ pub fn Invoker(comptime Writer: type) type {
                             .C => @compileError("[*c] pointers not supported"),
                         },
                         .Optional => |info| {
-                            if (data) |value| {
-                                return try recursiveFind(depth, info.child, action_param, out_writer, value, path, path_iterator, index);
+                            if (!isNull(data)) {
+                                return try recursiveFind(depth, info.child, action_param, out_writer, data, path, path_iterator, index);
                             }
                         },
                         .Array, .Vector => {
 
                             //Slice supports the "len" field,
                             if (std.mem.eql(u8, "len", path)) {
-                                return try find(.Leaf, action_param, out_writer, data.len, path_iterator, index);
+                                return try find(.Leaf, action_param, out_writer, lenOf(data), path_iterator, index);
                             }
                         },
                         else => {},
                     }
 
                     return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+                }
+
+                fn isNull(data: anytype) bool {
+                    return switch (@typeInfo(@TypeOf(data))) {
+                        .Pointer => |info| switch (info.size) {
+                            .One => return isNull(data.*),
+                            .Slice => return false,
+                            .Many => @compileError("[*] pointers not supported"),
+                            .C => @compileError("[*c] pointers not supported"),
+                        },
+                        .Optional => return data == null,
+                        else => return false,
+                    };
+                }
+
+                fn lenOf(data: anytype) ?usize {
+                    return switch (@typeInfo(@TypeOf(data))) {
+                        .Pointer => |info| switch (info.size) {
+                            .One => return null,
+                            .Slice => return data.len,
+                            .Many => @compileError("[*] pointers not supported"),
+                            .C => @compileError("[*c] pointers not supported"),
+                        },
+                        .Array, .Vector => return data.len,
+                        .Optional => if (data) |value| return lenOf(value) else null,
+                        else => return null,
+                    };
+                }
+
+                fn fieldRef(comptime TValue: type, comptime field_name: []const u8, data: anytype) return_type:{
+
+                    const TData = @TypeOf(data);
+                    const fields = std.meta.fields(TValue);
+                    const field_index = std.meta.fieldIndex(TValue, field_name) orelse @compileError("invalid field " ++ @typeName(TValue) ++ "." ++ field_name);
+                    const T = fields[field_index].field_type;
+
+                    if (trait.is(.Pointer)(TData) and !trait.isConstPtr(TData)) {
+                        break :return_type *T;
+                    } else {
+                        break :return_type *const T;
+                    }
+                }{
+                    if (@TypeOf(data) == TValue) {
+                         return &@field(data, field_name);
+                    } else {
+                        switch (@typeInfo(@TypeOf(data))) {
+                            .Pointer => |info| switch (info.size) {
+                                .One => return &@field(data.*, field_name),
+                                else => @compileError("invalid field " ++ @typeName(TValue) ++ "." ++ field_name),
+                            },
+                            .Optional => return &@field(data.?, field_name),
+                            else => return &@field(data, field_name),
+                        }
+                    }
                 }
 
                 fn findFieldPath(
@@ -218,7 +272,7 @@ pub fn Invoker(comptime Writer: type) type {
                     const fields = std.meta.fields(TValue);
                     inline for (fields) |field| {
                         if (std.mem.eql(u8, field.name, path)) {
-                            return try find(.Leaf, action_param, out_writer, @field(data, field.name), path_iterator, index);
+                            return try find(.Leaf, action_param, out_writer, fieldRef(TValue, field.name, data), path_iterator, index);
                         }
                     } else {
                         return try findLambdaPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
@@ -333,6 +387,7 @@ pub fn Invoker(comptime Writer: type) type {
                         },
 
                         .Pointer => |info| switch (info.size) {
+                            .One => return try iterateAt(action_param, out_writer, data.*, index),
                             .Slice => {
 
                                 //Slice of u8 is always string
