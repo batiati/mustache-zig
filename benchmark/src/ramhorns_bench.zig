@@ -1,14 +1,22 @@
 // Bench suite based on Ramhorns benchmarkw
 // https://github.com/maciejhirsz/ramhorns/tree/master/tests/benches
 
+const builtin = @import("builtin");
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const mustache = @import("mustache");
-const TIMES = 1_000_000;
+const TIMES = if (builtin.mode == .Debug) 10_000 else 1_000_000;
 
 pub fn main() anyerror!void {
-    try simpleTemplate(std.heap.raw_c_allocator);
+    if (builtin.mode == .Debug) {
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
+        try simpleTemplate(gpa.allocator());
+    } else {
+        try simpleTemplate(std.heap.raw_c_allocator);
+    }
 }
 
 pub fn simpleTemplate(allocator: Allocator) !void {
@@ -21,7 +29,9 @@ pub fn simpleTemplate(allocator: Allocator) !void {
     };
 
     var template = (try mustache.parseTemplate(allocator, template_text, .{}, false)).Success;
+    defer template.free(allocator);
 
+    _ = fmt_template;
     try repeat("Zig fmt", zigFmt, .{ allocator, fmt_template, data });
     try repeat("Mustache pre-parsed", preParsed, .{ allocator, template, data });
     try repeat("Mustache not parsed", notParsed, .{ allocator, template_text, data });
