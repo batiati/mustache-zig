@@ -156,18 +156,6 @@ pub fn Invoker(comptime Writer: type) type {
                             return Result{ .Field = try action_fn(action_param, out_writer, ctx) };
                         }
                     }
-
-                    const path = if (isLambda) null else path_iterator.next();
-
-                    if (path) |current_path| {
-                        return try recursiveFind(depth, @TypeOf(data), action_param, out_writer, ctx, current_path, path_iterator, index);
-                    } else if (index) |current_index| {
-                        return try iterateAt(action_param, out_writer, ctx, current_index);
-                    } else if (isLambda) {
-                        return Result{ .Lambda = try action_fn(action_param, out_writer, ctx) };
-                    } else {
-                        return Result{ .Field = try action_fn(action_param, out_writer, ctx) };
-                    }
                 }
 
                 fn recursiveFind(
