@@ -13,7 +13,7 @@ const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
 
 const invoker = @import("invoker.zig");
-const FieldHelper = @import("FieldHelper.zig");
+const Fields = invoker.Fields;
 
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
@@ -61,7 +61,7 @@ pub const Escape = enum {
 
 pub fn getContext(comptime Writer: type, allocator: Allocator, data: anytype) Allocator.Error!Context(Writer) {
     const Data = @TypeOf(data);
-    const by_value = comptime FieldHelper.byValue(Data);
+    const by_value = comptime Fields.byValue(Data);
     if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
 
     const Impl = ContextImpl(Writer, Data);
@@ -450,7 +450,7 @@ const struct_tests = struct {
         const allocator = testing.allocator;
 
         const Data = @TypeOf(data);
-        const by_value = comptime FieldHelper.byValue(Data);
+        const by_value = comptime Fields.byValue(Data);
 
         const Writer = @TypeOf(writer);
         var ctx = try getContext(Writer, allocator, if (by_value) data else @as(*const Data, &data));

@@ -15,11 +15,13 @@ const ParseError = mustache.ParseError;
 const Template = mustache.Template;
 
 const TemplateLoader = @import("../template.zig").TemplateLoader;
-const FieldHelper = @import("FieldHelper.zig");
 
 const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
+
+const invoker = @import("invoker.zig");
+const Fields = invoker.Fields;
 
 const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 
@@ -106,7 +108,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
         data: Data,
 
         pub fn render(self: *Self, elements: []const Element) Error!void {
-            const by_value = comptime FieldHelper.byValue(Data);
+            const by_value = comptime Fields.byValue(Data);
 
             var stack = WriterRender.ContextStack{
                 .parent = null,
