@@ -112,9 +112,8 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
 
             var stack = WriterRender.ContextStack{
                 .parent = null,
-                .ctx = try context.getContext(Writer, self.allocator, if (by_value) self.data else @as(*const Data, &self.data)),
+                .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
             };
-            defer stack.ctx.destroy(self.allocator);
 
             if (self.out_writer == .Buffer) {
                 var list = self.out_writer.Buffer;
@@ -153,9 +152,8 @@ pub fn Render(comptime Writer: type) type {
                                     const expand_result = try iterator.context.expandLambda(allocator, out_writer, stack, section.key, section.inner_text.?, .Unescaped, section.delimiters.?);
                                     assert(expand_result == .Lambda);
                                 } else {
-                                    while (try iterator.next(allocator)) |item_ctx| {
-                                        defer item_ctx.destroy(allocator);
-
+                                    while (iterator.next()) |item_ctx| {
+       
                                         var next_level = ContextStack{
                                             .parent = stack,
                                             .ctx = item_ctx,

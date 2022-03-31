@@ -27,14 +27,13 @@ pub fn Invoker(comptime Writer: type) type {
         pub const OutWriter = ContextInterface.OutWriter;
 
         pub inline fn get(
-            allocator: Allocator,
             data: anytype,
             path_iterator: *std.mem.TokenIterator(u8),
             index: ?usize,
-        ) Allocator.Error!PathResolution(Context(Writer)) {
-            const Get = PathInvoker(Allocator.Error, Context(Writer), getAction);
+        ) PathResolution(Context(Writer)) {
+            const Get = PathInvoker(error{}, Context(Writer), getAction);
             return try Get.call(
-                allocator,
+                {},
                 {},
                 data,
                 path_iterator,
@@ -355,9 +354,10 @@ pub fn Invoker(comptime Writer: type) type {
             };
         }
 
-        inline fn getAction(allocator: Allocator, out_writer: void, value: anytype) Allocator.Error!ContextInterface {
+        inline fn getAction(param: void, out_writer: void, value: anytype) error{}!ContextInterface {
+            _ = param;
             _ = out_writer;
-            return try context.getContext(Writer, allocator, value);
+            return context.getContext(Writer, value);
         }
 
         inline fn checkAction(
@@ -824,33 +824,7 @@ pub fn Invoker(comptime Writer: type) type {
 }
 
 pub const Fields = struct {
-    pub const FlattenedType = [4]usize;
-
-    pub inline fn flatterField(data: anytype, comptime field_name: []const u8) FlattenedType {
-        const field = getField(data, field_name);
-        const TField = @TypeOf(field);
-        comptime assert(@sizeOf(TField) <= @sizeOf(FlattenedType));
-
-        var ret: FlattenedType = undefined;
-        if (@sizeOf(TField) > 0) {
-            var ptr = @ptrCast(*TField, @alignCast(@alignOf(TField), &ret));
-            ptr.* = field;
-        }
-
-        return ret;
-    }
-
-    pub inline fn unflatterField(comptime TDest: type, data: FlattenedType) TDest {
-        comptime assert(@sizeOf(TDest) <= @sizeOf(FlattenedType));
-
-        if (@sizeOf(TDest) > 0) {
-            var ptr = @ptrCast(*const TDest, @alignCast(@alignOf(TDest), &data));
-            return ptr.*;
-        } else {
-            return undefined;
-        }
-    }
-
+    
     pub inline fn getField(data: anytype, comptime field_name: []const u8) field_type: {
         const TField = FieldType(@TypeOf(data), field_name);
 
@@ -1520,25 +1494,6 @@ pub const Fields = struct {
         var field4 = getField(&data, "value4");
         try std.testing.expect(field4 == .OnlyOption);
         try std.testing.expect(@sizeOf(@TypeOf(field4)) == 0);
-    }
-
-    test "flattern and unflatern" {
-        const Data = struct {
-            value: []const u8,
-            level: struct {
-                value: []const u8,
-            },
-        };
-
-        var data = Data{ .value = "hello", .level = .{ .value = "world" } };
-
-        var flat_field = flatterField(&data, "value");
-        var field = unflatterField(FieldRef(*Data, "value"), flat_field);
-        try std.testing.expectEqualStrings(field, data.value);
-
-        var flat_level = flatterField(&data, "level");
-        var level = unflatterField(FieldRef(*Data, "level"), flat_level);
-        try std.testing.expectEqualStrings(level.value, data.level.value);
     }
 
     test "nested" {
