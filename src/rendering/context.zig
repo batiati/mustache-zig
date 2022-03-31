@@ -13,6 +13,7 @@ const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
 
 const invoker = @import("invoker.zig");
+const FieldHelper = @import("FieldHelper.zig");
 
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
@@ -59,7 +60,11 @@ pub const Escape = enum {
 };
 
 pub fn getContext(comptime Writer: type, allocator: Allocator, data: anytype) Allocator.Error!Context(Writer) {
-    const Impl = ContextImpl(Writer, @TypeOf(data));
+    const Data = @TypeOf(data);
+    const by_value = comptime FieldHelper.byValue(Data);
+    if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
+
+    const Impl = ContextImpl(Writer, Data);
     return try Impl.create(allocator, data);
 }
 
@@ -444,8 +449,11 @@ const struct_tests = struct {
     fn interpolate(writer: anytype, data: anytype, path: []const u8) anyerror!void {
         const allocator = testing.allocator;
 
+        const Data = @TypeOf(data);
+        const by_value = comptime FieldHelper.byValue(Data);
+
         const Writer = @TypeOf(writer);
-        var ctx = try getContext(Writer, allocator, data);
+        var ctx = try getContext(Writer, allocator, if (by_value) data else @as(*const Data, &data));
         defer ctx.destroy(allocator);
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
@@ -1025,7 +1033,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = try getContext(@TypeOf(writer), allocator, person);
+        var person_ctx = try getContext(@TypeOf(writer), allocator, &person);
         defer person_ctx.destroy(allocator);
 
         list.clearAndFree();
@@ -1150,7 +1158,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var person_ctx = try getContext(Writer, allocator, person);
+        var person_ctx = try getContext(Writer, allocator, &person);
         defer person_ctx.destroy(allocator);
 
         // Person.address
@@ -1204,7 +1212,7 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Person
-        var ctx = try getContext(@TypeOf(writer), allocator, person);
+        var ctx = try getContext(@TypeOf(writer), allocator, &person);
         defer ctx.destroy(allocator);
 
         var iterator = switch (ctx.iterator("items")) {
@@ -1249,7 +1257,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var ctx = try getContext(Writer, allocator, person);
+        var ctx = try getContext(Writer, allocator, &person);
         defer ctx.destroy(allocator);
 
         {
@@ -1295,7 +1303,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var ctx = try getContext(Writer, allocator, person);
+        var ctx = try getContext(Writer, allocator, &person);
         defer ctx.destroy(allocator);
 
         {

@@ -1,4 +1,6 @@
 const std = @import("std");
+const meta = std.meta;
+const trait = meta.trait;
 const Allocator = std.mem.Allocator;
 
 const testing = std.testing;
@@ -13,6 +15,7 @@ const ParseError = mustache.ParseError;
 const Template = mustache.Template;
 
 const TemplateLoader = @import("../template.zig").TemplateLoader;
+const FieldHelper = @import("FieldHelper.zig");
 
 const context = @import("context.zig");
 const Context = context.Context;
@@ -103,9 +106,11 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
         data: Data,
 
         pub fn render(self: *Self, elements: []const Element) Error!void {
+            const by_value = comptime FieldHelper.byValue(Data);
+
             var stack = WriterRender.ContextStack{
                 .parent = null,
-                .ctx = try context.getContext(Writer, self.allocator, self.data),
+                .ctx = try context.getContext(Writer, self.allocator, if (by_value) self.data else @as(*const Data, &self.data)),
             };
             defer stack.ctx.destroy(self.allocator);
 

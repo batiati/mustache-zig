@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const meta = std.meta;
 const trait = std.meta.trait;
 
 const mustache = @import("../mustache.zig");
@@ -16,6 +17,8 @@ const LambdaInvoker = lambda.LambdaInvoker;
 
 const testing = std.testing;
 const assert = std.debug.assert;
+
+const FieldHelper = @import("FieldHelper.zig");
 
 const escapedWrite = @import("escape.zig").escapedWrite;
 
@@ -120,28 +123,11 @@ pub fn Invoker(comptime Writer: type) type {
                     index: ?usize,
                 ) TError!Result {
                     const Data = @TypeOf(data);
+                    if (Data == void) return .ChainBroken;
 
-                    const ctx = blk: {
-                        if (Data == comptime_int) {
-                            const RuntimeInt = if (data > 0) std.math.IntFittingRange(0, data) else std.math.IntFittingRange(data, 0);
-                            var runtime_value: RuntimeInt = data;
-                            break :blk runtime_value;
-                        } else if (Data == comptime_float) {
-                            var runtime_value: f64 = data;
-                            break :blk runtime_value;
-                        } else if (Data == @TypeOf(null)) {
-                            var runtime_value: ?u0 = null;
-                            break :blk runtime_value;
-                        } else if (Data == void) {
-                            return if (depth == .Root) .NotFoundInContext else .ChainBroken;
-                        } else {
-                            break :blk data;
-                        }
-                    };
+                    const ctx = FieldHelper.getRuntimeValue(data);
 
-                    const isLambda = comptime lambda.isLambdaInvoker(Data);
-
-                    if (isLambda) {
+                    if (comptime lambda.isLambdaInvoker(Data)) {
                         if (index) |current_index| {
                             if (current_index > 0) return .IteratorConsumed;
                         }
@@ -232,33 +218,6 @@ pub fn Invoker(comptime Writer: type) type {
                     };
                 }
 
-                fn fieldRef(comptime TValue: type, comptime field_name: []const u8, data: anytype) return_type:{
-
-                    const TData = @TypeOf(data);
-                    const fields = std.meta.fields(TValue);
-                    const field_index = std.meta.fieldIndex(TValue, field_name) orelse @compileError("invalid field " ++ @typeName(TValue) ++ "." ++ field_name);
-                    const T = fields[field_index].field_type;
-
-                    if (trait.is(.Pointer)(TData) and !trait.isConstPtr(TData)) {
-                        break :return_type *T;
-                    } else {
-                        break :return_type *const T;
-                    }
-                }{
-                    if (@TypeOf(data) == TValue) {
-                         return &@field(data, field_name);
-                    } else {
-                        switch (@typeInfo(@TypeOf(data))) {
-                            .Pointer => |info| switch (info.size) {
-                                .One => return &@field(data.*, field_name),
-                                else => @compileError("invalid field " ++ @typeName(TValue) ++ "." ++ field_name),
-                            },
-                            .Optional => return &@field(data.?, field_name),
-                            else => return &@field(data, field_name),
-                        }
-                    }
-                }
-
                 fn findFieldPath(
                     depth: Depth,
                     comptime TValue: type,
@@ -272,7 +231,7 @@ pub fn Invoker(comptime Writer: type) type {
                     const fields = std.meta.fields(TValue);
                     inline for (fields) |field| {
                         if (std.mem.eql(u8, field.name, path)) {
-                            return try find(.Leaf, action_param, out_writer, fieldRef(TValue, field.name, data), path_iterator, index);
+                            return try find(.Leaf, action_param, out_writer, FieldHelper.getField(data, field.name), path_iterator, index);
                         }
                     } else {
                         return try findLambdaPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
@@ -296,10 +255,12 @@ pub fn Invoker(comptime Writer: type) type {
                             const bound_fn = @field(TValue, decl.name);
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, path, decl.name)) {
-                                return if (is_valid_lambda)
-                                    try getLambda(action_param, out_writer, data, bound_fn, path_iterator, index)
-                                else
-                                    .ChainBroken;
+                                if (is_valid_lambda) {
+                                    const ctx = FieldHelper.getRuntimeValue(data);
+                                    return try getLambda(action_param, out_writer, FieldHelper.lhs(ctx), bound_fn, path_iterator, index);
+                                } else {
+                                    return .ChainBroken;
+                                }
                             }
                         }
                     } else {
@@ -330,7 +291,7 @@ pub fn Invoker(comptime Writer: type) type {
                             .data = if (args_len == 1) {} else data,
                         };
 
-                        return try find(.Leaf, action_param, out_writer, impl, path_iterator, index);
+                        return try find(.Leaf, action_param, out_writer, &impl, path_iterator, index);
                     } else {
                         return .ChainBroken;
                     }
@@ -342,35 +303,13 @@ pub fn Invoker(comptime Writer: type) type {
                     data: anytype,
                     index: usize,
                 ) TError!Result {
-                    switch (@typeInfo(@TypeOf(data))) {
+                    const Data = @TypeOf(data);
+                    switch (@typeInfo(Data)) {
                         .Struct => |info| {
                             if (info.is_tuple) {
                                 inline for (info.fields) |_, i| {
                                     if (index == i) {
-                                        const item = comptime blk: {
-
-                                            // Tuple fields can be a comptime value
-                                            // We must convert it to a runtime type
-                                            const Data = @TypeOf(data[i]);
-
-                                            if (Data == comptime_int) {
-                                                const RuntimeInt = if (data[i] > 0) std.math.IntFittingRange(0, data[i]) else std.math.IntFittingRange(data[i], 0);
-                                                var runtime_value: RuntimeInt = data[i];
-                                                break :blk runtime_value;
-                                            } else if (Data == comptime_float) {
-                                                var runtime_value: f64 = data[i];
-                                                break :blk runtime_value;
-                                            } else if (Data == @TypeOf(null)) {
-                                                var runtime_value: ?u0 = null;
-                                                break :blk runtime_value;
-                                            } else if (Data == void) {
-                                                return .IteratorConsumed;
-                                            } else {
-                                                break :blk data[i];
-                                            }
-                                        };
-
-                                        return Result{ .Field = try action_fn(action_param, out_writer, item) };
+                                        return Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getTupleElement(data, i)) };
                                     }
                                 } else {
                                     return .IteratorConsumed;
@@ -378,22 +317,13 @@ pub fn Invoker(comptime Writer: type) type {
                             }
                         },
 
-                        // Booleans are evaluated on the iterator
-                        .Bool => {
-                            return if (data == true and index == 0)
-                                Result{ .Field = try action_fn(action_param, out_writer, data) }
-                            else
-                                .IteratorConsumed;
-                        },
-
                         .Pointer => |info| switch (info.size) {
-                            .One => return try iterateAt(action_param, out_writer, data.*, index),
                             .Slice => {
 
                                 //Slice of u8 is always string
                                 if (info.child != u8) {
                                     return if (index < data.len)
-                                        Result{ .Field = try action_fn(action_param, out_writer, data[index]) }
+                                        Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(data, index)) }
                                     else
                                         .IteratorConsumed;
                                 }
@@ -406,7 +336,7 @@ pub fn Invoker(comptime Writer: type) type {
                             //Array of u8 is always string
                             if (info.child != u8) {
                                 return if (index < data.len)
-                                    Result{ .Field = try action_fn(action_param, out_writer, data[index]) }
+                                    Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(data, index)) }
                                 else
                                     .IteratorConsumed;
                             }
@@ -414,13 +344,13 @@ pub fn Invoker(comptime Writer: type) type {
 
                         .Vector => {
                             return if (index < data.len)
-                                Result{ .Field = try action_fn(action_param, out_writer, data[index]) }
+                                Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(data, index)) }
                             else
                                 .IteratorConsumed;
                         },
 
                         .Optional => {
-                            return if (data) |value|
+                            return if (data) |*value|
                                 try iterateAt(action_param, out_writer, value, index)
                             else
                                 .IteratorConsumed;
@@ -428,10 +358,21 @@ pub fn Invoker(comptime Writer: type) type {
                         else => {},
                     }
 
-                    return if (index == 0)
-                        Result{ .Field = try action_fn(action_param, out_writer, data) }
-                    else
-                        .IteratorConsumed;
+                    const is_true = index == 0 and is_true: {
+                        if (Data == bool) {
+                            break :is_true data;
+                        } else if (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == bool) {
+                            break :is_true data.*;
+                        } else {
+                            break :is_true true;
+                        }
+                    };
+
+                    if (is_true) {
+                        return Result{ .Field = try action_fn(action_param, out_writer, data) };
+                    } else {
+                        return .IteratorConsumed;
+                    }
                 }
             };
         }
@@ -868,6 +809,7 @@ pub fn Invoker(comptime Writer: type) type {
                 try expectIterNotFound(data, "a1.b_tuple", 3);
                 try expectIterNotFound(data, "a1.b1.c_tuple", 3);
                 try expectIterNotFound(data, "a1.b1.c1.d_tuple", 3);
+                try testing.expect(false);
             }
 
             test "Comptime iter - nested tuple" {
