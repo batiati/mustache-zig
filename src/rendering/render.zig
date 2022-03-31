@@ -153,7 +153,6 @@ pub fn Render(comptime Writer: type) type {
                                     assert(expand_result == .Lambda);
                                 } else {
                                     while (iterator.next()) |item_ctx| {
-       
                                         var next_level = ContextStack{
                                             .parent = stack,
                                             .ctx = item_ctx,

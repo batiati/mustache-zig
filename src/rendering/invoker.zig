@@ -824,7 +824,6 @@ pub fn Invoker(comptime Writer: type) type {
 }
 
 pub const Fields = struct {
-    
     pub inline fn getField(data: anytype, comptime field_name: []const u8) field_type: {
         const TField = FieldType(@TypeOf(data), field_name);
 

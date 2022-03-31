@@ -223,13 +223,11 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         const Self = @This();
 
         pub fn context(data: Data) ContextInterface {
-
             var interface = ContextInterface{
                 .vtable = &vtable,
             };
 
             if (!is_zero_size) {
-
                 if (comptime @sizeOf(Data) > @sizeOf(FlattenedType)) @compileError(std.fmt.comptimePrint("Type {s} size {} exceeds the maxinum by-val size of {}", .{ @typeName(Data), @sizeOf(Data), @sizeOf(FlattenedType) }));
                 var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &interface.ctx));
                 ptr.* = data;
@@ -267,7 +265,6 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         }
 
         fn expandLambda(ctx: *const anyopaque, allocator: Allocator, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.expandLambda(
                 allocator,
@@ -1176,7 +1173,6 @@ const struct_tests = struct {
 
         // Person
         var ctx = getContext(@TypeOf(writer), &person);
-        
 
         var iterator = switch (ctx.iterator("items")) {
             .Field => |found| found,
@@ -1190,7 +1186,7 @@ const struct_tests = struct {
             try testing.expect(false);
             unreachable;
         };
-        
+
         list.clearAndFree();
 
         try interpolateCtx(writer, item_1, "name", .Unescaped);
@@ -1219,7 +1215,6 @@ const struct_tests = struct {
 
         const Writer = @TypeOf(std.io.null_writer);
         var ctx = getContext(Writer, &person);
-        
 
         {
             // iterator over true
@@ -1262,7 +1257,6 @@ const struct_tests = struct {
 
         const Writer = @TypeOf(std.io.null_writer);
         var ctx = getContext(Writer, &person);
-        
 
         {
             // iterator over true
