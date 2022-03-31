@@ -164,6 +164,23 @@ pub fn lhs(value: anytype) Lhs(@TypeOf(value)) {
 
 pub fn getElement(ctx: anytype, index: usize) element_type: {
     const T = @TypeOf(ctx);
+
+    if ((trait.isIndexable(T) and !trait.isTuple(T)) == false) {
+        @compileLog(
+            \\invalid indexable
+            \\invalid indexable
+            \\invalid indexable
+            \\invalid indexable
+            \\invalid indexable
+            \\==========================================
+            \\invalid indexable
+            \\invalid indexable
+            \\invalid indexable
+            \\invalid indexable
+        , T);
+        @compileError("abort");
+    }
+
     debug.assert(trait.isIndexable(T) and !trait.isTuple(T));
 
     const ElementType = @TypeOf(ctx[0]);
@@ -184,11 +201,13 @@ pub fn getElement(ctx: anytype, index: usize) element_type: {
 }
 
 pub fn needsDerref(comptime T: type) bool {
-    if (trait.isSingleItemPtr(T)) {
-        const Child = meta.Child(T);
-        return trait.isSingleItemPtr(Child) or trait.is(.Optional)(Child);
-    } else {
-        return false;
+    comptime {
+        if (trait.isSingleItemPtr(T)) {
+            const Child = meta.Child(T);
+            return trait.isSingleItemPtr(Child) or trait.isSlice(Child) or trait.is(.Optional)(Child);
+        } else {
+            return false;
+        }
     }
 }
 
@@ -244,10 +263,35 @@ pub fn byValue(comptime TField: type) bool {
         trait.is(.EnumLiteral)(TField) or
         trait.isSlice(TField) or
         trait.isSingleItemPtr(TField) or
+        TField == bool or
         trait.isIntegral(TField) or
         trait.isFloat(TField) or
         (trait.is(.Optional)(TField) and byValue(meta.Child(TField))) or
         @sizeOf(TField) == 0;
+}
+
+test "Needs derref" {
+    var value: usize = 10;
+    var ptr = &value;
+    var const_ptr: *const usize = &value;
+    var ptr_ptr = &ptr;
+    var const_ptr_ptr: *const *usize = &ptr;
+
+    try std.testing.expect(needsDerref(@TypeOf(value)) == false);
+    try std.testing.expect(needsDerref(@TypeOf(ptr)) == false);
+    try std.testing.expect(needsDerref(@TypeOf((const_ptr))) == false);
+
+    try std.testing.expect(needsDerref(@TypeOf(ptr_ptr)) == true);
+    try std.testing.expect(needsDerref(@TypeOf(const_ptr_ptr)) == true);
+
+    var optional: ?usize = value;
+    try std.testing.expect(needsDerref(@TypeOf(optional)) == false);
+
+    var ptr_optional: *?usize = &optional;
+    try std.testing.expect(needsDerref(@TypeOf(ptr_optional)) == true);
+
+    var optional_ptr: ?*usize = ptr;
+    try std.testing.expect(needsDerref(@TypeOf(optional_ptr)) == false);
 }
 
 test "Ref values" {
@@ -307,7 +351,7 @@ test "comptime floats" {
 
     var field = getField(&data, "float");
     try std.testing.expectEqual(field, data.float);
-    try std.testing.expect(@TypeOf(field) == f16);
+    try std.testing.expect(@TypeOf(field) == f64);
 
     var level = getField(&data, "level");
     try std.testing.expectEqual(level.float, data.level.float);
@@ -396,6 +440,45 @@ test "slices items" {
         Item{ .value = "ccc" },
     };
     var data = Data{ .values = &items };
+
+    var field = getField(&data, "values");
+    try std.testing.expectEqual(field.len, data.values.len);
+
+    var item0 = getElement(field, 0);
+    try std.testing.expectEqual(item0.value, data.values[0].value);
+
+    item0.value = "changed 0";
+    try std.testing.expectEqual(item0.value, data.values[0].value);
+
+    var item1 = getElement(field, 1);
+    try std.testing.expectEqual(item1.value, data.values[1].value);
+
+    item1.value = "changed 1";
+    try std.testing.expectEqual(item1.value, data.values[1].value);
+
+    var item2 = getElement(field, 2);
+    try std.testing.expectEqual(item2.value, data.values[2].value);
+
+    item2.value = "changed 2";
+    try std.testing.expectEqual(item2.value, data.values[2].value);
+}
+
+test "array items" {
+    const Item = struct {
+        value: []const u8,
+    };
+
+    const Data = struct {
+        values: [3]Item,
+    };
+
+    var data = Data{
+        .values = [_]Item{
+            Item{ .value = "aaa" },
+            Item{ .value = "bbb" },
+            Item{ .value = "ccc" },
+        },
+    };
 
     var field = getField(&data, "values");
     try std.testing.expectEqual(field.len, data.values.len);

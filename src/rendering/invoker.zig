@@ -137,7 +137,7 @@ pub fn Invoker(comptime Writer: type) type {
                         if (path_iterator.next()) |current_path| {
                             return try recursiveFind(depth, Data, action_param, out_writer, ctx, current_path, path_iterator, index);
                         } else if (index) |current_index| {
-                            return try iterateAt(action_param, out_writer, ctx, current_index);
+                            return try iterateAt(Data, action_param, out_writer, ctx, current_index);
                         } else {
                             return Result{ .Field = try action_fn(action_param, out_writer, ctx) };
                         }
@@ -298,18 +298,25 @@ pub fn Invoker(comptime Writer: type) type {
                 }
 
                 fn iterateAt(
+                    comptime TValue: type,
                     action_param: anytype,
                     out_writer: anytype,
                     data: anytype,
                     index: usize,
                 ) TError!Result {
-                    const Data = @TypeOf(data);
-                    switch (@typeInfo(Data)) {
+                    switch (@typeInfo(TValue)) {
                         .Struct => |info| {
                             if (info.is_tuple) {
+                                const derref = comptime trait.isSingleItemPtr(@TypeOf(data));
                                 inline for (info.fields) |_, i| {
                                     if (index == i) {
-                                        return Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getTupleElement(data, i)) };
+                                        return Result{
+                                            .Field = try action_fn(
+                                                action_param,
+                                                out_writer,
+                                                FieldHelper.getTupleElement(if (derref) data.* else data, i),
+                                            ),
+                                        };
                                     }
                                 } else {
                                     return .IteratorConsumed;
@@ -317,13 +324,24 @@ pub fn Invoker(comptime Writer: type) type {
                             }
                         },
 
+                        // Booleans are evaluated on the iterator
+                        .Bool => {
+                            return if (data == true and index == 0)
+                                Result{ .Field = try action_fn(action_param, out_writer, data) }
+                            else
+                                .IteratorConsumed;
+                        },
+
                         .Pointer => |info| switch (info.size) {
+                            .One => {
+                                return try iterateAt(info.child, action_param, out_writer, FieldHelper.lhs(data), index);
+                            },
                             .Slice => {
 
                                 //Slice of u8 is always string
                                 if (info.child != u8) {
                                     return if (index < data.len)
-                                        Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(data, index)) }
+                                        Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(FieldHelper.lhs(data), index)) }
                                     else
                                         .IteratorConsumed;
                                 }
@@ -336,7 +354,7 @@ pub fn Invoker(comptime Writer: type) type {
                             //Array of u8 is always string
                             if (info.child != u8) {
                                 return if (index < data.len)
-                                    Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(data, index)) }
+                                    Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(FieldHelper.lhs(data), index)) }
                                 else
                                     .IteratorConsumed;
                             }
@@ -344,35 +362,24 @@ pub fn Invoker(comptime Writer: type) type {
 
                         .Vector => {
                             return if (index < data.len)
-                                Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(data, index)) }
+                                Result{ .Field = try action_fn(action_param, out_writer, FieldHelper.getElement(FieldHelper.lhs(data), index)) }
                             else
                                 .IteratorConsumed;
                         },
 
-                        .Optional => {
-                            return if (data) |*value|
-                                try iterateAt(action_param, out_writer, value, index)
+                        .Optional => |info| {
+                            return if (!isNull(data))
+                                try iterateAt(info.child, action_param, out_writer, FieldHelper.lhs(data), index)
                             else
                                 .IteratorConsumed;
                         },
                         else => {},
                     }
 
-                    const is_true = index == 0 and is_true: {
-                        if (Data == bool) {
-                            break :is_true data;
-                        } else if (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == bool) {
-                            break :is_true data.*;
-                        } else {
-                            break :is_true true;
-                        }
-                    };
-
-                    if (is_true) {
-                        return Result{ .Field = try action_fn(action_param, out_writer, data) };
-                    } else {
-                        return .IteratorConsumed;
-                    }
+                    return if (index == 0)
+                        Result{ .Field = try action_fn(action_param, out_writer, data) }
+                    else
+                        .IteratorConsumed;
                 }
             };
         }
@@ -568,12 +575,21 @@ pub fn Invoker(comptime Writer: type) type {
 
             fn fooAction(comptime TExpected: type, out_writer: anytype, value: anytype) error{}!bool {
                 _ = out_writer;
-                return TExpected == @TypeOf(value);
+                const TValue = @TypeOf(value);
+                const expected = comptime (TExpected == TValue) or (trait.isSingleItemPtr(TValue) and meta.Child(TValue) == TExpected);
+                if (!expected) {
+                    std.log.err(
+                        \\ Invalid iterator type
+                        \\ Expected \"{s}\"
+                        \\ Found \"{s}\"
+                    , .{ @typeName(TExpected), @typeName(TValue) });
+                }
+                return expected;
             }
 
             fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !FooCaller.Result {
                 var path_iterator = std.mem.tokenize(u8, path, ".");
-                return try FooCaller.call(TExpected, std.io.null_writer, data, &path_iterator, index);
+                return try FooCaller.call(TExpected, std.io.null_writer, &data, &path_iterator, index);
             }
 
             fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
@@ -809,7 +825,6 @@ pub fn Invoker(comptime Writer: type) type {
                 try expectIterNotFound(data, "a1.b_tuple", 3);
                 try expectIterNotFound(data, "a1.b1.c_tuple", 3);
                 try expectIterNotFound(data, "a1.b1.c1.d_tuple", 3);
-                try testing.expect(false);
             }
 
             test "Comptime iter - nested tuple" {
