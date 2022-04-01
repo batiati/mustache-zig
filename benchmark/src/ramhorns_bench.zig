@@ -38,9 +38,6 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode) !void {
     var template = (try mustache.parseTemplate(allocator, template_text, .{}, false)).Success;
     defer template.free(allocator);
 
-    var dod = try mustache.toDoD(allocator, template.elements);
-    defer dod.deinit(allocator);
-
     std.debug.print("Mode {s}\n", .{@tagName(mode)});
     std.debug.print("----------------------------------\n", .{});
     const reference = try repeat("Reference: Zig fmt", zigFmt, .{
@@ -50,7 +47,6 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode) !void {
         .{ data.title, data.title, data.body },
     }, null);
     _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, mode, template, data }, reference);
-    _ = try repeat("Mustache DoD", doD, .{ allocator, mode, dod, data }, reference);
     _ = try repeat("Mustache not parsed", notParsed, .{ allocator, mode, template_text, data }, reference);
     std.debug.print("\n\n", .{});
 }
@@ -108,21 +104,6 @@ fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data
         },
         .String => {
             const ret = try mustache.renderAllocCached(allocator, template, data);
-            defer allocator.free(ret);
-            return ret.len;
-        },
-    }
-}
-
-fn doD(allocator: Allocator, mode: Mode, dod: mustache.DoDTemplateList, data: anytype) !usize {
-    switch (mode) {
-        .Counter => {
-            var counter = std.io.countingWriter(std.io.null_writer);
-            try mustache.renderCachedDoD(allocator, dod, data, counter.writer());
-            return counter.bytes_written;
-        },
-        .String => {
-            const ret = try mustache.renderAllocCachedDoD(allocator, dod, data);
             defer allocator.free(ret);
             return ret.len;
         },
