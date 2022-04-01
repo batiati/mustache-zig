@@ -9,19 +9,26 @@ const Allocator = std.mem.Allocator;
 const mustache = @import("mustache");
 const TIMES = if (builtin.mode == .Debug) 10_000 else 1_000_000;
 
+const Mode = enum {
+    Counter,
+    String,
+};
+
 pub fn main() anyerror!void {
     if (builtin.mode == .Debug) {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         defer _ = gpa.deinit();
-        try simpleTemplate(gpa.allocator());
+        try simpleTemplate(gpa.allocator(), .Counter);
+        try simpleTemplate(gpa.allocator(), .String);
     } else {
-        try simpleTemplate(std.heap.raw_c_allocator);
+        try simpleTemplate(std.heap.raw_c_allocator, .Counter);
+        try simpleTemplate(std.heap.raw_c_allocator, .String);
     }
 }
 
-pub fn simpleTemplate(allocator: Allocator) !void {
-    const template_text = "<title>{{title}}</title><h1>{{ title }}</h1><div>{{{body}}}</div>";
-    const fmt_template = "<title>{[title]s}</title><h1>{[title]s}</h1><div>{[body]s}</div>";
+pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode) !void {
+    const template_text = "<title>{{&title}}</title><h1>{{&title}}</h1><div>{{{body}}}</div>";
+    const fmt_template = "<title>{s}</title><h1>{s}</h1><div>{s}</div>";
 
     var data = .{
         .title = "Hello, Mustache!",
@@ -31,13 +38,24 @@ pub fn simpleTemplate(allocator: Allocator) !void {
     var template = (try mustache.parseTemplate(allocator, template_text, .{}, false)).Success;
     defer template.free(allocator);
 
-    _ = fmt_template;
-    try repeat("Zig fmt", zigFmt, .{ allocator, fmt_template, data });
-    try repeat("Mustache pre-parsed", preParsed, .{ allocator, template, data });
-    try repeat("Mustache not parsed", notParsed, .{ allocator, template_text, data });
+    var dod = try mustache.toDoD(allocator, template.elements);
+    defer dod.deinit(allocator);
+
+    std.debug.print("Mode {s}\n", .{@tagName(mode)});
+    std.debug.print("----------------------------------\n", .{});
+    const reference = try repeat("Reference: Zig fmt", zigFmt, .{
+        allocator,
+        mode,
+        fmt_template,
+        .{ data.title, data.title, data.body },
+    }, null);
+    _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, mode, template, data }, reference);
+    _ = try repeat("Mustache DoD", doD, .{ allocator, mode, dod, data }, reference);
+    _ = try repeat("Mustache not parsed", notParsed, .{ allocator, mode, template_text, data }, reference);
+    std.debug.print("\n\n", .{});
 }
 
-fn repeat(comptime caption: []const u8, comptime func: anytype, args: anytype) !void {
+fn repeat(comptime caption: []const u8, comptime func: anytype, args: anytype, reference: ?i128) !i128 {
     var index: usize = 0;
     var total_bytes: usize = 0;
 
@@ -45,33 +63,83 @@ fn repeat(comptime caption: []const u8, comptime func: anytype, args: anytype) !
     while (index < TIMES) : (index += 1) {
         total_bytes += try @call(.{}, func, args);
     }
-    const end = std.time.nanoTimestamp();
+    const ellapsed = std.time.nanoTimestamp() - start;
 
-    printSummary(caption, end - start, total_bytes);
+    printSummary(caption, ellapsed, total_bytes, reference);
+    return ellapsed;
 }
 
-fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize) void {
-    std.debug.print("\n{s}\n", .{caption});
+fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize, reference: ?i128) void {
+    std.debug.print("{s}\n", .{caption});
     std.debug.print("Total time {d:.3}s\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_s});
+
+    if (reference) |reference_time| {
+        const perf = if (reference_time > 0) @intToFloat(f64, ellapsed) / @intToFloat(f64, reference_time) else 0;
+        std.debug.print("Comparation {d:.3}x {s}\n", .{ perf, (if (perf > 0) "slower" else "faster") });
+    }
+
     std.debug.print("{d:.0} ops/s\n", .{TIMES / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
     std.debug.print("{d:.0} ns/iter\n", .{@intToFloat(f64, ellapsed) / TIMES});
     std.debug.print("{d:.0} MB/s\n", .{(@intToFloat(f64, total_bytes) / 1024 / 1024) / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
+    std.debug.print("\n", .{});
 }
 
-fn zigFmt(allocator: Allocator, comptime fmt_template: []const u8, data: anytype) !usize {
-    const ret = try std.fmt.allocPrint(allocator, fmt_template, data);
-    defer allocator.free(ret);
-    return ret.len;
+fn zigFmt(allocator: Allocator, mode: Mode, comptime fmt_template: []const u8, data: anytype) !usize {
+    switch (mode) {
+        .Counter => {
+            var counter = std.io.countingWriter(std.io.null_writer);
+            try std.fmt.format(counter.writer(), fmt_template, data);
+            return counter.bytes_written;
+        },
+        .String => {
+            const ret = try std.fmt.allocPrint(allocator, fmt_template, data);
+            defer allocator.free(ret);
+            return ret.len;
+        },
+    }
 }
 
-fn preParsed(allocator: Allocator, template: mustache.Template, data: anytype) !usize {
-    const ret = try mustache.renderAllocCached(allocator, template, data);
-    defer allocator.free(ret);
-    return ret.len;
+fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data: anytype) !usize {
+    switch (mode) {
+        .Counter => {
+            var counter = std.io.countingWriter(std.io.null_writer);
+            try mustache.renderCached(allocator, template, data, counter.writer());
+            return counter.bytes_written;
+        },
+        .String => {
+            const ret = try mustache.renderAllocCached(allocator, template, data);
+            defer allocator.free(ret);
+            return ret.len;
+        },
+    }
 }
 
-fn notParsed(allocator: Allocator, template_text: []const u8, data: anytype) !usize {
-    const ret = try mustache.renderAllocFromString(allocator, template_text, data);
-    defer allocator.free(ret);
-    return ret.len;
+fn doD(allocator: Allocator, mode: Mode, dod: mustache.DoDTemplateList, data: anytype) !usize {
+    switch (mode) {
+        .Counter => {
+            var counter = std.io.countingWriter(std.io.null_writer);
+            try mustache.renderCachedDoD(allocator, dod, data, counter.writer());
+            return counter.bytes_written;
+        },
+        .String => {
+            const ret = try mustache.renderAllocCachedDoD(allocator, dod, data);
+            defer allocator.free(ret);
+            return ret.len;
+        },
+    }
+}
+
+fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: anytype) !usize {
+    switch (mode) {
+        .Counter => {
+            var counter = std.io.countingWriter(std.io.null_writer);
+            try mustache.renderFromString(allocator, template_text, data, counter.writer());
+            return counter.bytes_written;
+        },
+        .String => {
+            const ret = try mustache.renderAllocFromString(allocator, template_text, data);
+            defer allocator.free(ret);
+            return ret.len;
+        },
+    }
 }
