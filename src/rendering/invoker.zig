@@ -57,21 +57,6 @@ pub fn Invoker(comptime Writer: type) type {
             );
         }
 
-        pub inline fn check(
-            data: anytype,
-            path_iterator: *std.mem.TokenIterator(u8),
-            index: usize,
-        ) PathResolution(void) {
-            const CheckAction = PathInvoker(error{}, void, checkAction);
-            return try CheckAction.call(
-                {},
-                {},
-                data,
-                path_iterator,
-                index,
-            );
-        }
-
         pub inline fn expandLambda(
             allocator: Allocator,
             out_writer: OutWriter,
@@ -358,16 +343,6 @@ pub fn Invoker(comptime Writer: type) type {
             _ = param;
             _ = out_writer;
             return context.getContext(Writer, value);
-        }
-
-        inline fn checkAction(
-            param: void,
-            out_writer: void,
-            value: anytype,
-        ) error{}!void {
-            _ = param;
-            _ = out_writer;
-            _ = value;
         }
 
         inline fn interpolateAction(

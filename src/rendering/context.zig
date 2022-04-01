@@ -94,68 +94,133 @@ pub fn Context(comptime Writer: type) type {
             Buffer: *std.ArrayList(u8),
         };
 
-        //TODO: Mega-TODO >> replace by a propper pointer type
         ctx: FlattenedType = undefined,
         vtable: *const VTable,
 
         const VTable = struct {
             get: fn (*const anyopaque, []const u8, ?usize) PathResolution(Self),
-            check: fn (*const anyopaque, []const u8, usize) PathResolution(void),
             interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
             expandLambda: fn (*const anyopaque, Allocator, OutWriter, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = struct {
-            context: *const Self,
-            path: []const u8,
-            current: usize,
-            finished: bool,
-            is_lambda: bool,
-
-            pub fn hasNext(self: Iterator) bool {
-                if (self.finished) {
-                    return false;
-                } else {
-                    const result = self.context.vtable.check(
-                        &self.context.ctx,
-                        self.path,
-                        self.current,
-                    );
-
-                    return switch (result) {
-                        .Field => true,
-                        .IteratorConsumed => false,
-                        else => {
-                            assert(false);
-                            unreachable;
+            data: union(enum) {
+                Empty,
+                Lambda: Self,
+                Sequence: struct {
+                    context: *const Self,
+                    path: []const u8,
+                    state: union(enum) {
+                        Loaded: struct {
+                            item: Self,
+                            index: usize,
                         },
-                    };
+                        Fetching: usize,
+                        Finished,
+                    },
+
+                    fn fetch(self: *@This(), index: usize) ?Self {
+                        const result = self.context.vtable.get(
+                            &self.context.ctx,
+                            self.path,
+                            index,
+                        );
+
+                        return switch (result) {
+                            .Field => |item| item,
+                            .IteratorConsumed => null,
+                            else => {
+                                assert(false);
+                                unreachable;
+                            },
+                        };
+                    }
+                },
+            },
+
+            fn initEmpty() Iterator {
+                return .{
+                    .data = .Empty,
+                };
+            }
+
+            fn initLambda(lambda_ctx: Self) Iterator {
+                return .{
+                    .data = .{
+                        .Lambda = lambda_ctx,
+                    },
+                };
+            }
+
+            fn initSequence(parent_ctx: *const Self, path: []const u8, item: Self) Iterator {
+                return .{
+                    .data = .{
+                        .Sequence = .{
+                            .context = parent_ctx,
+                            .path = path,
+                            .state = .{
+                                .Loaded = .{
+                                    .item = item,
+                                    .index = 0,
+                                },
+                            },
+                        },
+                    },
+                };
+            }
+
+            pub fn lambda(self: *Iterator) ?Self {
+                return switch (self.data) {
+                    .Lambda => |item| item,
+                    else => null,
+                };
+            }
+
+            pub fn truthy(self: *Iterator) bool {
+                switch (self.data) {
+                    .Empty => return false,
+                    .Lambda => return true,
+                    .Sequence => |*sequence| switch (sequence.state) {
+                        .Fetching => |index| {
+                            if (sequence.fetch(index)) |item| {
+                                sequence.state = .{
+                                    .Loaded = .{
+                                        .index = index,
+                                        .item = item,
+                                    },
+                                };
+
+                                return true;
+                            } else {
+                                sequence.state = .Finished;
+                                return false;
+                            }
+                        },
+                        .Loaded => return true,
+                        .Finished => return false,
+                    },
                 }
             }
 
             pub fn next(self: *Iterator) ?Self {
-                if (self.finished) {
-                    return null;
-                } else {
-                    defer self.current += 1;
-                    const result = self.context.vtable.get(
-                        &self.context.ctx,
-                        self.path,
-                        self.current,
-                    );
-
-                    // Keeping the iterator pattern
-                    switch (result) {
-                        .Field => |found| return found,
-                        .IteratorConsumed => {
-                            self.finished = true;
-                            return null;
+                switch (self.data) {
+                    .Lambda, .Empty => return null,
+                    .Sequence => |*sequence| switch (sequence.state) {
+                        .Fetching => |index| {
+                            if (sequence.fetch(index)) |item| {
+                                sequence.state = .{ .Fetching = index + 1 };
+                                return item;
+                            } else {
+                                sequence.state = .Finished;
+                                return null;
+                            }
                         },
-                        else => {
-                            assert(false);
-                            unreachable;
+                        .Loaded => |current| {
+                            sequence.state = .{ .Fetching = current.index + 1 };
+                            return current.item;
                         },
-                    }
+                        .Finished => return null,
+                    },
                 }
             }
         };
@@ -165,30 +230,18 @@ pub fn Context(comptime Writer: type) type {
         }
 
         pub fn iterator(self: *const Self, path: []const u8) PathResolution(Iterator) {
-            const result = self.vtable.check(&self.ctx, path, 0);
+            const result = self.vtable.get(&self.ctx, path, 0);
 
             return switch (result) {
-                .Field,
-                .IteratorConsumed,
-                => .{
-                    .Field = .{
-                        .context = self,
-                        .path = path,
-                        .current = 0,
-                        .finished = result == .IteratorConsumed,
-                        .is_lambda = false,
-                    },
+                .Field => |item| .{
+                    .Field = Iterator.initSequence(self, path, item),
                 },
-                .Lambda => .{
-                    .Lambda = .{
-                        .context = self,
-                        .path = path,
-                        .current = 0,
-                        .finished = true,
-                        .is_lambda = true,
-                    },
+                .IteratorConsumed => .{
+                    .Field = Iterator.initEmpty(),
                 },
-
+                .Lambda => |item| .{
+                    .Field = Iterator.initLambda(item),
+                },
                 .ChainBroken => .ChainBroken,
                 .NotFoundInContext => .NotFoundInContext,
             };
@@ -213,7 +266,6 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
 
         const vtable = ContextInterface.VTable{
             .get = get,
-            .check = check,
             .interpolate = interpolate,
             .expandLambda = expandLambda,
         };
@@ -239,15 +291,6 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
         fn get(ctx: *const anyopaque, path: []const u8, index: ?usize) PathResolution(ContextInterface) {
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return Invoker.get(
-                getData(ctx),
-                &path_iterator,
-                index,
-            );
-        }
-
-        fn check(ctx: *const anyopaque, path: []const u8, index: usize) PathResolution(void) {
-            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return Invoker.check(
                 getData(ctx),
                 &path_iterator,
                 index,

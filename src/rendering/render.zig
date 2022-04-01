@@ -143,34 +143,31 @@ pub fn Render(comptime Writer: type) type {
                         .UnescapedInterpolation => |path| try interpolate(allocator, out_writer, stack, path, .Unescaped),
                         .Section => |section| {
                             if (getIterator(stack, section.key)) |*iterator| {
-                                if (iterator.is_lambda) {
+                                if (iterator.lambda()) |lambda_ctx| {
 
                                     //TODO: Add template options
                                     assert(section.inner_text != null);
                                     assert(section.delimiters != null);
 
-                                    const expand_result = try iterator.context.expandLambda(allocator, out_writer, stack, section.key, section.inner_text.?, .Unescaped, section.delimiters.?);
+                                    const expand_result = try lambda_ctx.expandLambda(allocator, out_writer, stack, "", section.inner_text.?, .Unescaped, section.delimiters.?);
                                     assert(expand_result == .Lambda);
-                                } else {
-                                    while (iterator.next()) |item_ctx| {
-                                        var next_level = ContextStack{
-                                            .parent = stack,
-                                            .ctx = item_ctx,
-                                        };
+                                } else while (iterator.next()) |item_ctx| {
+                                    var next_level = ContextStack{
+                                        .parent = stack,
+                                        .ctx = item_ctx,
+                                    };
 
-                                        try renderLevel(allocator, out_writer, &next_level, section.content);
-                                    }
+                                    try renderLevel(allocator, out_writer, &next_level, section.content);
                                 }
                             }
                         },
                         .InvertedSection => |section| {
-                            var iterator = getIterator(stack, section.key);
 
                             // Lambdas aways evaluate as "true" for inverted section
                             // Broken paths, empty lists, null and false evaluates as "false"
 
-                            const render_inverted = if (iterator) |it| it.is_lambda == false and it.hasNext() == false else true;
-                            if (render_inverted) {
+                            const truthy = if (getIterator(stack, section.key)) |*iterator| iterator.truthy() else false;
+                            if (!truthy) {
                                 try renderLevel(allocator, out_writer, stack, section.content);
                             }
                         },
