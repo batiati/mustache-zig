@@ -26,57 +26,6 @@ pub fn Invoker(comptime Writer: type) type {
         pub const ContextStack = ContextInterface.ContextStack;
         pub const OutWriter = ContextInterface.OutWriter;
 
-        pub inline fn get(
-            data: anytype,
-            path_iterator: *std.mem.TokenIterator(u8),
-            index: ?usize,
-        ) PathResolution(Context(Writer)) {
-            const Get = PathInvoker(error{}, Context(Writer), getAction);
-            return try Get.call(
-                {},
-                {},
-                data,
-                path_iterator,
-                index,
-            );
-        }
-
-        pub inline fn interpolate(
-            out_writer: OutWriter,
-            data: anytype,
-            path_iterator: *std.mem.TokenIterator(u8),
-            escape: Escape,
-        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            const Interpolate = PathInvoker(Allocator.Error || Writer.Error, void, interpolateAction);
-            return try Interpolate.call(
-                escape,
-                out_writer,
-                data,
-                path_iterator,
-                null,
-            );
-        }
-
-        pub inline fn expandLambda(
-            allocator: Allocator,
-            out_writer: OutWriter,
-            data: anytype,
-            stack: anytype,
-            tag_contents: []const u8,
-            escape: Escape,
-            delimiters: Delimiters,
-            path_iterator: *std.mem.TokenIterator(u8),
-        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            const ExpandLambdaAction = PathInvoker(Allocator.Error || Writer.Error, void, expandLambdaAction);
-            return try ExpandLambdaAction.call(
-                .{ allocator, stack, tag_contents, escape, delimiters },
-                out_writer,
-                data,
-                path_iterator,
-                null,
-            );
-        }
-
         fn PathInvoker(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
             const action_type_info = @typeInfo(@TypeOf(action_fn));
             if (action_type_info != .Fn) @compileError("action_fn must be a function");
@@ -86,7 +35,7 @@ pub fn Invoker(comptime Writer: type) type {
 
                 const Depth = enum { Root, Leaf };
 
-                pub inline fn call(
+                pub fn call(
                     action_param: anytype,
                     out_writer: anytype,
                     data: anytype,
@@ -110,10 +59,6 @@ pub fn Invoker(comptime Writer: type) type {
                     const ctx = Fields.getRuntimeValue(data);
 
                     if (comptime lambda.isLambdaInvoker(Data)) {
-                        if (index) |current_index| {
-                            if (current_index > 0) return .IteratorConsumed;
-                        }
-
                         return Result{ .Lambda = try action_fn(action_param, out_writer, ctx) };
                     } else {
                         if (path_iterator.next()) |current_path| {
@@ -211,8 +156,7 @@ pub fn Invoker(comptime Writer: type) type {
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, path, decl.name)) {
                                 if (is_valid_lambda) {
-                                    const ctx = Fields.getRuntimeValue(data);
-                                    return try getLambda(action_param, out_writer, Fields.lhs(ctx), bound_fn, path_iterator, index);
+                                    return try getLambda(action_param, out_writer, Fields.lhs(data), bound_fn, path_iterator, index);
                                 } else {
                                     return .ChainBroken;
                                 }
@@ -339,13 +283,64 @@ pub fn Invoker(comptime Writer: type) type {
             };
         }
 
-        inline fn getAction(param: void, out_writer: void, value: anytype) error{}!ContextInterface {
+        pub fn get(
+            data: anytype,
+            path_iterator: *std.mem.TokenIterator(u8),
+            index: ?usize,
+        ) PathResolution(Context(Writer)) {
+            const Get = PathInvoker(error{}, Context(Writer), getAction);
+            return try Get.call(
+                {},
+                {},
+                data,
+                path_iterator,
+                index,
+            );
+        }
+
+        pub fn interpolate(
+            out_writer: OutWriter,
+            data: anytype,
+            path_iterator: *std.mem.TokenIterator(u8),
+            escape: Escape,
+        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            const Interpolate = PathInvoker(Allocator.Error || Writer.Error, void, interpolateAction);
+            return try Interpolate.call(
+                escape,
+                out_writer,
+                data,
+                path_iterator,
+                null,
+            );
+        }
+
+        pub fn expandLambda(
+            allocator: Allocator,
+            out_writer: OutWriter,
+            data: anytype,
+            stack: anytype,
+            tag_contents: []const u8,
+            escape: Escape,
+            delimiters: Delimiters,
+            path_iterator: *std.mem.TokenIterator(u8),
+        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            const ExpandLambdaAction = PathInvoker(Allocator.Error || Writer.Error, void, expandLambdaAction);
+            return try ExpandLambdaAction.call(
+                .{ allocator, stack, tag_contents, escape, delimiters },
+                out_writer,
+                data,
+                path_iterator,
+                null,
+            );
+        }
+
+        fn getAction(param: void, out_writer: void, value: anytype) error{}!ContextInterface {
             _ = param;
             _ = out_writer;
             return context.getContext(Writer, value);
         }
 
-        inline fn interpolateAction(
+        fn interpolateAction(
             escape: Escape,
             out_writer: OutWriter,
             value: anytype,
@@ -356,7 +351,7 @@ pub fn Invoker(comptime Writer: type) type {
             }
         }
 
-        inline fn expandLambdaAction(
+        fn expandLambdaAction(
             params: anytype,
             out_writer: OutWriter,
             value: anytype,
@@ -799,7 +794,7 @@ pub fn Invoker(comptime Writer: type) type {
 }
 
 pub const Fields = struct {
-    pub inline fn getField(data: anytype, comptime field_name: []const u8) field_type: {
+    pub fn getField(data: anytype, comptime field_name: []const u8) field_type: {
         const TField = FieldType(@TypeOf(data), field_name);
 
         if (TField == comptime_int) {
@@ -835,7 +830,7 @@ pub const Fields = struct {
         return if (is_by_value) @field(lhs(data), field_name) else &@field(lhs(data), field_name);
     }
 
-    pub inline fn getRuntimeValue(ctx: anytype) context_type: {
+    pub fn getRuntimeValue(ctx: anytype) context_type: {
         const TContext = @TypeOf(ctx);
 
         if (TContext == comptime_int) {
@@ -868,7 +863,7 @@ pub const Fields = struct {
         }
     }
 
-    pub inline fn getTupleElement(ctx: anytype, comptime index: usize) element_type: {
+    pub fn getTupleElement(ctx: anytype, comptime index: usize) element_type: {
         const T = @TypeOf(ctx);
         assert(trait.isTuple(T));
 
@@ -906,7 +901,7 @@ pub const Fields = struct {
         }
     }
 
-    pub inline fn getElement(ctx: anytype, index: usize) element_type: {
+    pub fn getElement(ctx: anytype, index: usize) element_type: {
         const T = @TypeOf(ctx);
 
         const is_indexable = trait.isIndexable(T) and !trait.isTuple(T);
@@ -941,7 +936,7 @@ pub const Fields = struct {
         }
     }
 
-    pub inline fn lhs(value: anytype) Lhs(@TypeOf(value)) {
+    pub fn lhs(value: anytype) Lhs(@TypeOf(value)) {
         const T = @TypeOf(value);
 
         if (comptime trait.is(.Optional)(T)) {
@@ -984,7 +979,7 @@ pub const Fields = struct {
         }
     }
 
-    pub inline fn isNull(data: anytype) bool {
+    pub fn isNull(data: anytype) bool {
         return switch (@typeInfo(@TypeOf(data))) {
             .Pointer => |info| switch (info.size) {
                 .One => return isNull(data.*),
@@ -997,7 +992,7 @@ pub const Fields = struct {
         };
     }
 
-    pub inline fn lenOf(data: anytype) ?usize {
+    pub fn lenOf(data: anytype) ?usize {
         return switch (@typeInfo(@TypeOf(data))) {
             .Pointer => |info| switch (info.size) {
                 .One => return null,
