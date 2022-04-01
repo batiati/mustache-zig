@@ -13,6 +13,7 @@ const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
 
 const invoker = @import("invoker.zig");
+const Fields = invoker.Fields;
 
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
@@ -58,10 +59,16 @@ pub const Escape = enum {
     Unescaped,
 };
 
-pub fn getContext(comptime Writer: type, allocator: Allocator, data: anytype) Allocator.Error!Context(Writer) {
-    const Impl = ContextImpl(Writer, @TypeOf(data));
-    return try Impl.create(allocator, data);
+pub fn getContext(comptime Writer: type, data: anytype) Context(Writer) {
+    const Data = @TypeOf(data);
+    const by_value = comptime Fields.byValue(Data);
+    if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
+
+    const Impl = ContextImpl(Writer, Data);
+    return Impl.context(data);
 }
+
+const FlattenedType = [4]usize;
 
 pub fn Context(comptime Writer: type) type {
     return struct {
@@ -87,117 +94,165 @@ pub fn Context(comptime Writer: type) type {
             Buffer: *std.ArrayList(u8),
         };
 
-        ptr: *const anyopaque,
+        ctx: FlattenedType = undefined,
         vtable: *const VTable,
 
         const VTable = struct {
-            get: fn (*const anyopaque, Allocator, []const u8, ?usize) Allocator.Error!PathResolution(Self),
+            get: fn (*const anyopaque, []const u8, ?usize) PathResolution(Self),
             interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
             expandLambda: fn (*const anyopaque, Allocator, OutWriter, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
-            check: fn (*const anyopaque, []const u8, usize) PathResolution(void),
-            destroy: fn (*const anyopaque, Allocator) void,
         };
 
         pub const Iterator = struct {
-            context: *const Self,
-            path: []const u8,
-            current: usize,
-            finished: bool,
-            is_lambda: bool,
-
-            pub fn hasNext(self: Iterator) bool {
-                if (self.finished) {
-                    return false;
-                } else {
-                    const result = self.context.vtable.check(
-                        self.context.ptr,
-                        self.path,
-                        self.current,
-                    );
-
-                    return switch (result) {
-                        .Field => true,
-                        .IteratorConsumed => false,
-                        else => {
-                            assert(false);
-                            unreachable;
+            data: union(enum) {
+                Empty,
+                Lambda: Self,
+                Sequence: struct {
+                    context: *const Self,
+                    path: []const u8,
+                    state: union(enum) {
+                        Loaded: struct {
+                            item: Self,
+                            index: usize,
                         },
-                    };
+                        Fetching: usize,
+                        Finished,
+                    },
+
+                    fn fetch(self: *@This(), index: usize) ?Self {
+                        const result = self.context.vtable.get(
+                            &self.context.ctx,
+                            self.path,
+                            index,
+                        );
+
+                        return switch (result) {
+                            .Field => |item| item,
+                            .IteratorConsumed => null,
+                            else => {
+                                assert(false);
+                                unreachable;
+                            },
+                        };
+                    }
+                },
+            },
+
+            fn initEmpty() Iterator {
+                return .{
+                    .data = .Empty,
+                };
+            }
+
+            fn initLambda(lambda_ctx: Self) Iterator {
+                return .{
+                    .data = .{
+                        .Lambda = lambda_ctx,
+                    },
+                };
+            }
+
+            fn initSequence(parent_ctx: *const Self, path: []const u8, item: Self) Iterator {
+                return .{
+                    .data = .{
+                        .Sequence = .{
+                            .context = parent_ctx,
+                            .path = path,
+                            .state = .{
+                                .Loaded = .{
+                                    .item = item,
+                                    .index = 0,
+                                },
+                            },
+                        },
+                    },
+                };
+            }
+
+            pub fn lambda(self: *Iterator) ?Self {
+                return switch (self.data) {
+                    .Lambda => |item| item,
+                    else => null,
+                };
+            }
+
+            pub fn truthy(self: *Iterator) bool {
+                switch (self.data) {
+                    .Empty => return false,
+                    .Lambda => return true,
+                    .Sequence => |*sequence| switch (sequence.state) {
+                        .Fetching => |index| {
+                            if (sequence.fetch(index)) |item| {
+                                sequence.state = .{
+                                    .Loaded = .{
+                                        .index = index,
+                                        .item = item,
+                                    },
+                                };
+
+                                return true;
+                            } else {
+                                sequence.state = .Finished;
+                                return false;
+                            }
+                        },
+                        .Loaded => return true,
+                        .Finished => return false,
+                    },
                 }
             }
 
-            pub fn next(self: *Iterator, allocator: Allocator) Allocator.Error!?Self {
-                if (self.finished) {
-                    return null;
-                } else {
-                    defer self.current += 1;
-                    const result = try self.context.vtable.get(
-                        self.context.ptr,
-                        allocator,
-                        self.path,
-                        self.current,
-                    );
-
-                    // Keeping the iterator pattern
-                    switch (result) {
-                        .Field => |found| return found,
-                        .IteratorConsumed => {
-                            self.finished = true;
-                            return null;
+            pub fn next(self: *Iterator) ?Self {
+                switch (self.data) {
+                    .Lambda, .Empty => return null,
+                    .Sequence => |*sequence| switch (sequence.state) {
+                        .Fetching => |index| {
+                            if (sequence.fetch(index)) |item| {
+                                sequence.state = .{ .Fetching = index + 1 };
+                                return item;
+                            } else {
+                                sequence.state = .Finished;
+                                return null;
+                            }
                         },
-                        else => {
-                            assert(false);
-                            unreachable;
+                        .Loaded => |current| {
+                            sequence.state = .{ .Fetching = current.index + 1 };
+                            return current.item;
                         },
-                    }
+                        .Finished => return null,
+                    },
                 }
             }
         };
 
-        pub inline fn get(self: Self, allocator: Allocator, path: []const u8) Allocator.Error!PathResolution(Self) {
-            return try self.vtable.get(self.ptr, allocator, path, null);
+        pub inline fn get(self: Self, path: []const u8) PathResolution(Self) {
+            return self.vtable.get(&self.ctx, path, null);
         }
 
         pub fn iterator(self: *const Self, path: []const u8) PathResolution(Iterator) {
-            const result = self.vtable.check(self.ptr, path, 0);
+            const result = self.vtable.get(&self.ctx, path, 0);
 
             return switch (result) {
-                .Field,
-                .IteratorConsumed,
-                => .{
-                    .Field = .{
-                        .context = self,
-                        .path = path,
-                        .current = 0,
-                        .finished = result == .IteratorConsumed,
-                        .is_lambda = false,
-                    },
+                .Field => |item| .{
+                    .Field = Iterator.initSequence(self, path, item),
                 },
-                .Lambda => .{
-                    .Lambda = .{
-                        .context = self,
-                        .path = path,
-                        .current = 0,
-                        .finished = true,
-                        .is_lambda = true,
-                    },
+                .IteratorConsumed => .{
+                    .Field = Iterator.initEmpty(),
                 },
-
+                .Lambda => |item| .{
+                    .Field = Iterator.initLambda(item),
+                },
                 .ChainBroken => .ChainBroken,
                 .NotFoundInContext => .NotFoundInContext,
             };
         }
 
         pub inline fn interpolate(self: Self, out_writer: OutWriter, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try self.vtable.interpolate(self.ptr, out_writer, path, escape);
+            return try self.vtable.interpolate(&self.ctx, out_writer, path, escape);
         }
 
         pub inline fn expandLambda(self: Self, allocator: Allocator, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try self.vtable.expandLambda(self.ptr, allocator, out_writer, stack, path, inner_text, escape, delimiters);
-        }
-
-        pub inline fn destroy(self: Self, allocator: Allocator) void {
-            return self.vtable.destroy(self.ptr, allocator);
+            return try self.vtable.expandLambda(&self.ctx, allocator, out_writer, stack, path, inner_text, escape, delimiters);
         }
     };
 }
@@ -211,80 +266,53 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
 
         const vtable = ContextInterface.VTable{
             .get = get,
-            .check = check,
             .interpolate = interpolate,
             .expandLambda = expandLambda,
-            .destroy = destroy,
         };
 
+        const is_zero_size = @sizeOf(Data) == 0;
         const PATH_SEPARATOR = ".";
         const Self = @This();
 
-        // Compiler error: '*Self' and '*anyopaque' do not have the same in-memory representation
-        // note: '*Self" has no in-memory bits
-        // note: '*anyopaque' has in-memory bits
-        const is_zero_size = @sizeOf(Data) == 0;
-
-        data: Data,
-
-        pub fn create(allocator: Allocator, data: Data) Allocator.Error!ContextInterface {
-            return ContextInterface{
-                .ptr = if (is_zero_size) undefined else blk: {
-                    var self = try allocator.create(Self);
-                    self.* = .{
-                        .data = data,
-                    };
-
-                    break :blk self;
-                },
+        pub fn context(data: Data) ContextInterface {
+            var interface = ContextInterface{
                 .vtable = &vtable,
             };
+
+            if (!is_zero_size) {
+                if (comptime @sizeOf(Data) > @sizeOf(FlattenedType)) @compileError(std.fmt.comptimePrint("Type {s} size {} exceeds the maxinum by-val size of {}", .{ @typeName(Data), @sizeOf(Data), @sizeOf(FlattenedType) }));
+                var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &interface.ctx));
+                ptr.* = data;
+            }
+
+            return interface;
         }
 
-        fn get(ctx: *const anyopaque, allocator: Allocator, path: []const u8, index: ?usize) Allocator.Error!PathResolution(ContextInterface) {
-            var self = getSelf(ctx);
-
+        fn get(ctx: *const anyopaque, path: []const u8, index: ?usize) PathResolution(ContextInterface) {
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return try Invoker.get(
-                allocator,
-                self.data,
-                &path_iterator,
-                index,
-            );
-        }
-
-        fn check(ctx: *const anyopaque, path: []const u8, index: usize) PathResolution(void) {
-            var self = getSelf(ctx);
-
-            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-            return Invoker.check(
-                self.data,
+            return Invoker.get(
+                getData(ctx),
                 &path_iterator,
                 index,
             );
         }
 
         fn interpolate(ctx: *const anyopaque, out_writer: OutWriter, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            var self = getSelf(ctx);
-
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.interpolate(
                 out_writer,
-                self.data,
+                getData(ctx),
                 &path_iterator,
                 escape,
             );
         }
 
         fn expandLambda(ctx: *const anyopaque, allocator: Allocator, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            var self = getSelf(ctx);
-
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
-
             return try Invoker.expandLambda(
                 allocator,
                 out_writer,
-                self.data,
+                getData(ctx),
                 stack,
                 inner_text,
                 escape,
@@ -293,15 +321,8 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             );
         }
 
-        fn destroy(ctx: *const anyopaque, allocator: Allocator) void {
-            if (!is_zero_size) {
-                var self = getSelf(ctx);
-                allocator.destroy(self);
-            }
-        }
-
-        inline fn getSelf(ctx: *const anyopaque) *const Self {
-            return if (is_zero_size) undefined else @ptrCast(*const Self, @alignCast(@alignOf(Self), ctx));
+        inline fn getData(ctx: *const anyopaque) Data {
+            return if (is_zero_size) undefined else (@ptrCast(*const Data, @alignCast(@alignOf(Data), ctx))).*;
         }
     };
 }
@@ -442,11 +463,11 @@ const struct_tests = struct {
     }
 
     fn interpolate(writer: anytype, data: anytype, path: []const u8) anyerror!void {
-        const allocator = testing.allocator;
+        const Data = @TypeOf(data);
+        const by_value = comptime Fields.byValue(Data);
 
         const Writer = @TypeOf(writer);
-        var ctx = try getContext(Writer, allocator, data);
-        defer ctx.destroy(allocator);
+        var ctx = getContext(Writer, if (by_value) data else @as(*const Data, &data));
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
@@ -1025,8 +1046,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = try getContext(@TypeOf(writer), allocator, person);
-        defer person_ctx.destroy(allocator);
+        var person_ctx = getContext(@TypeOf(writer), &person);
 
         list.clearAndFree();
 
@@ -1035,14 +1055,13 @@ const struct_tests = struct {
 
         // Address
 
-        var address_ctx = switch (try person_ctx.get(allocator, "address")) {
+        var address_ctx = switch (person_ctx.get("address")) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
             },
         };
-        defer address_ctx.destroy(allocator);
 
         list.clearAndFree();
         try interpolateCtx(writer, address_ctx, "street", .Unescaped);
@@ -1050,14 +1069,13 @@ const struct_tests = struct {
 
         // Street
 
-        var street_ctx = switch (try address_ctx.get(allocator, "street")) {
+        var street_ctx = switch (address_ctx.get("street")) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
             },
         };
-        defer street_ctx.destroy(allocator);
 
         list.clearAndFree();
 
@@ -1082,8 +1100,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = try getContext(@TypeOf(writer), allocator, &person);
-        defer person_ctx.destroy(allocator);
+        var person_ctx = getContext(@TypeOf(writer), &person);
 
         list.clearAndFree();
 
@@ -1092,14 +1109,13 @@ const struct_tests = struct {
 
         // Indication
 
-        var indication_ctx = switch (try person_ctx.get(allocator, "indication")) {
+        var indication_ctx = switch (person_ctx.get("indication")) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
             },
         };
-        defer indication_ctx.destroy(allocator);
 
         list.clearAndFree();
         try interpolateCtx(writer, indication_ctx, "address.street", .Unescaped);
@@ -1107,14 +1123,13 @@ const struct_tests = struct {
 
         // Address
 
-        var address_ctx = switch (try indication_ctx.get(allocator, "address")) {
+        var address_ctx = switch (indication_ctx.get("address")) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
             },
         };
-        defer address_ctx.destroy(allocator);
 
         list.clearAndFree();
         try interpolateCtx(writer, address_ctx, "street", .Unescaped);
@@ -1122,14 +1137,13 @@ const struct_tests = struct {
 
         // Street
 
-        var street_ctx = switch (try address_ctx.get(allocator, "street")) {
+        var street_ctx = switch (address_ctx.get("street")) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
             },
         };
-        defer street_ctx.destroy(allocator);
 
         list.clearAndFree();
 
@@ -1150,46 +1164,43 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var person_ctx = try getContext(Writer, allocator, person);
-        defer person_ctx.destroy(allocator);
+        var person_ctx = getContext(Writer, &person);
 
         // Person.address
-        var address_ctx = switch (try person_ctx.get(allocator, "address")) {
+        var address_ctx = switch (person_ctx.get("address")) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
             },
         };
-        defer address_ctx.destroy(allocator);
 
-        var wrong_address = try person_ctx.get(allocator, "wrong_address");
+        var wrong_address = person_ctx.get("wrong_address");
         try testing.expect(wrong_address == .NotFoundInContext);
 
         // Person.address.street
-        var street_ctx = switch (try address_ctx.get(allocator, "street")) {
+        var street_ctx = switch (address_ctx.get("street")) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
             },
         };
-        defer street_ctx.destroy(allocator);
 
-        var wrong_street = try address_ctx.get(allocator, "wrong_street");
+        var wrong_street = address_ctx.get("wrong_street");
         try testing.expect(wrong_street == .NotFoundInContext);
 
         // Person.address.street.len
-        var street_len_ctx = switch (try street_ctx.get(allocator, "len")) {
+        var street_len_ctx = switch (street_ctx.get("len")) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
             },
         };
-        defer street_len_ctx.destroy(allocator);
+        _ = street_len_ctx;
 
-        var wrong_len = try street_ctx.get(allocator, "wrong_len");
+        var wrong_len = street_ctx.get("wrong_len");
         try testing.expect(wrong_len == .NotFoundInContext);
     }
 
@@ -1204,8 +1215,7 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Person
-        var ctx = try getContext(@TypeOf(writer), allocator, person);
-        defer ctx.destroy(allocator);
+        var ctx = getContext(@TypeOf(writer), &person);
 
         var iterator = switch (ctx.iterator("items")) {
             .Field => |found| found,
@@ -1215,29 +1225,27 @@ const struct_tests = struct {
             },
         };
 
-        var item_1 = (try iterator.next(allocator)) orelse {
+        var item_1 = iterator.next() orelse {
             try testing.expect(false);
-            return;
+            unreachable;
         };
-        defer item_1.destroy(allocator);
 
         list.clearAndFree();
 
         try interpolateCtx(writer, item_1, "name", .Unescaped);
         try testing.expectEqualStrings("item 1", list.items);
 
-        var item_2 = (try iterator.next(allocator)) orelse {
+        var item_2 = iterator.next() orelse {
             try testing.expect(false);
-            return;
+            unreachable;
         };
-        defer item_2.destroy(allocator);
 
         list.clearAndFree();
 
         try interpolateCtx(writer, item_2, "name", .Unescaped);
         try testing.expectEqualStrings("item 2", list.items);
 
-        var no_more = try iterator.next(allocator);
+        var no_more = iterator.next();
         try testing.expect(no_more == null);
     }
 
@@ -1249,8 +1257,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var ctx = try getContext(Writer, allocator, person);
-        defer ctx.destroy(allocator);
+        var ctx = getContext(Writer, &person);
 
         {
             // iterator over true
@@ -1262,13 +1269,10 @@ const struct_tests = struct {
                 },
             };
 
-            var item_1 = (try iterator.next(allocator)) orelse {
-                try testing.expect(false);
-                return;
-            };
-            defer item_1.destroy(allocator);
+            var item_1 = iterator.next();
+            try testing.expect(item_1 != null);
 
-            var no_more = try iterator.next(allocator);
+            var no_more = iterator.next();
             try testing.expect(no_more == null);
         }
 
@@ -1282,7 +1286,7 @@ const struct_tests = struct {
                 },
             };
 
-            var no_more = try iterator.next(allocator);
+            var no_more = iterator.next();
             try testing.expect(no_more == null);
         }
     }
@@ -1295,8 +1299,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var ctx = try getContext(Writer, allocator, person);
-        defer ctx.destroy(allocator);
+        var ctx = getContext(Writer, &person);
 
         {
             // iterator over true
@@ -1308,13 +1311,10 @@ const struct_tests = struct {
                 },
             };
 
-            var item_1 = (try iterator.next(allocator)) orelse {
-                try testing.expect(false);
-                return;
-            };
-            defer item_1.destroy(allocator);
+            var item_1 = iterator.next();
+            try testing.expect(item_1 != null);
 
-            var no_more = try iterator.next(allocator);
+            var no_more = iterator.next();
             try testing.expect(no_more == null);
         }
 
@@ -1328,7 +1328,7 @@ const struct_tests = struct {
                 },
             };
 
-            var no_more = try iterator.next(allocator);
+            var no_more = iterator.next();
             try testing.expect(no_more == null);
         }
     }

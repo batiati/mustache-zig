@@ -1,11 +1,4 @@
-/zig-cache
-/zig-out
-src/zig-cache
-samples/zig-cache
-samples/zig-out
-samples/src/zig-cache
-benchmark/zig-cache
-benchmark/zig-out
-benchmark/src/zig-cache
+*zig-cache
+*zig-out
 codecov
-kcov-output/
+kcov-output
