@@ -33,6 +33,30 @@ pub const Options = struct {
     }
 };
 
+pub const ParseTextOptions = struct {
+
+    ///
+    /// Use 'false' if the source string is static or lives enough
+    copy_strings: bool = true,
+
+    ///
+    /// Those options affect both performance and supported Mustache features.
+    /// Defaults to full-spec compatible.
+    features: Features = .{},
+};
+
+pub const ParseFileOptions = struct {
+
+    ///
+    /// Define the buffer size for reading the stream
+    read_buffer_size: usize = 4 * 1024,
+
+    ///
+    /// Those options affect both performance and supported Mustache features.
+    /// Defaults to full-spec compatible.
+    features: Features = .{},
+};
+
 pub const Source = union(enum) {
 
     ///
@@ -71,11 +95,6 @@ pub const Output = enum {
 pub const Features = struct {
 
     ///
-    /// Default delimiters are '{{' and '}}'
-    /// Allow redefining new delimiters such as '[' and ']'
-    default_delimiters: Delimiters = .{},
-
-    ///
     /// Allows redefining the delimiters through the tags '{{=' and '=}}'
     /// Disabling this option speeds up the parsing process.
     /// If disabled, any occurrence of '{{=' will result in a parse error
@@ -92,7 +111,7 @@ pub const Features = struct {
 
     ///
     /// Lambda expansion support
-    lambdas: Lambdas = .{ .Enabled = .{} },
+    lambdas: bool = true,
 };
 
 pub const Lambdas = union(enum) {

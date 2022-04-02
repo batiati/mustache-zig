@@ -14,8 +14,8 @@ pub const Delimiters = template.Delimiters;
 pub const Element = template.Element;
 pub const Template = template.Template;
 
-pub const parse = template.parse;
-pub const parseFromFile = template.parseFromFile;
+pub const parseText = template.parseText;
+pub const parseFile = template.parseFile;
 
 pub const render = rendering.render;
 pub const allocRender = rendering.allocRender;

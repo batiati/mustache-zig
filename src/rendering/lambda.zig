@@ -120,7 +120,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
         fn renderAlloc(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) anyerror![]u8 {
             var self = getSelf(ctx);
 
-            var template = switch (try mustache.parse(allocator, template_text, self.delimiters, false)) {
+            var template = switch (try mustache.parseText(allocator, template_text, self.delimiters, .{ .copy_strings = false })) {
                 .Success => |value| value,
                 .ParseError => |detail| return detail.parse_error,
             };
@@ -138,7 +138,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
         fn render(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) anyerror!void {
             var self = getSelf(ctx);
 
-            var template = switch (try mustache.parse(allocator, template_text, self.delimiters, false)) {
+            var template = switch (try mustache.parseText(allocator, template_text, self.delimiters, .{ .copy_strings = false })) {
                 .Success => |value| value,
                 .ParseError => return,
             };

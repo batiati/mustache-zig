@@ -26,7 +26,7 @@ const memory = @import("../memory.zig");
 
 pub fn Parser(comptime options: Options) type {
     const copy_string = options.copyStrings();
-    const allow_lambdas = options.features.lambdas == .Enabled;
+    const allow_lambdas = options.features.lambdas;
 
     const RefCounter = memory.RefCounter(options);
     const RefCounterHolder = memory.RefCounterHolder(options);

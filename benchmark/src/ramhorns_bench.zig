@@ -40,7 +40,7 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype
         .body = "This is a really simple test of the rendering!",
     };
 
-    var template = (try mustache.parse(allocator, template_text, .{}, false)).Success;
+    var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false })).Success;
     defer template.deinit(allocator);
 
     std.debug.print("Mode {s}\n", .{@tagName(mode)});

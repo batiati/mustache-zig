@@ -17,7 +17,7 @@ pub fn Node(comptime options: Options) type {
     const TextBlock = parsing.TextBlock(options);
 
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
-    const allow_lambdas = options.features.lambdas == .Enabled;
+    const allow_lambdas = options.features.lambdas;
 
     return struct {
         const Self = @This();

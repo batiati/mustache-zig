@@ -126,7 +126,7 @@ fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize) void {
 }
 
 fn parseTemplate(allocator: Allocator, template_text: []const u8) mustache.Template {
-    return switch (mustache.parse(allocator, template_text, .{}, false) catch unreachable) {
+    return switch (mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false }) catch unreachable) {
         .ParseError => |detail| {
             std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
             @panic("parser error");

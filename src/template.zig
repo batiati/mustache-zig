@@ -268,41 +268,52 @@ pub const Template = struct {
     }
 };
 
-/// Parses a string and returns an union containing either a ParseError or the CachedTemplate
+/// Parses a string and returns an union containing either a `ParseError` or a `Template`
 /// parameters:
-/// allocator used to all temporary and permanent allocations.
-///   Use this same allocator to free the returned template
-/// template_text: utf-8 encoded template text to be parsed
-/// delimiters: define custom delimiters, or use .{} for the default
-/// copy_strings: comptime bool indicating if the cached template shoud copy its strings.
-///   When true, all strings will be copied to the template and the "template_text" slice can be freed by the caller 
-///   When false, the "template_text" slice must be static or be valid during the template lifetime.
-pub fn parse(
+/// `allocator` used to all temporary and permanent allocations.
+///   Use this same allocator to deinit the returned template
+/// `template_text`: utf-8 encoded template text to be parsed
+/// `default_delimiters`: define custom delimiters, or use .{} for the default
+/// `options`: comptime options.
+pub fn parseText(
     allocator: Allocator,
     template_text: []const u8,
-    delimiters: Delimiters,
-    comptime copy_strings: bool,
+    default_delimiters: Delimiters,
+    comptime options: mustache.options.ParseTextOptions,
 ) Allocator.Error!ParseResult {
-    const source = Source{ .String = .{ .copy_strings = copy_strings } };
-    return try parseSource(source, allocator, template_text, delimiters);
+    const source = Source{ .String = .{ .copy_strings = options.copy_strings } };
+    return try parseSource(source, options.features, allocator, template_text, default_delimiters);
 }
 
-pub fn parseFromFile(
+/// Parses a file and returns an union containing either a `ParseError` or a `Template`
+/// parameters:
+/// `allocator` used to all temporary and permanent allocations.
+///   Use this same allocator to deinit the returned template
+/// `template_text`: utf-8 encoded template text to be parsed
+/// `default_delimiters`: define custom delimiters, or use .{} for the default
+/// `options`: comptime options.
+pub fn parseFile(
     allocator: Allocator,
     template_absolute_path: []const u8,
-    delimiters: Delimiters,
+    default_delimiters: Delimiters,
+    comptime options: mustache.options.ParseFileOptions,
 ) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseResult {
-    const source = Source{ .Stream = .{} };
-    return try parseSource(source, allocator, template_absolute_path, delimiters);
+    const source = Source{ .Stream = .{ .read_buffer_size = options.read_buffer_size } };
+    return try parseSource(source, options.features, allocator, template_absolute_path, default_delimiters);
 }
 
 fn parseSource(
-    comptime source: Source,
+    comptime source: mustache.options.Source,
+    comptime features: mustache.options.Features,
     allocator: Allocator,
     source_content: []const u8,
     delimiters: Delimiters,
 ) !ParseResult {
-    const options = Options{ .source = source, .output = .Parse };
+    const options = Options{
+        .source = source,
+        .output = .Parse,
+        .features = features,
+    };
 
     var template = TemplateLoader(options){
         .allocator = allocator,
@@ -312,7 +323,7 @@ fn parseSource(
     errdefer template.deinit();
 
     switch (source) {
-        .Stream => try template.loadFromFile(source_content),
+        .Stream => try template.loadFile(source_content),
         .String => try template.load(source_content),
     }
 
@@ -359,7 +370,7 @@ pub fn TemplateLoader(comptime options: Options) type {
             };
         }
 
-        pub fn loadFromFile(self: *Self, absolute_path: []const u8) Parser.LoadError!void {
+        pub fn loadFile(self: *Self, absolute_path: []const u8) Parser.LoadError!void {
             var parser = try Parser.init(self.allocator, absolute_path, self.delimiters);
             defer parser.deinit();
 
@@ -2365,7 +2376,7 @@ const tests = struct {
 
         defer template.deinit();
 
-        try template.loadFromFile(absolute_file_path);
+        try template.loadFile(absolute_file_path);
 
         try testing.expect(template.result == .Elements);
         const elements = template.result.Elements;
