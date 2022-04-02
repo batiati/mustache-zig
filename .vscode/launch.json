@@ -16,5 +16,17 @@
             "console": "integratedTerminal",
             "preLaunchTask": "build tests",
         },
+        {
+            "name": "debug benchmark",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/benchmark/zig-out/bin/benchmark",
+            "args": [ "." ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "build benchmark",
+        },        
     ]
 }
