@@ -26,11 +26,10 @@ pub const LambdaContext = struct {
     ptr: *const anyopaque,
     vtable: *const VTable,
 
-    allocator: Allocator,
     inner_text: []const u8,
 
     const VTable = struct {
-        renderAlloc: fn (*const anyopaque, Allocator, Allocator, []const u8) anyerror![]u8,
+        renderAlloc: fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
         render: fn (*const anyopaque, Allocator, []const u8) anyerror!void,
         write: fn (*const anyopaque, []const u8) anyerror!usize,
     };
@@ -39,34 +38,34 @@ pub const LambdaContext = struct {
     /// Renders a template against the current context
     /// Returns an owned mutable slice with the rendered text
     pub inline fn renderAlloc(self: LambdaContext, allocator: Allocator, template_text: []const u8) anyerror![]u8 {
-        return try self.vtable.renderAlloc(self.ptr, self.allocator, allocator, template_text);
+        return try self.vtable.renderAlloc(self.ptr, allocator, template_text);
     }
 
     ///
     /// Formats a template to be rendered against the current context
     /// Returns an owned mutable slice with the rendered text
     pub fn renderFormatAlloc(self: LambdaContext, allocator: Allocator, comptime fmt: []const u8, args: anytype) anyerror![]u8 {
-        const template_text = try std.fmt.allocPrint(self.allocator, fmt, args);
-        defer self.allocator.free(template_text);
+        const template_text = try std.fmt.allocPrint(allocator, fmt, args);
+        defer allocator.free(template_text);
 
-        return try self.vtable.renderAlloc(self.ptr, self.allocator, allocator, template_text);
+        return try self.vtable.renderAlloc(self.ptr, allocator, template_text);
     }
 
     ///
     /// Renders a template against the current context
     /// Can return anyerror depending on the underlying writer 
-    pub inline fn render(self: LambdaContext, template_text: []const u8) anyerror!void {
-        try self.vtable.render(self.ptr, self.allocator, template_text);
+    pub inline fn render(self: LambdaContext, allocator: Allocator, template_text: []const u8) anyerror!void {
+        try self.vtable.render(self.ptr, allocator, template_text);
     }
 
     ///
     /// Formats a template to be rendered against the current context
     /// Can return anyerror depending on the underlying writer 
-    pub fn renderFormat(self: LambdaContext, comptime fmt: []const u8, args: anytype) anyerror!void {
-        const template_text = try std.fmt.allocPrint(self.allocator, fmt, args);
-        defer self.allocator.free(template_text);
+    pub fn renderFormat(self: LambdaContext, allocator: Allocator, comptime fmt: []const u8, args: anytype) anyerror!void {
+        const template_text = try std.fmt.allocPrint(allocator, fmt, args);
+        defer allocator.free(template_text);
 
-        try self.vtable.render(self.ptr, self.allocator, template_text);
+        try self.vtable.render(self.ptr, allocator, template_text);
     }
 
     ///
@@ -110,16 +109,15 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             .write = write,
         };
 
-        pub fn context(self: *Self, allocator: Allocator, inner_text: []const u8) LambdaContext {
+        pub fn context(self: *Self, inner_text: []const u8) LambdaContext {
             return .{
                 .ptr = self,
                 .vtable = &vtable,
-                .allocator = allocator,
                 .inner_text = inner_text,
             };
         }
 
-        fn renderAlloc(ctx: *const anyopaque, allocator: Allocator, buffer_allocator: Allocator, template_text: []const u8) anyerror![]u8 {
+        fn renderAlloc(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) anyerror![]u8 {
             var self = getSelf(ctx);
 
             var template = switch (try mustache.parseTemplate(allocator, template_text, self.delimiters, false)) {
@@ -128,11 +126,11 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             };
             defer template.free(allocator);
 
-            var buffer = std.ArrayList(u8).init(buffer_allocator);
+            var buffer = std.ArrayList(u8).init(allocator);
             defer buffer.deinit();
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(allocator, .{ .Buffer = &buffer }, self.stack, template.elements);
+            try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, template.elements);
 
             return buffer.toOwnedSlice();
         }
@@ -147,7 +145,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             defer template.free(allocator);
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(allocator, self.out_writer, self.stack, template.elements);
+            try Impl.renderLevel(self.out_writer, self.stack, template.elements);
         }
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {

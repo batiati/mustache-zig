@@ -99,11 +99,11 @@ fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data
     switch (mode) {
         .Counter => {
             var counter = std.io.countingWriter(std.io.null_writer);
-            try mustache.renderCached(allocator, template, data, counter.writer());
+            try mustache.render(template, data, counter.writer());
             return counter.bytes_written;
         },
         .String => {
-            const ret = try mustache.renderAllocCached(allocator, template, data);
+            const ret = try mustache.renderAlloc(allocator, template, data);
             defer allocator.free(ret);
             return ret.len;
         },

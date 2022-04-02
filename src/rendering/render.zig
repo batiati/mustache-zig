@@ -27,30 +27,19 @@ const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
 
-pub fn renderAllocCached(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![]const u8 {
+pub fn render(cached_template: Template, data: anytype, out_writer: anytype) !void {
+    var data_render = getDataRender(out_writer, data);
+    try data_render.render(cached_template.elements);
+}
+
+pub fn renderAlloc(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var render = getDataRender(allocator, std.io.null_writer, data);
-    render.out_writer = .{ .Buffer = &list };
-
-    try render.render(cached_template.elements);
+    var data_render = getDataRender(std.io.null_writer, data);
+    try data_render.bufRender(&list, cached_template.elements);
 
     return list.toOwnedSlice();
-}
-
-pub fn renderCached(allocator: Allocator, cached_template: Template, data: anytype, out_writer: anytype) (Allocator.Error || @TypeOf(out_writer).Error)!void {
-    var render = getDataRender(allocator, out_writer, data);
-    try render.render(cached_template.elements);
-}
-
-pub fn renderAllocFromString(allocator: Allocator, template_text: []const u8, data: anytype) (Allocator.Error || ParseError)![]const u8 {
-    var builder = std.ArrayList(u8).init(allocator);
-    errdefer builder.deinit();
-
-    try renderFromString(allocator, template_text, data, builder.writer());
-
-    return builder.toOwnedSlice();
 }
 
 pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || @TypeOf(out_writer).Error)!void {
@@ -64,8 +53,30 @@ pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: a
     };
     errdefer template.deinit();
 
-    var render = getDataRender(allocator, out_writer, data);
-    try template.collectElements(template_text, &render);
+    var data_render = getDataRender(out_writer, data);
+    try template.collectElements(template_text, &data_render);
+}
+
+pub fn renderAllocFromString(allocator: Allocator, template_text: []const u8, data: anytype) (Allocator.Error || ParseError)![]const u8 {
+    const options = Options{
+        .source = .{ .String = .{ .copy_strings = false } },
+        .output = .Render,
+    };
+
+    var template = TemplateLoader(options){
+        .allocator = allocator,
+    };
+    errdefer template.deinit();
+
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
+
+    var data_render = getDataRender(std.io.null_writer, data);
+    data_render.out_writer = .{ .Buffer = &list };
+
+    try template.collectElements(template_text, &data_render);
+
+    return list.toOwnedSlice();
 }
 
 pub fn renderFromFile(allocator: Allocator, absolute_template_path: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(out_writer).Error)!void {
@@ -79,15 +90,14 @@ pub fn renderFromFile(allocator: Allocator, absolute_template_path: []const u8, 
     };
     errdefer template.deinit();
 
-    var render = getDataRender(allocator, out_writer, data);
-    try template.collectElementsFromFile(absolute_template_path, &render);
+    var data_render = getDataRender(out_writer, data);
+    try template.collectElementsFromFile(absolute_template_path, &data_render);
 }
 
-fn getDataRender(allocator: Allocator, writer: anytype, data: anytype) DataRender(@TypeOf(writer), @TypeOf(data)) {
+fn getDataRender(writer: anytype, data: anytype) DataRender(@TypeOf(writer), @TypeOf(data)) {
     const Writer = @TypeOf(writer);
 
     return DataRender(Writer, @TypeOf(data)){
-        .allocator = allocator,
         .out_writer = .{ .Writer = writer },
         .data = data,
     };
@@ -103,7 +113,6 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
 
         pub const Error = Allocator.Error || Writer.Error;
 
-        allocator: Allocator,
         out_writer: OutWriter,
         data: Data,
 
@@ -115,13 +124,21 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
                 .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
             };
 
-            if (self.out_writer == .Buffer) {
-                var list = self.out_writer.Buffer;
-                const capacity_hint = WriterRender.capacityHint(elements);
-                try list.ensureUnusedCapacity(capacity_hint);
-            }
+            try WriterRender.renderLevel(self.out_writer, &stack, elements);
+        }
 
-            try WriterRender.renderLevel(self.allocator, self.out_writer, &stack, elements);
+        pub fn bufRender(self: *Self, buffer: *std.ArrayList(u8), elements: []const Element) Error!void {
+            const by_value = comptime Fields.byValue(Data);
+
+            var stack = WriterRender.ContextStack{
+                .parent = null,
+                .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
+            };
+
+            const capacity_hint = WriterRender.capacityHint(elements);
+            try buffer.ensureUnusedCapacity(capacity_hint);
+
+            try WriterRender.renderLevel(.{ .Buffer = buffer }, &stack, elements);
         }
     };
 }
@@ -134,13 +151,13 @@ pub fn Render(comptime Writer: type) type {
 
         pub const Error = Allocator.Error || Writer.Error;
 
-        pub fn renderLevel(allocator: Allocator, out_writer: OutWriter, stack: *const ContextStack, children: ?[]const Element) Error!void {
+        pub fn renderLevel(out_writer: OutWriter, stack: *const ContextStack, children: ?[]const Element) Error!void {
             if (children) |elements| {
                 for (elements) |element| {
                     switch (element) {
                         .StaticText => |content| try writeAll(out_writer, content),
-                        .Interpolation => |path| try interpolate(allocator, out_writer, stack, path, .Escaped),
-                        .UnescapedInterpolation => |path| try interpolate(allocator, out_writer, stack, path, .Unescaped),
+                        .Interpolation => |path| try interpolate(out_writer, stack, path, .Escaped),
+                        .UnescapedInterpolation => |path| try interpolate(out_writer, stack, path, .Unescaped),
                         .Section => |section| {
                             if (getIterator(stack, section.key)) |*iterator| {
                                 if (iterator.lambda()) |lambda_ctx| {
@@ -149,7 +166,7 @@ pub fn Render(comptime Writer: type) type {
                                     assert(section.inner_text != null);
                                     assert(section.delimiters != null);
 
-                                    const expand_result = try lambda_ctx.expandLambda(allocator, out_writer, stack, "", section.inner_text.?, .Unescaped, section.delimiters.?);
+                                    const expand_result = try lambda_ctx.expandLambda(out_writer, stack, "", section.inner_text.?, .Unescaped, section.delimiters.?);
                                     assert(expand_result == .Lambda);
                                 } else while (iterator.next()) |item_ctx| {
                                     var next_level = ContextStack{
@@ -157,7 +174,7 @@ pub fn Render(comptime Writer: type) type {
                                         .ctx = item_ctx,
                                     };
 
-                                    try renderLevel(allocator, out_writer, &next_level, section.content);
+                                    try renderLevel(out_writer, &next_level, section.content);
                                 }
                             }
                         },
@@ -168,7 +185,7 @@ pub fn Render(comptime Writer: type) type {
 
                             const truthy = if (getIterator(stack, section.key)) |*iterator| iterator.truthy() else false;
                             if (!truthy) {
-                                try renderLevel(allocator, out_writer, stack, section.content);
+                                try renderLevel(out_writer, stack, section.content);
                             }
                         },
 
@@ -198,7 +215,7 @@ pub fn Render(comptime Writer: type) type {
             return capacity_hint + (capacity_hint / 2 + 8);
         }
 
-        fn interpolate(allocator: Allocator, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
+        fn interpolate(out_writer: OutWriter, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
             var level: ?*const ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {
@@ -213,7 +230,7 @@ pub fn Render(comptime Writer: type) type {
                     .Lambda => {
 
                         // Expand the lambda against the current context and break the loop
-                        const expand_result = try current.ctx.expandLambda(allocator, out_writer, stack, path, "", escape, .{});
+                        const expand_result = try current.ctx.expandLambda(out_writer, stack, path, "", escape, .{});
                         assert(expand_result == .Lambda);
                         break;
                     },
@@ -1946,7 +1963,7 @@ const tests = struct {
                     planet: []const u8,
 
                     pub fn lambda(ctx: mustache.LambdaContext) !void {
-                        try ctx.render("{{planet}}");
+                        try ctx.render(testing.allocator, "{{planet}}");
                     }
                 };
 
@@ -1963,7 +1980,7 @@ const tests = struct {
                     planet: []const u8,
 
                     pub fn lambda(ctx: mustache.LambdaContext) !void {
-                        try ctx.render("|planet| => {{planet}}");
+                        try ctx.render(testing.allocator, "|planet| => {{planet}}");
                     }
                 };
 
@@ -2035,7 +2052,7 @@ const tests = struct {
                     planet: []const u8,
 
                     pub fn lambda(ctx: mustache.LambdaContext) !void {
-                        try ctx.renderFormat("{s}{s}{s}", .{ ctx.inner_text, "{{planet}}", ctx.inner_text });
+                        try ctx.renderFormat(testing.allocator, "{s}{s}{s}", .{ ctx.inner_text, "{{planet}}", ctx.inner_text });
                     }
                 };
 
@@ -2052,7 +2069,7 @@ const tests = struct {
                     planet: []const u8,
 
                     pub fn lambda(ctx: mustache.LambdaContext) !void {
-                        try ctx.renderFormat("{s}{s}{s}", .{ ctx.inner_text, "{{planet}} => |planet|", ctx.inner_text });
+                        try ctx.renderFormat(testing.allocator, "{s}{s}{s}", .{ ctx.inner_text, "{{planet}} => |planet|", ctx.inner_text });
                     }
                 };
 
@@ -2067,7 +2084,7 @@ const tests = struct {
             test "Section - Multiple Calls" {
                 const Data = struct {
                     pub fn lambda(ctx: mustache.LambdaContext) !void {
-                        try ctx.renderFormat("__{s}__", .{ctx.inner_text});
+                        try ctx.renderFormat(testing.allocator, "__{s}__", .{ctx.inner_text});
                     }
                 };
 
@@ -2183,8 +2200,8 @@ const tests = struct {
                 name: []const u8,
 
                 pub fn lower(ctx: LambdaContext) !void {
-                    var text = try ctx.renderAlloc(ctx.allocator, ctx.inner_text);
-                    defer ctx.allocator.free(text);
+                    var text = try ctx.renderAlloc(testing.allocator, ctx.inner_text);
+                    defer testing.allocator.free(text);
 
                     for (text) |char, i| {
                         text[i] = std.ascii.toLower(char);
@@ -2205,8 +2222,8 @@ const tests = struct {
                 name: []const u8,
 
                 pub fn lower(ctx: LambdaContext) !void {
-                    var text = try ctx.renderAlloc(ctx.allocator, ctx.inner_text);
-                    defer ctx.allocator.free(text);
+                    var text = try ctx.renderAlloc(testing.allocator, ctx.inner_text);
+                    defer testing.allocator.free(text);
 
                     for (text) |char, i| {
                         text[i] = std.ascii.toLower(char);
@@ -2216,8 +2233,8 @@ const tests = struct {
                 }
 
                 pub fn upper(ctx: LambdaContext) !void {
-                    var text = try ctx.renderAlloc(ctx.allocator, ctx.inner_text);
-                    defer ctx.allocator.free(text);
+                    var text = try ctx.renderAlloc(testing.allocator, ctx.inner_text);
+                    defer testing.allocator.free(text);
 
                     const expected = "name=phill";
                     try testing.expectEqualStrings(expected, text);
@@ -2268,8 +2285,8 @@ const tests = struct {
                 content: []const u8,
 
                 pub fn hash(ctx: LambdaContext) !void {
-                    var content = try ctx.renderAlloc(ctx.allocator, ctx.inner_text);
-                    defer ctx.allocator.free(content);
+                    var content = try ctx.renderAlloc(testing.allocator, ctx.inner_text);
+                    defer testing.allocator.free(content);
 
                     const hash_value = std.hash.Crc32.hash(content);
 
@@ -2299,7 +2316,7 @@ const tests = struct {
         };
         defer cached_template.free(allocator);
 
-        var result = try renderAllocCached(allocator, cached_template, data);
+        var result = try renderAlloc(allocator, cached_template, data);
         defer allocator.free(result);
         try testing.expectEqualStrings(expected, result);
     }

@@ -315,7 +315,6 @@ pub fn Invoker(comptime Writer: type) type {
         }
 
         pub fn expandLambda(
-            allocator: Allocator,
             out_writer: OutWriter,
             data: anytype,
             stack: anytype,
@@ -326,7 +325,7 @@ pub fn Invoker(comptime Writer: type) type {
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const ExpandLambdaAction = PathInvoker(Allocator.Error || Writer.Error, void, expandLambdaAction);
             return try ExpandLambdaAction.call(
-                .{ allocator, stack, tag_contents, escape, delimiters },
+                .{ stack, tag_contents, escape, delimiters },
                 out_writer,
                 data,
                 path_iterator,
@@ -362,11 +361,10 @@ pub fn Invoker(comptime Writer: type) type {
             }
 
             const Error = Allocator.Error || Writer.Error;
-            const allocator = params.@"0";
-            const stack = params.@"1";
-            const inner_text = params.@"2";
-            const escape = params.@"3";
-            const delimiters = params.@"4";
+            const stack = params.@"0";
+            const inner_text = params.@"1";
+            const escape = params.@"2";
+            const delimiters = params.@"3";
 
             const Impl = lambda.LambdaContextImpl(Writer);
             var impl = Impl{
@@ -376,7 +374,7 @@ pub fn Invoker(comptime Writer: type) type {
                 .delimiters = delimiters,
             };
 
-            const lambda_context = impl.context(allocator, inner_text);
+            const lambda_context = impl.context(inner_text);
 
             // Errors are intentionally ignored on lambda calls, interpolating empty strings
             value.invoke(lambda_context) catch |e| {

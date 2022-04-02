@@ -19,8 +19,8 @@ pub const Template = template.Template;
 pub const parseTemplate = template.parseTemplate;
 pub const parseTemplateFromFile = template.parseTemplateFromFile;
 
-pub const renderCached = rendering.renderCached;
-pub const renderAllocCached = rendering.renderAllocCached;
+pub const render = rendering.render;
+pub const renderAlloc = rendering.renderAlloc;
 pub const renderFromString = rendering.renderFromString;
 pub const renderFromFile = rendering.renderFromFile;
 pub const renderAllocFromString = rendering.renderAllocFromString;

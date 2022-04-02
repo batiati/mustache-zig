@@ -58,7 +58,7 @@ pub fn renderFromCachedTemplate() anyerror!void {
 
     var repeat: u32 = 0;
     while (repeat < 10) : (repeat += 1) {
-        var result = try mustache.renderAllocCached(allocator, cached_template, ctx);
+        var result = try mustache.renderAlloc(allocator, cached_template, ctx);
         defer allocator.free(result);
 
         var out = std.io.getStdOut();
