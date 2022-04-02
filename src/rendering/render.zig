@@ -135,9 +135,6 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
                 .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
             };
 
-            const capacity_hint = WriterRender.capacityHint(elements);
-            try buffer.ensureUnusedCapacity(capacity_hint);
-
             try WriterRender.renderLevel(.{ .Buffer = buffer }, &stack, elements);
         }
     };
@@ -194,25 +191,6 @@ pub fn Render(comptime Writer: type) type {
                     }
                 }
             }
-        }
-
-        pub fn capacityHint(children: ?[]const Element) usize {
-            var capacity_hint: usize = 0;
-
-            if (children) |elements| {
-                for (elements) |element| {
-                    switch (element) {
-                        .StaticText => |content| capacity_hint += content.len,
-                        .Section => |section| capacity_hint += capacityHint(section.content),
-                        .InvertedSection => |section| capacity_hint += capacityHint(section.content),
-
-                        //TODO Partial, Parent, Block
-                        else => {},
-                    }
-                }
-            }
-
-            return capacity_hint + (capacity_hint / 2 + 8);
         }
 
         fn interpolate(out_writer: OutWriter, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {

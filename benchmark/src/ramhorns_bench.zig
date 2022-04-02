@@ -12,6 +12,7 @@ const TIMES = if (builtin.mode == .Debug) 10_000 else 1_000_000;
 const Mode = enum {
     Counter,
     String,
+    Writer,
 };
 
 pub fn main() anyerror!void {
@@ -21,12 +22,16 @@ pub fn main() anyerror!void {
         try simpleTemplate(gpa.allocator(), .Counter);
         try simpleTemplate(gpa.allocator(), .String);
     } else {
-        try simpleTemplate(std.heap.raw_c_allocator, .Counter);
-        try simpleTemplate(std.heap.raw_c_allocator, .String);
+        var file = try std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only });
+        defer file.close();
+
+        try simpleTemplate(std.heap.raw_c_allocator, .Counter, std.io.null_writer);
+        try simpleTemplate(std.heap.raw_c_allocator, .String, std.io.null_writer);
+        try simpleTemplate(std.heap.raw_c_allocator, .Writer, file.writer());
     }
 }
 
-pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode) !void {
+pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype) !void {
     const template_text = "<title>{{&title}}</title><h1>{{&title}}</h1><div>{{{body}}}</div>";
     const fmt_template = "<title>{s}</title><h1>{s}</h1><div>{s}</div>";
 
@@ -45,9 +50,10 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode) !void {
         mode,
         fmt_template,
         .{ data.title, data.title, data.body },
+        writer,
     }, null);
-    _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, mode, template, data }, reference);
-    _ = try repeat("Mustache not parsed", notParsed, .{ allocator, mode, template_text, data }, reference);
+    _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, mode, template, data, writer }, reference);
+    _ = try repeat("Mustache not parsed", notParsed, .{ allocator, mode, template_text, data, writer }, reference);
     std.debug.print("\n\n", .{});
 }
 
@@ -80,10 +86,10 @@ fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize, referen
     std.debug.print("\n", .{});
 }
 
-fn zigFmt(allocator: Allocator, mode: Mode, comptime fmt_template: []const u8, data: anytype) !usize {
+fn zigFmt(allocator: Allocator, mode: Mode, comptime fmt_template: []const u8, data: anytype, writer: anytype) !usize {
     switch (mode) {
-        .Counter => {
-            var counter = std.io.countingWriter(std.io.null_writer);
+        .Counter, .Writer => {
+            var counter = std.io.countingWriter(writer);
             try std.fmt.format(counter.writer(), fmt_template, data);
             return counter.bytes_written;
         },
@@ -95,10 +101,10 @@ fn zigFmt(allocator: Allocator, mode: Mode, comptime fmt_template: []const u8, d
     }
 }
 
-fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data: anytype) !usize {
+fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data: anytype, writer: anytype) !usize {
     switch (mode) {
-        .Counter => {
-            var counter = std.io.countingWriter(std.io.null_writer);
+        .Counter, .Writer => {
+            var counter = std.io.countingWriter(writer);
             try mustache.render(template, data, counter.writer());
             return counter.bytes_written;
         },
@@ -110,10 +116,10 @@ fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data
     }
 }
 
-fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: anytype) !usize {
+fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: anytype, writer: anytype) !usize {
     switch (mode) {
-        .Counter => {
-            var counter = std.io.countingWriter(std.io.null_writer);
+        .Counter, .Writer => {
+            var counter = std.io.countingWriter(writer);
             try mustache.renderFromString(allocator, template_text, data, counter.writer());
             return counter.bytes_written;
         },
