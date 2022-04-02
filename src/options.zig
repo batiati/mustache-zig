@@ -37,7 +37,7 @@ pub const ParseTextOptions = struct {
 
     ///
     /// Use 'false' if the source string is static or lives enough
-    copy_strings: bool = true,
+    copy_strings: bool,
 
     ///
     /// Those options affect both performance and supported Mustache features.

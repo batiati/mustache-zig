@@ -263,7 +263,7 @@ pub const Template = struct {
     elements: []const Element,
     owns_string: bool,
 
-    pub fn deinit(self: *Template, allocator: Allocator) void {
+    pub fn deinit(self: Template, allocator: Allocator) void {
         Element.deinitMany(allocator, self.owns_string, self.elements);
     }
 };
@@ -329,7 +329,7 @@ fn parseSource(
 
     switch (template.result) {
         .Error => |last_error| return ParseResult{ .ParseError = last_error },
-        .Elements => |elements| return ParseResult{ .Success = .{ .elements = elements, .owns_string = if (source == .String) source.String.copy_strings else false } },
+        .Elements => |elements| return ParseResult{ .Success = .{ .elements = elements, .owns_string = options.copyStrings() } },
         .NotLoaded => unreachable,
     }
 }
@@ -473,6 +473,8 @@ const tests = struct {
         _ = inverted;
         _ = partials;
         _ = lambdas;
+        _ = extra;
+        _ = api;
     }
 
     const options = Options{
@@ -2272,277 +2274,316 @@ const tests = struct {
         }
     };
 
-    test "Basic DOM test" {
-        const template_text =
-            \\{{! Comments block }}
-            \\  Hello
-            \\  {{#section}}
-            \\Name: {{name}}
-            \\Comments: {{&comments}}
-            \\{{^inverted}}Inverted text{{/inverted}}
-            \\{{/section}}
-            \\World
-        ;
+    const extra = struct {
+        test "Basic DOM test" {
+            const template_text =
+                \\{{! Comments block }}
+                \\  Hello
+                \\  {{#section}}
+                \\Name: {{name}}
+                \\Comments: {{&comments}}
+                \\{{^inverted}}Inverted text{{/inverted}}
+                \\{{/section}}
+                \\World
+            ;
 
-        var template = try getTemplate(template_text);
-        defer template.deinit();
+            var template = try getTemplate(template_text);
+            defer template.deinit();
 
-        try testing.expect(template.result == .Elements);
-        const elements = template.result.Elements;
+            try testing.expect(template.result == .Elements);
+            const elements = template.result.Elements;
 
-        try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 3), elements.len);
 
-        try testing.expectEqual(Element.Type.StaticText, elements[0]);
-        try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.StaticText, elements[0]);
+            try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
 
-        try testing.expectEqual(Element.Type.Section, elements[1]);
-        try testing.expectEqualStrings("section", elements[1].Section.key);
-        if (elements[1].Section.content) |section| {
-            try testing.expectEqual(@as(usize, 7), section.len);
+            try testing.expectEqual(Element.Type.Section, elements[1]);
+            try testing.expectEqualStrings("section", elements[1].Section.key);
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 7), section.len);
 
-            try testing.expectEqual(Element.Type.StaticText, section[0]);
-            try testing.expectEqualStrings("Name: ", section[0].StaticText);
+                try testing.expectEqual(Element.Type.StaticText, section[0]);
+                try testing.expectEqualStrings("Name: ", section[0].StaticText);
 
-            try testing.expectEqual(Element.Type.Interpolation, section[1]);
-            try testing.expectEqualStrings("name", section[1].Interpolation);
+                try testing.expectEqual(Element.Type.Interpolation, section[1]);
+                try testing.expectEqualStrings("name", section[1].Interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, section[2]);
-            try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
+                try testing.expectEqual(Element.Type.StaticText, section[2]);
+                try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, section[3]);
-            try testing.expectEqualStrings("comments", section[3].UnescapedInterpolation);
+                try testing.expectEqual(Element.Type.UnescapedInterpolation, section[3]);
+                try testing.expectEqualStrings("comments", section[3].UnescapedInterpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, section[4]);
-            try testing.expectEqualStrings("\n", section[4].StaticText);
+                try testing.expectEqual(Element.Type.StaticText, section[4]);
+                try testing.expectEqualStrings("\n", section[4].StaticText);
 
-            try testing.expectEqual(Element.Type.InvertedSection, section[5]);
-            try testing.expectEqualStrings("inverted", section[5].InvertedSection.key);
+                try testing.expectEqual(Element.Type.InvertedSection, section[5]);
+                try testing.expectEqualStrings("inverted", section[5].InvertedSection.key);
 
-            if (section[5].InvertedSection.content) |inverted_section| {
-                try testing.expectEqual(@as(usize, 1), inverted_section.len);
+                if (section[5].InvertedSection.content) |inverted_section| {
+                    try testing.expectEqual(@as(usize, 1), inverted_section.len);
 
-                try testing.expectEqual(Element.Type.StaticText, inverted_section[0]);
-                try testing.expectEqualStrings("Inverted text", inverted_section[0].StaticText);
+                    try testing.expectEqual(Element.Type.StaticText, inverted_section[0]);
+                    try testing.expectEqualStrings("Inverted text", inverted_section[0].StaticText);
+                } else {
+                    try testing.expect(false);
+                }
+
+                try testing.expectEqual(Element.Type.StaticText, section[6]);
+                try testing.expectEqualStrings("\n", section[6].StaticText);
             } else {
                 try testing.expect(false);
             }
 
-            try testing.expectEqual(Element.Type.StaticText, section[6]);
-            try testing.expectEqualStrings("\n", section[6].StaticText);
-        } else {
-            try testing.expect(false);
+            try testing.expectEqual(Element.Type.StaticText, elements[2]);
+            try testing.expectEqualStrings("World", elements[2].StaticText);
         }
 
-        try testing.expectEqual(Element.Type.StaticText, elements[2]);
-        try testing.expectEqualStrings("World", elements[2].StaticText);
-    }
+        test "Basic DOM File test" {
+            const template_text =
+                \\{{! Comments block }}
+                \\  Hello
+                \\  {{#section}}
+                \\Name: {{name}}
+                \\Comments: {{&comments}}
+                \\{{^inverted}}Inverted text{{/inverted}}
+                \\{{/section}}
+                \\World
+            ;
 
-    test "Basic DOM File test" {
-        const template_text =
-            \\{{! Comments block }}
-            \\  Hello
-            \\  {{#section}}
-            \\Name: {{name}}
-            \\Comments: {{&comments}}
-            \\{{^inverted}}Inverted text{{/inverted}}
-            \\{{/section}}
-            \\World
-        ;
+            const allocator = testing.allocator;
 
-        const allocator = testing.allocator;
+            const path = try std.fs.selfExeDirPathAlloc(allocator);
+            defer allocator.free(path);
 
-        const path = try std.fs.selfExeDirPathAlloc(allocator);
-        defer allocator.free(path);
+            // Creating a temp file
+            const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "temp.mustache" });
+            defer allocator.free(absolute_file_path);
 
-        // Creating a temp file
-        const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "temp.mustache" });
-        defer allocator.free(absolute_file_path);
-
-        var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
-        try file.writeAll(template_text);
-        file.close();
-        defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
-
-        // Read from a file, assuring that this text should read four times from the buffer
-        const read_buffer_size = (template_text.len / 4);
-        const SmallBufferTemplateloader = TemplateLoader(.{
-            .source = .{ .Stream = .{ .read_buffer_size = read_buffer_size } },
-            .output = .Parse,
-        });
-
-        var template = SmallBufferTemplateloader{
-            .allocator = allocator,
-        };
-
-        defer template.deinit();
-
-        try template.loadFile(absolute_file_path);
-
-        try testing.expect(template.result == .Elements);
-        const elements = template.result.Elements;
-
-        try testing.expectEqual(@as(usize, 3), elements.len);
-
-        try testing.expectEqual(Element.Type.StaticText, elements[0]);
-        try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
-
-        try testing.expectEqual(Element.Type.Section, elements[1]);
-        try testing.expectEqualStrings("section", elements[1].Section.key);
-        if (elements[1].Section.content) |section| {
-            try testing.expectEqual(@as(usize, 7), section.len);
-
-            try testing.expectEqual(Element.Type.StaticText, section[0]);
-            try testing.expectEqualStrings("Name: ", section[0].StaticText);
-
-            try testing.expectEqual(Element.Type.Interpolation, section[1]);
-            try testing.expectEqualStrings("name", section[1].Interpolation);
-
-            try testing.expectEqual(Element.Type.StaticText, section[2]);
-            try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
-
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, section[3]);
-            try testing.expectEqualStrings("comments", section[3].UnescapedInterpolation);
-
-            try testing.expectEqual(Element.Type.StaticText, section[4]);
-            try testing.expectEqualStrings("\n", section[4].StaticText);
-
-            try testing.expectEqual(Element.Type.InvertedSection, section[5]);
-            try testing.expectEqualStrings("inverted", section[5].InvertedSection.key);
-
-            if (section[5].InvertedSection.content) |inverted_section| {
-                try testing.expectEqual(@as(usize, 1), inverted_section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, inverted_section[0]);
-                try testing.expectEqualStrings("Inverted text", inverted_section[0].StaticText);
-            } else {
-                try testing.expect(false);
-            }
-
-            try testing.expectEqual(Element.Type.StaticText, section[6]);
-            try testing.expectEqualStrings("\n", section[6].StaticText);
-        } else {
-            try testing.expect(false);
-        }
-
-        try testing.expectEqual(Element.Type.StaticText, elements[2]);
-        try testing.expectEqualStrings("World", elements[2].StaticText);
-    }
-
-    test "Large DOM File test" {
-        const template_text =
-            \\{{! Comments block }}
-            \\  Hello
-            \\  {{#section}}
-            \\Name: {{name}}
-            \\Comments: {{&comments}}
-            \\{{^inverted}}Inverted text{{/inverted}}
-            \\{{/section}}
-            \\World
-        ;
-
-        const allocator = testing.allocator;
-
-        const path = try std.fs.selfExeDirPathAlloc(allocator);
-        defer allocator.free(path);
-
-        // Creating a temp file
-        const test_10MB_file = try std.fs.path.join(allocator, &.{ path, "10MB_file.mustache" });
-        defer allocator.free(test_10MB_file);
-
-        var file = try std.fs.createFileAbsolute(test_10MB_file, .{ .truncate = true });
-        defer std.fs.deleteFileAbsolute(test_10MB_file) catch {};
-
-        // Writes the same template many times on a file
-        const REPEAT = 100_000;
-        var step: usize = 0;
-        while (step < REPEAT) : (step += 1) {
+            var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
             try file.writeAll(template_text);
-        }
+            file.close();
+            defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
 
-        const size = try file.getEndPos();
-        file.close();
+            // Read from a file, assuring that this text should read four times from the buffer
+            const read_buffer_size = (template_text.len / 4);
+            const SmallBufferTemplateloader = TemplateLoader(.{
+                .source = .{ .Stream = .{ .read_buffer_size = read_buffer_size } },
+                .output = .Parse,
+            });
 
-        // Must be at least 10MB big
-        try testing.expect(size > 10 * 1024 * 1024);
+            var template = SmallBufferTemplateloader{
+                .allocator = allocator,
+            };
 
-        // 32KB should be enough memory for this job
-        // 16KB if we don't need to support lambdas 😅
-        var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){
-            .requested_memory_limit = 32 * 1024,
-        };
-        defer _ = plenty_of_memory.deinit();
+            defer template.deinit();
 
-        // Strings are not ownned by the template,
-        // Use this option when creating templates from a static string or when rendering direct to a stream
-        const RefStringsTemplate = TemplateLoader(.{
-            .source = .{ .Stream = .{} },
-            .output = .Render,
-        });
+            try template.loadFile(absolute_file_path);
 
-        // Create a template to parse and render this 10MB file, with only 16KB of memory
-        var template = RefStringsTemplate{
-            .allocator = plenty_of_memory.allocator(),
-        };
+            try testing.expect(template.result == .Elements);
+            const elements = template.result.Elements;
 
-        defer template.deinit();
+            try testing.expectEqual(@as(usize, 3), elements.len);
 
-        // A dummy render, just count the produced elements
-        const DummyRender = struct {
-            pub const Error = Allocator.Error;
+            try testing.expectEqual(Element.Type.StaticText, elements[0]);
+            try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
 
-            count: usize = 0,
+            try testing.expectEqual(Element.Type.Section, elements[1]);
+            try testing.expectEqualStrings("section", elements[1].Section.key);
+            if (elements[1].Section.content) |section| {
+                try testing.expectEqual(@as(usize, 7), section.len);
 
-            pub fn render(self: *@This(), elements: []Element) Allocator.Error!void {
-                self.count += elements.len;
+                try testing.expectEqual(Element.Type.StaticText, section[0]);
+                try testing.expectEqualStrings("Name: ", section[0].StaticText);
 
-                checkStrings(elements);
+                try testing.expectEqual(Element.Type.Interpolation, section[1]);
+                try testing.expectEqualStrings("name", section[1].Interpolation);
+
+                try testing.expectEqual(Element.Type.StaticText, section[2]);
+                try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
+
+                try testing.expectEqual(Element.Type.UnescapedInterpolation, section[3]);
+                try testing.expectEqualStrings("comments", section[3].UnescapedInterpolation);
+
+                try testing.expectEqual(Element.Type.StaticText, section[4]);
+                try testing.expectEqualStrings("\n", section[4].StaticText);
+
+                try testing.expectEqual(Element.Type.InvertedSection, section[5]);
+                try testing.expectEqualStrings("inverted", section[5].InvertedSection.key);
+
+                if (section[5].InvertedSection.content) |inverted_section| {
+                    try testing.expectEqual(@as(usize, 1), inverted_section.len);
+
+                    try testing.expectEqual(Element.Type.StaticText, inverted_section[0]);
+                    try testing.expectEqualStrings("Inverted text", inverted_section[0].StaticText);
+                } else {
+                    try testing.expect(false);
+                }
+
+                try testing.expectEqual(Element.Type.StaticText, section[6]);
+                try testing.expectEqualStrings("\n", section[6].StaticText);
+            } else {
+                try testing.expect(false);
             }
 
-            // Check if all strings are valid
-            // As long we are running with own_string = false,
-            // Those strings must be valid during the render process
-            fn checkStrings(elements: ?[]const Element) void {
-                if (elements) |any| {
-                    for (any) |element| {
-                        switch (element) {
-                            .StaticText => |item| scan(item),
-                            .Interpolation => |item| scan(item),
-                            .UnescapedInterpolation => |item| scan(item),
-                            .Partial => |item| scan(item.key),
-                            .Section => |item| {
-                                scan(item.key);
-                                checkStrings(item.content);
-                            },
-                            .InvertedSection => |item| {
-                                scan(item.key);
-                                checkStrings(item.content);
-                            },
-                            .Parent => |item| {
-                                scan(item.key);
-                                checkStrings(item.content);
-                            },
-                            .Block => |item| {
-                                scan(item.key);
-                                checkStrings(item.content);
-                            },
+            try testing.expectEqual(Element.Type.StaticText, elements[2]);
+            try testing.expectEqualStrings("World", elements[2].StaticText);
+        }
+
+        test "Large DOM File test" {
+            const template_text =
+                \\{{! Comments block }}
+                \\  Hello
+                \\  {{#section}}
+                \\Name: {{name}}
+                \\Comments: {{&comments}}
+                \\{{^inverted}}Inverted text{{/inverted}}
+                \\{{/section}}
+                \\World
+            ;
+
+            const allocator = testing.allocator;
+
+            const path = try std.fs.selfExeDirPathAlloc(allocator);
+            defer allocator.free(path);
+
+            // Creating a temp file
+            const test_10MB_file = try std.fs.path.join(allocator, &.{ path, "10MB_file.mustache" });
+            defer allocator.free(test_10MB_file);
+
+            var file = try std.fs.createFileAbsolute(test_10MB_file, .{ .truncate = true });
+            defer std.fs.deleteFileAbsolute(test_10MB_file) catch {};
+
+            // Writes the same template many times on a file
+            const REPEAT = 100_000;
+            var step: usize = 0;
+            while (step < REPEAT) : (step += 1) {
+                try file.writeAll(template_text);
+            }
+
+            const size = try file.getEndPos();
+            file.close();
+
+            // Must be at least 10MB big
+            try testing.expect(size > 10 * 1024 * 1024);
+
+            // 32KB should be enough memory for this job
+            // 16KB if we don't need to support lambdas 😅
+            var plenty_of_memory = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){
+                .requested_memory_limit = 32 * 1024,
+            };
+            defer _ = plenty_of_memory.deinit();
+
+            // Strings are not ownned by the template,
+            // Use this option when creating templates from a static string or when rendering direct to a stream
+            const RefStringsTemplate = TemplateLoader(.{
+                .source = .{ .Stream = .{} },
+                .output = .Render,
+            });
+
+            // Create a template to parse and render this 10MB file, with only 16KB of memory
+            var template = RefStringsTemplate{
+                .allocator = plenty_of_memory.allocator(),
+            };
+
+            defer template.deinit();
+
+            // A dummy render, just count the produced elements
+            const DummyRender = struct {
+                pub const Error = Allocator.Error;
+
+                count: usize = 0,
+
+                pub fn render(self: *@This(), elements: []Element) Allocator.Error!void {
+                    self.count += elements.len;
+
+                    checkStrings(elements);
+                }
+
+                // Check if all strings are valid
+                // As long we are running with own_string = false,
+                // Those strings must be valid during the render process
+                fn checkStrings(elements: ?[]const Element) void {
+                    if (elements) |any| {
+                        for (any) |element| {
+                            switch (element) {
+                                .StaticText => |item| scan(item),
+                                .Interpolation => |item| scan(item),
+                                .UnescapedInterpolation => |item| scan(item),
+                                .Partial => |item| scan(item.key),
+                                .Section => |item| {
+                                    scan(item.key);
+                                    checkStrings(item.content);
+                                },
+                                .InvertedSection => |item| {
+                                    scan(item.key);
+                                    checkStrings(item.content);
+                                },
+                                .Parent => |item| {
+                                    scan(item.key);
+                                    checkStrings(item.content);
+                                },
+                                .Block => |item| {
+                                    scan(item.key);
+                                    checkStrings(item.content);
+                                },
+                            }
                         }
                     }
                 }
-            }
 
-            // Just scans the whole slice, hopping for no segfault
-            fn scan(string: []const u8) void {
-                var prev_char: u8 = 0;
-                for (string) |char| {
-                    prev_char = prev_char +% char;
+                // Just scans the whole slice, hopping for no segfault
+                fn scan(string: []const u8) void {
+                    var prev_char: u8 = 0;
+                    for (string) |char| {
+                        prev_char = prev_char +% char;
+                    }
+                    _ = prev_char;
                 }
-                _ = prev_char;
+            };
+
+            var dummy_render = DummyRender{};
+            try template.collectElementsFromFile(test_10MB_file, &dummy_render);
+
+            try testing.expectEqual(@as(usize, 3 * REPEAT), dummy_render.count);
+        }
+    };
+
+    const api = struct {
+        test "parseText API" {
+            var result = try parseText(testing.allocator, "{{hello}}world", .{}, .{ .copy_strings = true });
+            switch (result) {
+                .ParseError => {
+                    try testing.expect(false);
+                },
+                .Success => |template| {
+                    template.deinit(testing.allocator);
+                },
             }
-        };
+        }
 
-        var dummy_render = DummyRender{};
-        try template.collectElementsFromFile(test_10MB_file, &dummy_render);
+        test "parseFile API" {
+            var file_name = file_name: {
+                var tmp = testing.tmpDir(.{});
+                var file = try tmp.dir.createFile("parseFile.mustache", .{ .truncate = true });
+                defer file.close();
 
-        try testing.expectEqual(@as(usize, 3 * REPEAT), dummy_render.count);
-    }
+                try file.writeAll("{{hello}}world");
+
+                break :file_name try tmp.dir.realpathAlloc(testing.allocator, "parseFile.mustache");
+            };
+            defer testing.allocator.free(file_name);
+
+            var result = try parseFile(testing.allocator, file_name, .{}, .{});
+            switch (result) {
+                .ParseError => {
+                    try testing.expect(false);
+                },
+                .Success => |template| {
+                    template.deinit(testing.allocator);
+                },
+            }
+        }
+    };
 };
