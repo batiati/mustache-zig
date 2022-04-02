@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 const mustache = @import("mustache.zig");
-const Options = mustache.Options;
+const Options = mustache.options.Options;
 
 pub fn RefCountedSlice(comptime options: Options) type {
     return struct {

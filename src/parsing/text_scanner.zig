@@ -9,8 +9,8 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.Options;
 const ParseError = mustache.ParseError;
+const Options = mustache.options.Options;
 
 const memory = @import("../memory.zig");
 

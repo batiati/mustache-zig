@@ -3,9 +3,9 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.Options;
 const Delimiters = mustache.Delimiters;
 const ParseError = mustache.ParseError;
+const Options = mustache.options.Options;
 
 const parsing = @import("parsing.zig");
 const BlockType = parsing.BlockType;

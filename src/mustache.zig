@@ -8,7 +8,8 @@ pub const ParseError = template.ParseError;
 pub const ParseErrorDetail = template.ParseErrorDetail;
 pub const ParseResult = template.ParseResult;
 
-pub const Options = template.Options;
+pub const options = @import("options.zig");
+
 pub const Delimiters = template.Delimiters;
 pub const Element = template.Element;
 pub const Template = template.Template;

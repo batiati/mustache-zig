@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.Options;
+const Options = mustache.options.Options;
 
 const assert = std.debug.assert;
 const testing = std.testing;

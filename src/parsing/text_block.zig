@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.Options;
+const Options = mustache.options.Options;
 
 const memory = @import("../memory.zig");
 

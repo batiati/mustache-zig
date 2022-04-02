@@ -7,7 +7,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.Options;
+const Options = mustache.options.Options;
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 const Section = mustache.Section;

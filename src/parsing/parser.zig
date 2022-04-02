@@ -3,7 +3,6 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.Options;
 const Element = mustache.Element;
 const Section = mustache.Section;
 const Partial = mustache.Partial;
@@ -11,6 +10,8 @@ const Parent = mustache.Parent;
 const Block = mustache.Block;
 const ParseError = mustache.ParseError;
 const ParseErrorDetail = mustache.ParseErrorDetail;
+
+const Options = mustache.options.Options;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -23,7 +24,7 @@ const FileReader = parsing.FileReader;
 
 const memory = @import("../memory.zig");
 
-pub fn Parser(comptime options: mustache.Options) type {
+pub fn Parser(comptime options: Options) type {
     const copy_string = options.copyStrings();
     const allow_lambdas = options.features.lambdas == .Enabled;
 
