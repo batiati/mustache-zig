@@ -57,7 +57,7 @@ pub fn main() !void {
     };
 
     const allocator = std.testing.allocator;
-    const result = try mustache.renderAllocFromString(allocator, template, data);
+    const result = try mustache.allocRenderText(allocator, template, data);
     defer allocator.free(result);
 
     try std.testing.expectEqualStrings(
@@ -88,7 +88,7 @@ So, it's important to be able to deal with multi-megabyte inputs without eating 
     };
     defer _ = plenty_of_memory.deinit();
 
-    try mustache.renderFromFile(plenty_of_memory.allocator(), "10MB_file.mustache", ctx, out_writer);
+    try mustache.renderFile(plenty_of_memory.allocator(), "10MB_file.mustache", ctx, out_writer);
 
 ```
 
