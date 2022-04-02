@@ -5,19 +5,16 @@ const template = @import("template.zig");
 const rendering = @import("rendering/render.zig");
 
 pub const ParseError = template.ParseError;
-pub const LastError = template.LastError;
+pub const ParseErrorDetail = template.ParseErrorDetail;
+pub const ParseResult = template.ParseResult;
 
 pub const Options = template.Options;
 pub const Delimiters = template.Delimiters;
 pub const Element = template.Element;
-pub const Section = template.Section;
-pub const Partial = template.Partial;
-pub const Parent = template.Parent;
-pub const Block = template.Block;
 pub const Template = template.Template;
 
-pub const parseTemplate = template.parseTemplate;
-pub const parseTemplateFromFile = template.parseTemplateFromFile;
+pub const parse = template.parse;
+pub const parseFromFile = template.parseFromFile;
 
 pub const render = rendering.render;
 pub const allocRender = rendering.allocRender;

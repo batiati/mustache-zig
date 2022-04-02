@@ -2397,7 +2397,7 @@ const tests = struct {
         const allocator = testing.allocator;
 
         // Cached template render
-        switch (try mustache.parseTemplate(allocator, template_text, .{}, false)) {
+        switch (try mustache.parse(allocator, template_text, .{}, false)) {
             .ParseError => {
                 try testing.expect(false);
                 unreachable;

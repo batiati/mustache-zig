@@ -9,8 +9,8 @@ const Section = mustache.Section;
 const Partial = mustache.Partial;
 const Parent = mustache.Parent;
 const Block = mustache.Block;
-const LastError = mustache.LastError;
 const ParseError = mustache.ParseError;
+const ParseErrorDetail = mustache.ParseErrorDetail;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -41,7 +41,7 @@ pub fn Parser(comptime options: mustache.Options) type {
         pub const AbortError = error{ParserAbortedError};
 
         pub const ParseResult = union(enum) {
-            Error: LastError,
+            Error: ParseErrorDetail,
             Node: *Node,
             Done,
         };
@@ -65,7 +65,7 @@ pub fn Parser(comptime options: mustache.Options) type {
         current_level: *Level,
 
         /// Stores the last error ocurred parsing the content
-        last_error: ?LastError = null,
+        last_error: ?ParseErrorDetail = null,
 
         /// Holds a ref_counter to the read buffer for all produced elements
         ref_counter_holder: RefCounterHolder = .{},
@@ -412,8 +412,8 @@ pub fn Parser(comptime options: mustache.Options) type {
         }
 
         fn abort(self: *Self, err: ParseError, text_block: ?*const TextBlock) AbortError {
-            self.last_error = LastError{
-                .error_code = err,
+            self.last_error = ParseErrorDetail{
+                .parse_error = err,
                 .lin = if (text_block) |p| p.lin else 0,
                 .col = if (text_block) |p| p.col else 0,
             };
@@ -639,7 +639,7 @@ test "Parse - UnexpectedEof " {
     defer parser.deinit();
 
     const err = try testParseError(&parser);
-    try testing.expectEqual(ParseError.UnexpectedEof, err.error_code);
+    try testing.expectEqual(ParseError.UnexpectedEof, err.parse_error);
     try testing.expectEqual(@as(u32, 1), err.lin);
     try testing.expectEqual(@as(u32, 10), err.col);
 }
@@ -683,7 +683,7 @@ test "Parse - UnexpectedCloseSection " {
     defer parser.deinit();
 
     const err = try testParseError(&parser);
-    try testing.expectEqual(ParseError.UnexpectedCloseSection, err.error_code);
+    try testing.expectEqual(ParseError.UnexpectedCloseSection, err.parse_error);
     try testing.expectEqual(@as(u32, 1), err.lin);
     try testing.expectEqual(@as(u32, 16), err.col);
 }
@@ -700,7 +700,7 @@ test "Parse - InvalidDelimiters " {
     defer parser.deinit();
 
     const err = try testParseError(&parser);
-    try testing.expectEqual(ParseError.InvalidDelimiters, err.error_code);
+    try testing.expectEqual(ParseError.InvalidDelimiters, err.parse_error);
     try testing.expectEqual(@as(u32, 1), err.lin);
     try testing.expectEqual(@as(u32, 26), err.col);
 }
@@ -717,7 +717,7 @@ test "Parse - InvalidDelimiters " {
     defer parser.deinit();
 
     const err = try testParseError(&parser);
-    try testing.expectEqual(ParseError.InvalidIdentifier, err.error_code);
+    try testing.expectEqual(ParseError.InvalidIdentifier, err.parse_error);
     try testing.expectEqual(@as(u32, 1), err.lin);
     try testing.expectEqual(@as(u32, 27), err.col);
 }
@@ -734,15 +734,15 @@ test "Parse - ClosingTagMismatch " {
     defer parser.deinit();
 
     const err = try testParseError(&parser);
-    try testing.expectEqual(ParseError.ClosingTagMismatch, err.error_code);
+    try testing.expectEqual(ParseError.ClosingTagMismatch, err.parse_error);
     try testing.expectEqual(@as(u32, 1), err.lin);
     try testing.expectEqual(@as(u32, 22), err.col);
 }
 
 fn testParseTree(parser: anytype) !?*StreamedParser.Node {
     return parser.parseTree() catch |e| {
-        if (parser.last_error) |err| {
-            std.log.err("template {s} at row {}, col {};", .{ @errorName(err.error_code), err.lin, err.col });
+        if (parser.last_error) |detail| {
+            std.log.err("template {s} at row {}, col {};", .{ @errorName(detail.parse_error), detail.lin, detail.col });
             try testing.expect(false);
         }
 
@@ -750,7 +750,7 @@ fn testParseTree(parser: anytype) !?*StreamedParser.Node {
     };
 }
 
-fn testParseError(parser: anytype) !LastError {
+fn testParseError(parser: anytype) !ParseErrorDetail {
     const node = parser.parseTree() catch |e| {
         if (parser.last_error) |err| {
             return err;

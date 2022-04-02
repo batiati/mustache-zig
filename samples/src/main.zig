@@ -48,9 +48,9 @@ pub fn renderFromCachedTemplate() anyerror!void {
     const allocator = gpa.allocator();
 
     // Store this template and render many times from it
-    const cached_template = switch (try mustache.parseTemplate(allocator, template_text, .{}, false)) {
-        .ParseError => |last_error| {
-            std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(last_error.error_code), last_error.lin, last_error.col });
+    const cached_template = switch (try mustache.parse(allocator, template_text, .{}, false)) {
+        .ParseError => |detail| {
+            std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
             return;
         },
         .Success => |ret| ret,

@@ -17,10 +17,15 @@ pub const ParseError = error{
     ClosingTagMismatch,
 };
 
-pub const LastError = struct {
-    error_code: ParseError,
+pub const ParseErrorDetail = struct {
+    parse_error: ParseError,
     lin: u32 = 0,
     col: u32 = 0,
+};
+
+pub const ParseResult = union(enum) {
+    ParseError: ParseErrorDetail,
+    Success: Template,
 };
 
 pub const Section = struct {
@@ -247,11 +252,6 @@ pub const Template = struct {
     }
 };
 
-const ParseTemplateResult = union(enum) {
-    ParseError: LastError,
-    Success: Template,
-};
-
 /// Parses a string and returns an union containing either a ParseError or the CachedTemplate
 /// parameters:
 /// allocator used to all temporary and permanent allocations.
@@ -261,31 +261,31 @@ const ParseTemplateResult = union(enum) {
 /// copy_strings: comptime bool indicating if the cached template shoud copy its strings.
 ///   When true, all strings will be copied to the template and the "template_text" slice can be freed by the caller 
 ///   When false, the "template_text" slice must be static or be valid during the template lifetime.
-pub fn parseTemplate(
+pub fn parse(
     allocator: Allocator,
     template_text: []const u8,
     delimiters: Delimiters,
     comptime copy_strings: bool,
-) Allocator.Error!ParseTemplateResult {
+) Allocator.Error!ParseResult {
     const source = Options.Source{ .String = .{ .copy_strings = copy_strings } };
-    return try parse(source, allocator, template_text, delimiters);
+    return try parseSource(source, allocator, template_text, delimiters);
 }
 
-pub fn parseTemplateFromFile(
+pub fn parseFromFile(
     allocator: Allocator,
     template_absolute_path: []const u8,
     delimiters: Delimiters,
-) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseTemplateResult {
+) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseResult {
     const source = Options.Source{ .Stream = .{} };
-    return try parse(source, allocator, template_absolute_path, delimiters);
+    return try parseSource(source, allocator, template_absolute_path, delimiters);
 }
 
-fn parse(
+fn parseSource(
     comptime source: Options.Source,
     allocator: Allocator,
     source_content: []const u8,
     delimiters: Delimiters,
-) !ParseTemplateResult {
+) !ParseResult {
     const options = Options{ .source = source, .output = .Parse };
 
     var template = TemplateLoader(options){
@@ -301,8 +301,8 @@ fn parse(
     }
 
     switch (template.result) {
-        .Error => |last_error| return ParseTemplateResult{ .ParseError = last_error },
-        .Elements => |elements| return ParseTemplateResult{ .Success = .{ .elements = elements, .owns_string = if (source == .String) source.String.copy_strings else false } },
+        .Error => |last_error| return ParseResult{ .ParseError = last_error },
+        .Elements => |elements| return ParseResult{ .Success = .{ .elements = elements, .owns_string = if (source == .String) source.String.copy_strings else false } },
         .NotLoaded => unreachable,
     }
 }
@@ -440,7 +440,7 @@ pub fn TemplateLoader(comptime options: Options) type {
         delimiters: Delimiters = .{},
         result: union(enum) {
             Elements: []const Element,
-            Error: LastError,
+            Error: ParseErrorDetail,
             NotLoaded,
         } = .NotLoaded,
 
@@ -577,9 +577,9 @@ const tests = struct {
         try template.load(template_text);
 
         if (template.result == .Error) {
-            const last_error = template.result.Error;
-            std.log.err("{s} row {}, col {}", .{ @errorName(last_error.error_code), last_error.lin, last_error.col });
-            return last_error.error_code;
+            const detail = template.result.Error;
+            std.log.err("{s} row {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
+            return detail.parse_error;
         }
 
         return template;
