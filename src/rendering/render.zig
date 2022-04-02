@@ -2465,6 +2465,66 @@ const tests = struct {
 
             try testing.expect(false);
         }
+
+        test "renderText API" {
+            var couting_writer = std.io.countingWriter(std.io.null_writer);
+            try mustache.renderText(testing.allocator, "{{hello}}world", .{ .hello = "hello " }, couting_writer.writer());
+
+            try testing.expect(couting_writer.bytes_written == "hello world".len);
+        }
+
+        test "allocRenderText API" {
+            var ret = try mustache.allocRenderText(testing.allocator, "{{hello}}world", .{ .hello = "hello " });
+            defer testing.allocator.free(ret);
+
+            try testing.expectEqualStrings(ret, "hello world");
+        }
+
+        test "allocRenderTextZ API" {
+            var ret = try mustache.allocRenderTextZ(testing.allocator, "{{hello}}world", .{ .hello = "hello " });
+            defer testing.allocator.free(ret);
+
+            try testing.expectEqualStrings(ret, "hello world");
+        }
+
+        test "renderFile API" {
+            var tmp = testing.tmpDir(.{});
+            defer tmp.cleanup();
+
+            var absolute_path = try getTemplateFile(tmp.dir, "renderFile.mustache", "{{hello}}world");
+            defer testing.allocator.free(absolute_path);
+
+            var couting_writer = std.io.countingWriter(std.io.null_writer);
+            try mustache.renderFile(testing.allocator, absolute_path, .{ .hello = "hello " }, couting_writer.writer());
+
+            try testing.expect(couting_writer.bytes_written == "hello world".len);
+        }
+
+        test "allocRenderFile API" {
+            var tmp = testing.tmpDir(.{});
+            defer tmp.cleanup();
+
+            var absolute_path = try getTemplateFile(tmp.dir, "allocRenderFile.mustache", "{{hello}}world");
+            defer testing.allocator.free(absolute_path);
+
+            var ret = try mustache.allocRenderFile(testing.allocator, absolute_path, .{ .hello = "hello " });
+            defer testing.allocator.free(ret);
+
+            try testing.expectEqualStrings(ret, "hello world");
+        }
+
+        test "allocRenderFileZ API" {
+            var tmp = testing.tmpDir(.{});
+            defer tmp.cleanup();
+
+            var absolute_path = try getTemplateFile(tmp.dir, "allocRenderFileZ.mustache", "{{hello}}world");
+            defer testing.allocator.free(absolute_path);
+
+            var ret = try mustache.allocRenderFileZ(testing.allocator, absolute_path, .{ .hello = "hello " });
+            defer testing.allocator.free(ret);
+
+            try testing.expectEqualStrings(ret, "hello world");
+        }
     };
 
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
@@ -2505,5 +2565,14 @@ const tests = struct {
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
+    }
+
+    fn getTemplateFile(dir: std.fs.Dir, file_name: []const u8, template_text: []const u8) ![]const u8 {
+        var file = try dir.createFile(file_name, .{ .truncate = true });
+        defer file.close();
+
+        try file.writeAll(template_text);
+
+        return try dir.realpathAlloc(testing.allocator, file_name);
     }
 };
