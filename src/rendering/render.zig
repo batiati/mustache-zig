@@ -2313,7 +2313,7 @@ const tests = struct {
     const api = struct {
         test "render API" {
             var template = try expectParseTemplate("{{hello}}world");
-            defer template.free(testing.allocator);
+            defer template.deinit(testing.allocator);
 
             var couting_writer = std.io.countingWriter(std.io.null_writer);
             try mustache.render(template, .{ .hello = "hello " }, couting_writer.writer());
@@ -2323,7 +2323,7 @@ const tests = struct {
 
         test "allocRender API" {
             var template = try expectParseTemplate("{{hello}}world");
-            defer template.free(testing.allocator);
+            defer template.deinit(testing.allocator);
 
             var ret = try mustache.allocRender(testing.allocator, template, .{ .hello = "hello " });
             defer testing.allocator.free(ret);
@@ -2333,7 +2333,7 @@ const tests = struct {
 
         test "allocRenderZ API" {
             var template = try expectParseTemplate("{{hello}}world");
-            defer template.free(testing.allocator);
+            defer template.deinit(testing.allocator);
 
             var ret = try mustache.allocRenderZ(testing.allocator, template, .{ .hello = "hello " });
             defer testing.allocator.free(ret);
@@ -2343,7 +2343,7 @@ const tests = struct {
 
         test "bufRender API" {
             var template = try expectParseTemplate("{{hello}}world");
-            defer template.free(testing.allocator);
+            defer template.deinit(testing.allocator);
 
             var buf: [11]u8 = undefined;
             var ret = try mustache.bufRender(&buf, template, .{ .hello = "hello " });
@@ -2353,7 +2353,7 @@ const tests = struct {
 
         test "bufRenderZ API" {
             var template = try expectParseTemplate("{{hello}}world");
-            defer template.free(testing.allocator);
+            defer template.deinit(testing.allocator);
 
             var buf: [12]u8 = undefined;
             var ret = try mustache.bufRenderZ(&buf, template, .{ .hello = "hello " });
@@ -2363,7 +2363,7 @@ const tests = struct {
 
         test "bufRender error API" {
             var template = try expectParseTemplate("{{hello}}world");
-            defer template.free(testing.allocator);
+            defer template.deinit(testing.allocator);
 
             var buf: [5]u8 = undefined;
             _ = mustache.bufRender(&buf, template, .{ .hello = "hello " }) catch |err| {
@@ -2376,7 +2376,7 @@ const tests = struct {
 
         test "bufRenderZ error API" {
             var template = try expectParseTemplate("{{hello}}world");
-            defer template.free(testing.allocator);
+            defer template.deinit(testing.allocator);
 
             var buf: [11]u8 = undefined;
             _ = mustache.bufRenderZ(&buf, template, .{ .hello = "hello " }) catch |err| {
@@ -2411,7 +2411,7 @@ const tests = struct {
 
         // Cached template render
         var cached_template = try expectParseTemplate(template_text);
-        defer cached_template.free(allocator);
+        defer cached_template.deinit(allocator);
 
         var result = try allocRender(allocator, cached_template, data);
         defer allocator.free(result);

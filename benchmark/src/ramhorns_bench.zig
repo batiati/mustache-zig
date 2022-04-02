@@ -41,7 +41,7 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype
     };
 
     var template = (try mustache.parse(allocator, template_text, .{}, false)).Success;
-    defer template.free(allocator);
+    defer template.deinit(allocator);
 
     std.debug.print("Mode {s}\n", .{@tagName(mode)});
     std.debug.print("----------------------------------\n", .{});

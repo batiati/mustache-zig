@@ -124,7 +124,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
                 .Success => |value| value,
                 .ParseError => |detail| return detail.parse_error,
             };
-            defer template.free(allocator);
+            defer template.deinit(allocator);
 
             var buffer = std.ArrayList(u8).init(allocator);
             defer buffer.deinit();
@@ -142,7 +142,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
                 .Success => |value| value,
                 .ParseError => return,
             };
-            defer template.free(allocator);
+            defer template.deinit(allocator);
 
             const Impl = Render(Writer);
             try Impl.renderLevel(self.out_writer, self.stack, template.elements);

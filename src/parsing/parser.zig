@@ -162,7 +162,7 @@ pub fn Parser(comptime options: mustache.Options) type {
                                 var children = node.children();
                                 break :content try self.createElements(key, &children);
                             };
-                            errdefer if (content) |content_value| Element.freeMany(self.gpa, copy_string, content_value);
+                            errdefer if (content) |content_value| Element.deinitMany(self.gpa, copy_string, content_value);
 
                             const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
                             errdefer if (copy_string) if (indentation) |indentation_value| self.gpa.free(indentation_value);
