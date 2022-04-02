@@ -24,6 +24,7 @@ const invoker = @import("invoker.zig");
 const Fields = invoker.Fields;
 
 const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
+const BufError = std.io.FixedBufferStream([]u8).WriteError;
 
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
 
@@ -32,7 +33,7 @@ pub fn render(cached_template: Template, data: anytype, out_writer: anytype) !vo
     try data_render.render(cached_template.elements);
 }
 
-pub fn renderAlloc(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![]const u8 {
+pub fn allocRender(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
@@ -40,6 +41,35 @@ pub fn renderAlloc(allocator: Allocator, cached_template: Template, data: anytyp
     try data_render.bufRender(&list, cached_template.elements);
 
     return list.toOwnedSlice();
+}
+
+pub fn allocRenderZ(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![:0]const u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
+
+    var data_render = getDataRender(std.io.null_writer, data);
+    try data_render.bufRender(&list, cached_template.elements);
+
+    return list.toOwnedSliceSentinel('\x00');
+}
+
+pub fn bufRender(buf: []u8, cached_template: Template, data: anytype) (Allocator.Error || std.fmt.BufPrintError)![]const u8 {
+    var fbs = std.io.fixedBufferStream(buf);
+    var data_render = getDataRender(fbs.writer(), data);
+    try data_render.render(cached_template.elements);
+
+    return fbs.getWritten();
+}
+
+pub fn bufRenderZ(buf: []u8, cached_template: Template, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
+    var ret = try bufRender(buf, cached_template, data);
+
+    if (ret.len < buf.len) {
+        buf[ret.len] = '\x00';
+        return buf[0..ret.len :0];
+    } else {
+        return BufError.NoSpaceLeft;
+    }
 }
 
 pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || @TypeOf(out_writer).Error)!void {
@@ -263,6 +293,7 @@ test {
     _ = context;
     _ = tests.spec;
     _ = tests.extra;
+    _ = tests.api;
 }
 
 const tests = struct {
@@ -2279,22 +2310,110 @@ const tests = struct {
         }
     };
 
+    const api = struct {
+        test "render API" {
+            var template = try expectParseTemplate("{{hello}}world");
+            defer template.free(testing.allocator);
+
+            var couting_writer = std.io.countingWriter(std.io.null_writer);
+            try mustache.render(template, .{ .hello = "hello " }, couting_writer.writer());
+
+            try testing.expect(couting_writer.bytes_written == "hello world".len);
+        }
+
+        test "allocRender API" {
+            var template = try expectParseTemplate("{{hello}}world");
+            defer template.free(testing.allocator);
+
+            var ret = try mustache.allocRender(testing.allocator, template, .{ .hello = "hello " });
+            defer testing.allocator.free(ret);
+
+            try testing.expectEqualStrings(ret, "hello world");
+        }
+
+        test "allocRenderZ API" {
+            var template = try expectParseTemplate("{{hello}}world");
+            defer template.free(testing.allocator);
+
+            var ret = try mustache.allocRenderZ(testing.allocator, template, .{ .hello = "hello " });
+            defer testing.allocator.free(ret);
+
+            try testing.expectEqualStrings(ret, "hello world");
+        }
+
+        test "bufRender API" {
+            var template = try expectParseTemplate("{{hello}}world");
+            defer template.free(testing.allocator);
+
+            var buf: [11]u8 = undefined;
+            var ret = try mustache.bufRender(&buf, template, .{ .hello = "hello " });
+
+            try testing.expectEqualStrings(ret, "hello world");
+        }
+
+        test "bufRenderZ API" {
+            var template = try expectParseTemplate("{{hello}}world");
+            defer template.free(testing.allocator);
+
+            var buf: [12]u8 = undefined;
+            var ret = try mustache.bufRenderZ(&buf, template, .{ .hello = "hello " });
+
+            try testing.expectEqualStrings(ret, "hello world");
+        }
+
+        test "bufRender error API" {
+            var template = try expectParseTemplate("{{hello}}world");
+            defer template.free(testing.allocator);
+
+            var buf: [5]u8 = undefined;
+            _ = mustache.bufRender(&buf, template, .{ .hello = "hello " }) catch |err| {
+                try testing.expect(err == error.NoSpaceLeft);
+                return;
+            };
+
+            try testing.expect(false);
+        }
+
+        test "bufRenderZ error API" {
+            var template = try expectParseTemplate("{{hello}}world");
+            defer template.free(testing.allocator);
+
+            var buf: [11]u8 = undefined;
+            _ = mustache.bufRenderZ(&buf, template, .{ .hello = "hello " }) catch |err| {
+                try testing.expect(err == error.NoSpaceLeft);
+                return;
+            };
+
+            try testing.expect(false);
+        }
+    };
+
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
         try expectCachedRender(template_text, data, expected);
         try expectStreamedRender(template_text, data, expected);
+    }
+
+    fn expectParseTemplate(template_text: []const u8) !Template {
+        const allocator = testing.allocator;
+
+        // Cached template render
+        switch (try mustache.parseTemplate(allocator, template_text, .{}, false)) {
+            .ParseError => {
+                try testing.expect(false);
+                unreachable;
+            },
+            .Success => |ret| return ret,
+        }
     }
 
     fn expectCachedRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
         const allocator = testing.allocator;
 
         // Cached template render
-        var cached_template = switch (try mustache.parseTemplate(allocator, template_text, .{}, false)) {
-            .ParseError => return try testing.expect(false),
-            .Success => |ret| ret,
-        };
+        var cached_template = try expectParseTemplate(template_text);
         defer cached_template.free(allocator);
 
-        var result = try renderAlloc(allocator, cached_template, data);
+        var result = try allocRender(allocator, cached_template, data);
         defer allocator.free(result);
         try testing.expectEqualStrings(expected, result);
     }

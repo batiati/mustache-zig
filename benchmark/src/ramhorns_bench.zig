@@ -109,7 +109,7 @@ fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data
             return counter.bytes_written;
         },
         .String => {
-            const ret = try mustache.renderAlloc(allocator, template, data);
+            const ret = try mustache.allocRender(allocator, template, data);
             defer allocator.free(ret);
             return ret.len;
         },

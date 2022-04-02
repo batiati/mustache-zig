@@ -58,7 +58,7 @@ pub fn renderFromCachedTemplate() anyerror!void {
 
     var repeat: u32 = 0;
     while (repeat < 10) : (repeat += 1) {
-        var result = try mustache.renderAlloc(allocator, cached_template, ctx);
+        var result = try mustache.allocRender(allocator, cached_template, ctx);
         defer allocator.free(result);
 
         var out = std.io.getStdOut();
@@ -104,7 +104,7 @@ pub fn renderFromFile() anyerror!void {
         defer file.close();
         var repeat: u32 = 0;
 
-        // Writing the same template 100K times on a file
+        // Writing the same template 10K times on a file
         while (repeat < 10_000) : (repeat += 1) {
             try file.writeAll(template_text);
         }

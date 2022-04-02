@@ -20,7 +20,11 @@ pub const parseTemplate = template.parseTemplate;
 pub const parseTemplateFromFile = template.parseTemplateFromFile;
 
 pub const render = rendering.render;
-pub const renderAlloc = rendering.renderAlloc;
+pub const allocRender = rendering.allocRender;
+pub const allocRenderZ = rendering.allocRenderZ;
+pub const bufRender = rendering.bufRender;
+pub const bufRenderZ = rendering.bufRenderZ;
+
 pub const renderFromString = rendering.renderFromString;
 pub const renderFromFile = rendering.renderFromFile;
 pub const renderAllocFromString = rendering.renderAllocFromString;

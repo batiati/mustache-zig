@@ -89,7 +89,7 @@ fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comp
     var repeat: u32 = 0;
     const start = std.time.nanoTimestamp();
     while (repeat < TIMES) : (repeat += 1) {
-        const result = try mustache.renderAlloc(allocator, template, &data);
+        const result = try mustache.allocRender(allocator, template, &data);
         total_bytes += result.len;
         allocator.free(result);
     }
