@@ -28,13 +28,13 @@ const BufError = std.io.FixedBufferStream([]u8).WriteError;
 
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
 
-/// Render this Template with a given context to a writer.
-pub fn render(template: Template, data: anytype, writer: anytype) !void {
+/// Renders the `Template` with the given `data` to a writer.
+pub fn render(template: Template, context: anytype, writer: anytype) !void {
     var data_render = getDataRender(writer, data);
     try data_render.render(template.elements);
 }
 
-/// Render this Template with a given context and returns an owned slice with the content.
+/// Renders the `Template` with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
 pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allocator.Error![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
@@ -46,7 +46,7 @@ pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allo
     return list.toOwnedSlice();
 }
 
-/// Render this Template with a given context and returns an owned sentinel-terminated slice with the content.
+/// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
 pub fn allocRenderZ(allocator: Allocator, template: Template, data: anytype) Allocator.Error![:0]const u8 {
     var list = std.ArrayList(u8).init(allocator);
@@ -58,7 +58,7 @@ pub fn allocRenderZ(allocator: Allocator, template: Template, data: anytype) All
     return list.toOwnedSliceSentinel('\x00');
 }
 
-/// Render this Template with a given context to a buffer
+/// Renders the `Template` with the given `data` to a buffer.
 pub fn bufRender(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![]const u8 {
     var fbs = std.io.fixedBufferStream(buf);
     var data_render = getDataRender(fbs.writer(), data);
@@ -67,7 +67,7 @@ pub fn bufRender(buf: []u8, template: Template, data: anytype) (Allocator.Error 
     return fbs.getWritten();
 }
 
-/// Render this Template with a given context to a buffer
+/// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
 pub fn bufRenderZ(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
     var ret = try bufRender(buf, template, data);
 
@@ -79,13 +79,13 @@ pub fn bufRenderZ(buf: []u8, template: Template, data: anytype) (Allocator.Error
     }
 }
 
-/// Parse and render the template text with a given context to a writer
+/// Parses the `template_text` and renders with the given `data` to a writer
 pub fn renderText(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
     var data_render = getDataRender(writer, data);
     try data_render.renderText(allocator, template_text);
 }
 
-/// Parse and render the template text with a given context and returns an owned slice with the content.
+/// Parses the `template_text` and renders with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
 pub fn allocRenderText(allocator: Allocator, template_text: []const u8, data: anytype) (Allocator.Error || ParseError)![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
@@ -97,7 +97,7 @@ pub fn allocRenderText(allocator: Allocator, template_text: []const u8, data: an
     return list.toOwnedSlice();
 }
 
-/// Parse and render the template text with a given context and returns an owned sentinel-terminated slice with the content.
+/// Parses the `template_text` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
 pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: anytype) (Allocator.Error || ParseError)![:0]const u8 {
     var list = std.ArrayList(u8).init(allocator);
@@ -109,13 +109,13 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
     return list.toOwnedSliceSentinel('\x00');
 }
 
-/// Parse and render the template file with a given context to a writer
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
 pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
     var data_render = getDataRender(writer, data);
     try data_render.renderFile(allocator, template_absolute_path);
 }
 
-/// Parse and render the template file with a given context and returns an owned slice with the content.
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
 pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
@@ -127,7 +127,7 @@ pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8,
     return list.toOwnedSlice();
 }
 
-/// Parse and render the template file with a given context and returns an owned sentinel-terminated slice with the content.
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
 pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![:0]const u8 {
     var list = std.ArrayList(u8).init(allocator);
