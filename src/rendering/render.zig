@@ -28,41 +28,48 @@ const BufError = std.io.FixedBufferStream([]u8).WriteError;
 
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
 
-pub fn render(cached_template: Template, data: anytype, out_writer: anytype) !void {
-    var data_render = getDataRender(out_writer, data);
-    try data_render.render(cached_template.elements);
+/// Render this Template with a given context to a writer.
+pub fn render(template: Template, data: anytype, writer: anytype) !void {
+    var data_render = getDataRender(writer, data);
+    try data_render.render(template.elements);
 }
 
-pub fn allocRender(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![]const u8 {
+/// Render this Template with a given context and returns an owned slice with the content.
+/// Caller must free the memory
+pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allocator.Error![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data);
-    try data_render.bufRender(&list, cached_template.elements);
+    try data_render.bufRender(&list, template.elements);
 
     return list.toOwnedSlice();
 }
 
-pub fn allocRenderZ(allocator: Allocator, cached_template: Template, data: anytype) Allocator.Error![:0]const u8 {
+/// Render this Template with a given context and returns an owned sentinel-terminated slice with the content.
+/// Caller must free the memory
+pub fn allocRenderZ(allocator: Allocator, template: Template, data: anytype) Allocator.Error![:0]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data);
-    try data_render.bufRender(&list, cached_template.elements);
+    try data_render.bufRender(&list, template.elements);
 
     return list.toOwnedSliceSentinel('\x00');
 }
 
-pub fn bufRender(buf: []u8, cached_template: Template, data: anytype) (Allocator.Error || std.fmt.BufPrintError)![]const u8 {
+/// Render this Template with a given context to a buffer
+pub fn bufRender(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![]const u8 {
     var fbs = std.io.fixedBufferStream(buf);
     var data_render = getDataRender(fbs.writer(), data);
-    try data_render.render(cached_template.elements);
+    try data_render.render(template.elements);
 
     return fbs.getWritten();
 }
 
-pub fn bufRenderZ(buf: []u8, cached_template: Template, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
-    var ret = try bufRender(buf, cached_template, data);
+/// Render this Template with a given context to a buffer
+pub fn bufRenderZ(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
+    var ret = try bufRender(buf, template, data);
 
     if (ret.len < buf.len) {
         buf[ret.len] = '\x00';
@@ -72,56 +79,64 @@ pub fn bufRenderZ(buf: []u8, cached_template: Template, data: anytype) (Allocato
     }
 }
 
-pub fn renderFromString(allocator: Allocator, template_text: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || @TypeOf(out_writer).Error)!void {
-    const options = Options{
-        .source = .{ .String = .{ .copy_strings = false } },
-        .output = .Render,
-    };
-
-    var template = TemplateLoader(options){
-        .allocator = allocator,
-    };
-    errdefer template.deinit();
-
-    var data_render = getDataRender(out_writer, data);
-    try template.collectElements(template_text, &data_render);
+/// Parse and render the template text with a given context to a writer
+pub fn renderText(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
+    var data_render = getDataRender(writer, data);
+    try data_render.renderText(allocator, template_text);
 }
 
-pub fn renderAllocFromString(allocator: Allocator, template_text: []const u8, data: anytype) (Allocator.Error || ParseError)![]const u8 {
-    const options = Options{
-        .source = .{ .String = .{ .copy_strings = false } },
-        .output = .Render,
-    };
-
-    var template = TemplateLoader(options){
-        .allocator = allocator,
-    };
-    errdefer template.deinit();
-
+/// Parse and render the template text with a given context and returns an owned slice with the content.
+/// Caller must free the memory
+pub fn allocRenderText(allocator: Allocator, template_text: []const u8, data: anytype) (Allocator.Error || ParseError)![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data);
-    data_render.out_writer = .{ .Buffer = &list };
-
-    try template.collectElements(template_text, &data_render);
+    try data_render.bufRenderText(allocator, &list, template_text);
 
     return list.toOwnedSlice();
 }
 
-pub fn renderFromFile(allocator: Allocator, absolute_template_path: []const u8, data: anytype, out_writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(out_writer).Error)!void {
-    const options = Options{
-        .source = .{ .Stream = .{} },
-        .output = .Render,
-    };
+/// Parse and render the template text with a given context and returns an owned sentinel-terminated slice with the content.
+/// Caller must free the memory
+pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: anytype) (Allocator.Error || ParseError)![:0]const u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
 
-    var template = TemplateLoader(options){
-        .allocator = allocator,
-    };
-    errdefer template.deinit();
+    var data_render = getDataRender(std.io.null_writer, data);
+    try data_render.bufRenderText(allocator, &list, template_text);
 
-    var data_render = getDataRender(out_writer, data);
-    try template.collectElementsFromFile(absolute_template_path, &data_render);
+    return list.toOwnedSliceSentinel('\x00');
+}
+
+/// Parse and render the template file with a given context to a writer
+pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
+    var data_render = getDataRender(writer, data);
+    try data_render.renderFile(allocator, template_absolute_path);
+}
+
+/// Parse and render the template file with a given context and returns an owned slice with the content.
+/// Caller must free the memory
+pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
+
+    var data_render = getDataRender(std.io.null_writer, data);
+    try data_render.bufRenderFile(allocator, &list, template_absolute_path);
+
+    return list.toOwnedSlice();
+}
+
+/// Parse and render the template file with a given context and returns an owned sentinel-terminated slice with the content.
+/// Caller must free the memory
+pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![:0]const u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
+
+    var data_render = getDataRender(std.io.null_writer, data);
+    try data_render.bufRenderFile(allocator, &list, template_absolute_path);
+
+    return list.toOwnedSliceSentinel('\x00');
 }
 
 fn getDataRender(writer: anytype, data: anytype) DataRender(@TypeOf(writer), @TypeOf(data)) {
@@ -166,6 +181,70 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
             };
 
             try WriterRender.renderLevel(.{ .Buffer = buffer }, &stack, elements);
+        }
+
+        pub fn renderText(self: *Self, allocator: Allocator, template_text: []const u8) (ParseError || Error)!void {
+            const render_text_options = Options{
+                .source = .{ .String = .{ .copy_strings = false } },
+                .output = .Render,
+            };
+
+            var template = TemplateLoader(render_text_options){
+                .allocator = allocator,
+            };
+            errdefer template.deinit();
+
+            try template.collectElements(template_text, self);
+        }
+
+        pub fn bufRenderText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8) (ParseError || Error)!void {
+            const render_text_options = Options{
+                .source = .{ .String = .{ .copy_strings = false } },
+                .output = .Render,
+            };
+
+            var template = TemplateLoader(render_text_options){
+                .allocator = allocator,
+            };
+            errdefer template.deinit();
+
+            const current_writer = self.out_writer;
+            defer self.out_writer = current_writer;
+
+            self.out_writer = .{ .Buffer = buffer };
+            try template.collectElements(template_text, self);
+        }
+
+        pub fn renderFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8) !void {
+            const render_file_options = Options{
+                .source = .{ .Stream = .{} },
+                .output = .Render,
+            };
+
+            var template = TemplateLoader(render_file_options){
+                .allocator = allocator,
+            };
+            errdefer template.deinit();
+
+            try template.collectElementsFromFile(template_absolute_path, self);
+        }
+
+        pub fn bufRenderFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8) !void {
+            const render_file_options = Options{
+                .source = .{ .Stream = .{} },
+                .output = .Render,
+            };
+
+            var template = TemplateLoader(render_file_options){
+                .allocator = allocator,
+            };
+            errdefer template.deinit();
+
+            const current_writer = self.out_writer;
+            defer self.out_writer = current_writer;
+
+            self.out_writer = .{ .Buffer = buffer };
+            try template.collectElementsFromFile(template_absolute_path, self);
         }
     };
 }
@@ -2422,7 +2501,7 @@ const tests = struct {
         const allocator = testing.allocator;
 
         // Streamed template render
-        var result = try renderAllocFromString(allocator, template_text, data);
+        var result = try allocRenderText(allocator, template_text, data);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);

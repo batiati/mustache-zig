@@ -75,7 +75,7 @@ fn runTemplate(comptime caption: []const u8, comptime TBinding: type, comptime t
     const allocator = std.heap.c_allocator;
 
     var cached_template = parseTemplate(allocator, template_text);
-    defer cached_template.free(allocator);
+    defer cached_template.deinit(allocator);
 
     try runTemplatePreParsed(allocator, caption ++ " - pre-parsed", TBinding, json, cached_template);
     try runTemplateNotParsed(allocator, caption ++ " - not parsed", TBinding, json, template_text);
@@ -107,7 +107,7 @@ fn runTemplateNotParsed(allocator: Allocator, comptime caption: []const u8, comp
     var repeat: u32 = 0;
     const start = std.time.nanoTimestamp();
     while (repeat < TIMES) : (repeat += 1) {
-        const result = try mustache.renderAllocFromString(allocator, template_text, &data);
+        const result = try mustache.allocRenderText(allocator, template_text, &data);
         total_bytes += result.len;
         allocator.free(result);
     }
@@ -126,9 +126,9 @@ fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize) void {
 }
 
 fn parseTemplate(allocator: Allocator, template_text: []const u8) mustache.Template {
-    return switch (mustache.parseTemplate(allocator, template_text, .{}, false) catch unreachable) {
-        .ParseError => |last_error| {
-            std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(last_error.error_code), last_error.lin, last_error.col });
+    return switch (mustache.parse(allocator, template_text, .{}, false) catch unreachable) {
+        .ParseError => |detail| {
+            std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
             @panic("parser error");
         },
         .Success => |ret| ret,

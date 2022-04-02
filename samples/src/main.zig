@@ -76,7 +76,7 @@ pub fn renderFromString() anyerror!void {
     var out = std.io.getStdOut();
 
     // Direct render to save memory
-    try mustache.renderFromString(allocator, template_text, ctx, out.writer());
+    try mustache.renderText(allocator, template_text, ctx, out.writer());
 }
 
 ///
@@ -113,5 +113,5 @@ pub fn renderFromFile() anyerror!void {
     var out = std.io.getStdOut();
 
     // Rendering this large template with only 16KB of RAM
-    try mustache.renderFromFile(allocator, path_to_template, ctx, out.writer());
+    try mustache.renderFile(allocator, path_to_template, ctx, out.writer());
 }

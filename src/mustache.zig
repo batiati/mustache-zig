@@ -22,10 +22,12 @@ pub const allocRender = rendering.allocRender;
 pub const allocRenderZ = rendering.allocRenderZ;
 pub const bufRender = rendering.bufRender;
 pub const bufRenderZ = rendering.bufRenderZ;
-
-pub const renderFromString = rendering.renderFromString;
-pub const renderFromFile = rendering.renderFromFile;
-pub const renderAllocFromString = rendering.renderAllocFromString;
+pub const renderText = rendering.renderText;
+pub const allocRenderText = rendering.allocRenderText;
+pub const allocRenderTextZ = rendering.allocRenderTextZ;
+pub const renderFile = rendering.renderFile;
+pub const allocRenderFile = rendering.allocRenderFile;
+pub const allocRenderFileZ = rendering.allocRenderFileZ;
 
 pub const LambdaContext = rendering.LambdaContext;
 

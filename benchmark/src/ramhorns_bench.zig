@@ -120,11 +120,11 @@ fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: 
     switch (mode) {
         .Counter, .Writer => {
             var counter = std.io.countingWriter(writer);
-            try mustache.renderFromString(allocator, template_text, data, counter.writer());
+            try mustache.renderText(allocator, template_text, data, counter.writer());
             return counter.bytes_written;
         },
         .String => {
-            const ret = try mustache.renderAllocFromString(allocator, template_text, data);
+            const ret = try mustache.allocRenderText(allocator, template_text, data);
             defer allocator.free(ret);
             return ret.len;
         },

@@ -283,7 +283,7 @@ pub fn parse(
     delimiters: Delimiters,
     comptime copy_strings: bool,
 ) Allocator.Error!ParseResult {
-    const source = Source { .String = .{ .copy_strings = copy_strings } };
+    const source = Source{ .String = .{ .copy_strings = copy_strings } };
     return try parseSource(source, allocator, template_text, delimiters);
 }
 
