@@ -327,8 +327,8 @@ pub fn Render(comptime Writer: type) type {
                         },
 
                         .Partial => |partial| {
-                            const map = partialsMap(Template, partials);
-                            if (map.get(partial.key)) |partial_template| {
+                            const MapInterface = PartialsMapInterface(Template, @TypeOf(partials));
+                            if (MapInterface.get(partials, partial.key)) |partial_template| {
                                 try renderLevel(out_writer, stack, partial_template.elements, partials);
                             }
                         },
@@ -406,26 +406,20 @@ pub fn Render(comptime Writer: type) type {
     };
 }
 
-fn partialsMap(comptime TTemplate: type, partials: anytype) PartialsMapInterface(TTemplate, @TypeOf(partials)) {
-    return .{ .partials = partials };
-}
-
 /// Comptime interface to handle tuples and HashMaps in the same way
 fn PartialsMapInterface(comptime TTemplate: type, comptime TPartials: type) type {
     return struct {
         const Self = @This();
 
-        partials: TPartials,
-
-        pub fn get(self: Self, key: []const u8) ?TTemplate {
+        pub fn get(partials: TPartials, key: []const u8) ?TTemplate {
             comptime validatePartials();
 
             if (comptime isValidTuple()) {
-                return self.getFromTuple(key);
+                return getFromTuple(partials, key);
             } else if (comptime isValidIndexable()) {
-                return self.getFromIndexable(key);
+                return getFromIndexable(partials, key);
             } else if (comptime isValidMap()) {
-                return self.getFromMap(key);
+                return getFromMap(partials, key);
             } else if (comptime isEmpty()) {
                 return null;
             } else {
@@ -433,13 +427,13 @@ fn PartialsMapInterface(comptime TTemplate: type, comptime TPartials: type) type
             }
         }
 
-        fn getFromTuple(self: Self, key: []const u8) ?TTemplate {
+        fn getFromTuple(partials: TPartials, key: []const u8) ?TTemplate {
             comptime assert(isValidTuple());
 
             if (comptime isPartialsTupleElement(TPartials)) {
-                return if (std.mem.eql(u8, self.partials[0], key)) self.partials[1] else null;
+                return if (std.mem.eql(u8, partials[0], key)) partials[1] else null;
             } else {
-                inline for (self.partials) |item| {
+                inline for (partials) |item| {
                     if (std.mem.eql(u8, item[0], key)) return item[1];
                 } else {
                     return null;
@@ -447,19 +441,19 @@ fn PartialsMapInterface(comptime TTemplate: type, comptime TPartials: type) type
             }
         }
 
-        fn getFromIndexable(self: Self, key: []const u8) ?TTemplate {
+        fn getFromIndexable(partials: TPartials, key: []const u8) ?TTemplate {
             comptime assert(isValidIndexable());
 
-            for (self.partials) |item| {
+            for (partials) |item| {
                 if (std.mem.eql(u8, item[0], key)) return item[1];
             }
 
             return null;
         }
 
-        inline fn getFromMap(self: Self, key: []const u8) ?TTemplate {
+        inline fn getFromMap(partials: TPartials, key: []const u8) ?TTemplate {
             comptime assert(isValidMap());
-            return self.partials.get(key);
+            return partials.get(key);
         }
 
         fn validatePartials() void {
@@ -2864,78 +2858,87 @@ const tests = struct {
 
     const partials_map = struct {
         test "PartialsMap single tuple" {
-            var partials = partialsMap([]const u8, .{ "hello", "{{hello}}world" });
+            var data = .{ "hello", "{{hello}}world" };
+            const Map = PartialsMapInterface([]const u8, @TypeOf(data));
 
-            const hello = partials.get("hello");
+            const hello = Map.get(data, "hello");
             try testing.expect(hello != null);
             try testing.expectEqualStrings("{{hello}}world", hello.?);
 
-            try testing.expect(partials.get("wrong") == null);
+            try testing.expect(Map.get(data, "wrong") == null);
         }
 
         test "PartialsMap empty tuple" {
-            var partials = partialsMap([]const u8, .{});
-            try testing.expect(partials.get("wrong") == null);
+            var data = .{};
+            const Map = PartialsMapInterface([]const u8, @TypeOf(data));
+            try testing.expect(Map.get(data, "wrong") == null);
         }
 
         test "PartialsMap void" {
-            var partials = partialsMap([]const u8, {});
-            try testing.expect(partials.get("wrong") == null);
+            var data = {};
+            const Map = PartialsMapInterface([]const u8, @TypeOf(data));
+            try testing.expect(Map.get(data, "wrong") == null);
         }
 
         test "PartialsMap multiple tuple" {
-            var partials = partialsMap([]const u8, .{
+            var data = .{
                 .{ "hello", "{{hello}}world" },
                 .{ "hi", "{{hi}}there" },
-            });
+            };
 
-            const hello = partials.get("hello");
+            const Map = PartialsMapInterface([]const u8, @TypeOf(data));
+
+            const hello = Map.get(data, "hello");
             try testing.expect(hello != null);
             try testing.expectEqualStrings("{{hello}}world", hello.?);
 
-            const hi = partials.get("hi");
+            const hi = Map.get(data, "hi");
             try testing.expect(hi != null);
             try testing.expectEqualStrings("{{hi}}there", hi.?);
 
-            try testing.expect(partials.get("wrong") == null);
+            try testing.expect(Map.get(data, "wrong") == null);
         }
 
         test "PartialsMap array" {
             const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
 
-            var partials = partialsMap([]const u8, [_]Tuple{
+            var data = [_]Tuple{
                 .{ "hello", "{{hello}}world" },
                 .{ "hi", "{{hi}}there" },
-            });
+            };
 
-            const hello = partials.get("hello");
+            const Map = PartialsMapInterface([]const u8, @TypeOf(data));
+
+            const hello = Map.get(data, "hello");
             try testing.expect(hello != null);
             try testing.expectEqualStrings("{{hello}}world", hello.?);
 
-            const hi = partials.get("hi");
+            const hi = Map.get(data, "hi");
             try testing.expect(hi != null);
             try testing.expectEqualStrings("{{hi}}there", hi.?);
 
-            try testing.expect(partials.get("wrong") == null);
+            try testing.expect(Map.get(data, "wrong") == null);
         }
 
         test "PartialsMap ref array" {
             const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
 
-            var partials = partialsMap([]const u8, &[_]Tuple{
+            var data = &[_]Tuple{
                 .{ "hello", "{{hello}}world" },
                 .{ "hi", "{{hi}}there" },
-            });
+            };
 
-            const hello = partials.get("hello");
+            const Map = PartialsMapInterface([]const u8, @TypeOf(data));
+
+            const hello = Map.get(data, "hello");
             try testing.expect(hello != null);
             try testing.expectEqualStrings("{{hello}}world", hello.?);
 
-            const hi = partials.get("hi");
+            const hi = Map.get(data, "hi");
             try testing.expect(hi != null);
             try testing.expectEqualStrings("{{hi}}there", hi.?);
 
-            try testing.expect(partials.get("wrong") == null);
+            try testing.expect(Map.get(data, "wrong") == null);
         }
 
         test "PartialsMap slice" {
@@ -2944,38 +2947,39 @@ const tests = struct {
                 .{ "hello", "{{hello}}world" },
                 .{ "hi", "{{hi}}there" },
             };
+            const data = array[0..];
 
-            var partials = partialsMap([]const u8, array[0..]);
+            const Map = PartialsMapInterface([]const u8, @TypeOf(data));
 
-            const hello = partials.get("hello");
+            const hello = Map.get(data, "hello");
             try testing.expect(hello != null);
             try testing.expectEqualStrings("{{hello}}world", hello.?);
 
-            const hi = partials.get("hi");
+            const hi = Map.get(data, "hi");
             try testing.expect(hi != null);
             try testing.expectEqualStrings("{{hi}}there", hi.?);
 
-            try testing.expect(partials.get("wrong") == null);
+            try testing.expect(Map.get(data, "wrong") == null);
         }
 
         test "PartialsMap hashmap" {
-            var map = std.StringHashMap([]const u8).init(testing.allocator);
-            defer map.deinit();
+            var data = std.StringHashMap([]const u8).init(testing.allocator);
+            defer data.deinit();
 
-            try map.put("hello", "{{hello}}world");
-            try map.put("hi", "{{hi}}there");
+            try data.put("hello", "{{hello}}world");
+            try data.put("hi", "{{hi}}there");
 
-            var partials = partialsMap([]const u8, map);
+            const Map = PartialsMapInterface([]const u8, @TypeOf(data));
 
-            const hello = partials.get("hello");
+            const hello = Map.get(data, "hello");
             try testing.expect(hello != null);
             try testing.expectEqualStrings("{{hello}}world", hello.?);
 
-            const hi = partials.get("hi");
+            const hi = Map.get(data, "hi");
             try testing.expect(hi != null);
             try testing.expectEqualStrings("{{hi}}there", hi.?);
 
-            try testing.expect(partials.get("wrong") == null);
+            try testing.expect(Map.get(data, "wrong") == null);
         }
     };
 
