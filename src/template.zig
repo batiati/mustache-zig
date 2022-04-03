@@ -345,7 +345,8 @@ pub fn TemplateLoader(comptime options: Options) type {
 
             elements: []Element = undefined,
 
-            pub fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
+            pub fn render(ctx: *@This(), elements: []Element, partials: void) Allocator.Error!void {
+                _ = partials;
                 ctx.elements = elements;
             }
         };
@@ -420,7 +421,7 @@ pub fn TemplateLoader(comptime options: Options) type {
                             else => return @errSetCast(ErrorSet(@TypeOf(parser), @TypeOf(out_render)), err),
                         };
                         defer if (options.output == .Render) Element.deinitMany(self.allocator, options.copyStrings(), elements);
-                        try out_render.render(elements);
+                        try out_render.render(elements, {});
 
                         // No need for loop again
                         // when output == .Parse, all nodes are produced at once
@@ -471,7 +472,7 @@ const tests = struct {
         _ = interpolation;
         _ = sections;
         _ = inverted;
-        _ = partials;
+        _ = partials_section;
         _ = lambdas;
         _ = extra;
         _ = api;
@@ -2050,7 +2051,7 @@ const tests = struct {
         }
     };
 
-    const partials = struct {
+    const partials_section = struct {
 
         // The greater-than operator should not alter surrounding whitespace.
         test "Surrounding Whitespace" {
@@ -2495,7 +2496,8 @@ const tests = struct {
 
                 count: usize = 0,
 
-                pub fn render(self: *@This(), elements: []Element) Allocator.Error!void {
+                pub fn render(self: *@This(), elements: []Element, partials: void) Allocator.Error!void {
+                    _ = partials;
                     self.count += elements.len;
 
                     checkStrings(elements);

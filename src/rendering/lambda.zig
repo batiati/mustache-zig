@@ -130,7 +130,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             defer buffer.deinit();
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, template.elements);
+            try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, template.elements, {});
 
             return buffer.toOwnedSlice();
         }
@@ -145,7 +145,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             defer template.deinit(allocator);
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(self.out_writer, self.stack, template.elements);
+            try Impl.renderLevel(self.out_writer, self.stack, template.elements, {});
         }
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {

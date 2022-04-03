@@ -29,19 +29,32 @@ const BufError = std.io.FixedBufferStream([]u8).WriteError;
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
 
 /// Renders the `Template` with the given `data` to a writer.
-pub fn render(template: Template, context: anytype, writer: anytype) !void {
+pub fn render(template: Template, data: anytype, writer: anytype) !void {
+    return try renderPartials(template, {}, data, writer);
+}
+
+/// Renders the `Template` with the given `data` to a writer.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+pub fn renderPartials(template: Template, partials: anytype, data: anytype, writer: anytype) !void {
     var data_render = getDataRender(writer, data);
-    try data_render.render(template.elements);
+    try data_render.render(template.elements, partials);
 }
 
 /// Renders the `Template` with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
 pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allocator.Error![]const u8 {
+    return try allocRenderPartials(allocator, template, {}, data);
+}
+
+/// Renders the `Template` with the given `data` to a writer.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// Caller must free the memory
+pub fn allocRenderPartials(allocator: Allocator, template: Template, partials: anytype, data: anytype) Allocator.Error![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data);
-    try data_render.bufRender(&list, template.elements);
+    try data_render.bufRender(&list, template.elements, partials);
 
     return list.toOwnedSlice();
 }
@@ -49,27 +62,45 @@ pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allo
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
 pub fn allocRenderZ(allocator: Allocator, template: Template, data: anytype) Allocator.Error![:0]const u8 {
+    return try allocRenderPartialsZ(allocator, template, {}, data);
+}
+
+/// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// Caller must free the memory
+pub fn allocRenderPartialsZ(allocator: Allocator, template: Template, partials: anytype, data: anytype) Allocator.Error![:0]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data);
-    try data_render.bufRender(&list, template.elements);
+    try data_render.bufRender(&list, template.elements, partials);
 
     return list.toOwnedSliceSentinel('\x00');
 }
 
 /// Renders the `Template` with the given `data` to a buffer.
 pub fn bufRender(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![]const u8 {
+    return try bufRenderPartials(buf, template, {}, data);
+}
+
+/// Renders the `Template` with the given `data` to a buffer.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+pub fn bufRenderPartials(buf: []u8, template: Template, partials: anytype, data: anytype) (Allocator.Error || BufError)![]const u8 {
     var fbs = std.io.fixedBufferStream(buf);
     var data_render = getDataRender(fbs.writer(), data);
-    try data_render.render(template.elements);
+    try data_render.render(template.elements, partials);
 
     return fbs.getWritten();
 }
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
 pub fn bufRenderZ(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
-    var ret = try bufRender(buf, template, data);
+    return try bufRenderPartialsZ(buf, template, {}, data);
+}
+
+/// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
+pub fn bufRenderPartialsZ(buf: []u8, template: Template, partials: anytype, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
+    var ret = try bufRenderPartials(buf, template, partials, data);
 
     if (ret.len < buf.len) {
         buf[ret.len] = '\x00';
@@ -161,7 +192,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
         out_writer: OutWriter,
         data: Data,
 
-        pub fn render(self: *Self, elements: []const Element) Error!void {
+        pub fn render(self: *Self, elements: []const Element, partials: anytype) Error!void {
             const by_value = comptime Fields.byValue(Data);
 
             var stack = WriterRender.ContextStack{
@@ -169,10 +200,10 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
                 .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
             };
 
-            try WriterRender.renderLevel(self.out_writer, &stack, elements);
+            try WriterRender.renderLevel(self.out_writer, &stack, elements, partials);
         }
 
-        pub fn bufRender(self: *Self, buffer: *std.ArrayList(u8), elements: []const Element) Error!void {
+        pub fn bufRender(self: *Self, buffer: *std.ArrayList(u8), elements: []const Element, partials: anytype) Error!void {
             const by_value = comptime Fields.byValue(Data);
 
             var stack = WriterRender.ContextStack{
@@ -180,7 +211,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
                 .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
             };
 
-            try WriterRender.renderLevel(.{ .Buffer = buffer }, &stack, elements);
+            try WriterRender.renderLevel(.{ .Buffer = buffer }, &stack, elements, partials);
         }
 
         pub fn renderText(self: *Self, allocator: Allocator, template_text: []const u8) (ParseError || Error)!void {
@@ -257,7 +288,7 @@ pub fn Render(comptime Writer: type) type {
 
         pub const Error = Allocator.Error || Writer.Error;
 
-        pub fn renderLevel(out_writer: OutWriter, stack: *const ContextStack, children: ?[]const Element) Error!void {
+        pub fn renderLevel(out_writer: OutWriter, stack: *const ContextStack, children: ?[]const Element, partials: anytype) Error!void {
             if (children) |elements| {
                 for (elements) |element| {
                     switch (element) {
@@ -280,7 +311,7 @@ pub fn Render(comptime Writer: type) type {
                                         .ctx = item_ctx,
                                     };
 
-                                    try renderLevel(out_writer, &next_level, section.content);
+                                    try renderLevel(out_writer, &next_level, section.content, partials);
                                 }
                             }
                         },
@@ -291,11 +322,18 @@ pub fn Render(comptime Writer: type) type {
 
                             const truthy = if (getIterator(stack, section.key)) |*iterator| iterator.truthy() else false;
                             if (!truthy) {
-                                try renderLevel(out_writer, stack, section.content);
+                                try renderLevel(out_writer, stack, section.content, partials);
                             }
                         },
 
-                        //TODO Partial, Parent, Block
+                        .Partial => |partial| {
+                            const map = partialsMap(Template, partials);
+                            if (map.get(partial.key)) |partial_template| {
+                                try renderLevel(out_writer, stack, partial_template.elements, partials);
+                            }
+                        },
+
+                        //TODO Parent, Block
                         else => {},
                     }
                 }
@@ -368,8 +406,154 @@ pub fn Render(comptime Writer: type) type {
     };
 }
 
+fn partialsMap(comptime TTemplate: type, partials: anytype) PartialsMapInterface(TTemplate, @TypeOf(partials)) {
+    return .{ .partials = partials };
+}
+
+/// Comptime interface to handle tuples and HashMaps in the same way
+fn PartialsMapInterface(comptime TTemplate: type, comptime TPartials: type) type {
+    return struct {
+        const Self = @This();
+
+        partials: TPartials,
+
+        pub fn get(self: Self, key: []const u8) ?TTemplate {
+            comptime validatePartials();
+
+            if (comptime isValidTuple()) {
+                return self.getFromTuple(key);
+            } else if (comptime isValidIndexable()) {
+                return self.getFromIndexable(key);
+            } else if (comptime isValidMap()) {
+                return self.getFromMap(key);
+            } else if (comptime isEmpty()) {
+                return null;
+            } else {
+                unreachable;
+            }
+        }
+
+        fn getFromTuple(self: Self, key: []const u8) ?TTemplate {
+            comptime assert(isValidTuple());
+
+            if (comptime isPartialsTupleElement(TPartials)) {
+                return if (std.mem.eql(u8, self.partials[0], key)) self.partials[1] else null;
+            } else {
+                inline for (self.partials) |item| {
+                    if (std.mem.eql(u8, item[0], key)) return item[1];
+                } else {
+                    return null;
+                }
+            }
+        }
+
+        fn getFromIndexable(self: Self, key: []const u8) ?TTemplate {
+            comptime assert(isValidIndexable());
+
+            for (self.partials) |item| {
+                if (std.mem.eql(u8, item[0], key)) return item[1];
+            }
+
+            return null;
+        }
+
+        inline fn getFromMap(self: Self, key: []const u8) ?TTemplate {
+            comptime assert(isValidMap());
+            return self.partials.get(key);
+        }
+
+        fn validatePartials() void {
+            comptime {
+                if (!isValidTuple() and !isValidIndexable() and !isValidMap() and !isEmpty()) @compileError(
+                    std.fmt.comptimePrint(
+                        \\Invalid Partials type.
+                        \\Expected a HashMap or a tuple containing Key/Value pairs
+                        \\Key="[]const u8" and Value="{s}"
+                        \\Found: "{s}"
+                    , .{ @typeName(TTemplate), @typeName(TPartials) }),
+                );
+            }
+        }
+
+        fn isValidTuple() bool {
+            comptime {
+                if (trait.isTuple(TPartials)) {
+                    if (isPartialsTupleElement(TPartials)) {
+                        return true;
+                    } else {
+                        inline for (meta.fields(TPartials)) |field| {
+                            if (!isPartialsTupleElement(field.field_type)) {
+                                return false;
+                            }
+                        } else {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        fn isValidIndexable() bool {
+            comptime {
+                if (trait.isIndexable(TPartials) and !trait.isTuple(TPartials)) {
+                    if (trait.isSingleItemPtr(TPartials) and trait.is(.Array)(meta.Child(TPartials))) {
+                        const Array = meta.Child(TPartials);
+                        return isPartialsTupleElement(meta.Child(Array));
+                    } else {
+                        return isPartialsTupleElement(meta.Child(TPartials));
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        fn isPartialsTupleElement(comptime TElement: type) bool {
+            comptime {
+                if (trait.isTuple(TElement)) {
+                    const fields = meta.fields(TElement);
+                    if (fields.len == 2 and trait.isZigString(fields[0].field_type)) {
+                        if (fields[1].field_type == TTemplate) {
+                            return true;
+                        } else {
+                            return trait.isZigString(fields[1].field_type) and trait.isZigString(TTemplate);
+                        }
+                    }
+                }
+                return false;
+            }
+        }
+
+        fn isEmpty() bool {
+            comptime {
+                return TPartials == void or
+                    (trait.isTuple(TPartials) and meta.fields(TPartials).len == 0);
+            }
+        }
+
+        fn isValidMap() bool {
+            comptime {
+                if (trait.is(.Struct)(TPartials) and trait.hasDecls(TPartials, .{ "KV", "get" })) {
+                    const KV = @field(TPartials, "KV");
+                    if (trait.is(.Struct)(KV) and trait.hasFields(KV, .{ "key", "value" })) {
+                        const kv: KV = undefined;
+                        return trait.isZigString(@TypeOf(kv.key)) and
+                            (@TypeOf(kv.value) == TTemplate or
+                            (trait.isZigString(@TypeOf(kv.value)) and trait.isZigString(TTemplate)));
+                    }
+                }
+
+                return false;
+            }
+        }
+    };
+}
+
 test {
     _ = context;
+    _ = tests.partials_map;
     _ = tests.spec;
     _ = tests.extra;
     _ = tests.api;
@@ -383,6 +567,7 @@ const tests = struct {
             _ = inverted;
             _ = delimiters;
             _ = lambdas;
+            _ = partials;
         }
 
         /// Those tests are a verbatim copy from
@@ -2200,6 +2385,156 @@ const tests = struct {
                 try expectRender(template_text, data, expected);
             }
         };
+
+        /// Those tests are a verbatim copy from
+        /// https://github.com/mustache/spec/blob/master/specs/partials.yml
+        const partials = struct {
+
+            // The greater-than operator should expand to the named partial.
+            test "Basic Behavior" {
+                const template_text = "'{{>text}}'";
+                const partials_template_text = .{
+                    .{ "text", "from partial" },
+                };
+
+                const expected = "'from partial'";
+
+                var data = .{};
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // The greater-than operator should expand to the named partial.
+            test "Failed Lookup" {
+                const template_text = "'{{>text}}'";
+                const partials_template_text = .{};
+
+                const expected = "''";
+
+                var data = .{};
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // The greater-than operator should operate within the current context.
+            test "Context" {
+                const template_text = "'{{>partial}}'";
+                const partials_template_text = .{
+                    .{ "partial", "*{{text}}*" },
+                };
+
+                const expected = "'*content*'";
+
+                var data = .{ .text = "content" };
+
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // The greater-than operator should properly recurse.
+            test "Recursion" {
+                const Content = struct {
+                    content: []const u8,
+                    nodes: []const @This(),
+                };
+
+                const template_text = "{{>node}}";
+                const partials_template_text = .{
+                    .{ "node", "{{content}}<{{#nodes}}{{>node}}{{/nodes}}>" },
+                };
+
+                const expected = "X<Y<>>";
+
+                var data = Content{ .content = "X", .nodes = &.{Content{ .content = "Y", .nodes = &.{} }} };
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // The greater-than operator should not alter surrounding whitespace.
+            test "Surrounding Whitespace" {
+                const template_text = "| {{>partial}} |";
+                const partials_template_text = .{
+                    .{ "partial", "\t|\t" },
+                };
+
+                const expected = "| \t|\t |";
+
+                var data = .{};
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // Whitespace should be left untouched.
+            test "Inline Indentation" {
+                const template_text = "  {{data}}  {{> partial}}\n";
+                const partials_template_text = .{
+                    .{ "partial", ">\n>" },
+                };
+
+                const expected = "  |  >\n>\n";
+
+                var data = .{ .data = "|" };
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // "\r\n" should be considered a newline for standalone tags.
+            test "Standalone Line Endings" {
+                const template_text = "|\r\n{{>partial}}\r\n|";
+                const partials_template_text = .{
+                    .{ "partial", ">" },
+                };
+
+                const expected = "|\r\n>|";
+
+                var data = .{};
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // Standalone tags should not require a newline to precede them.
+            test "Standalone Without Previous Line" {
+
+                //Indentation needed
+                if (true) return error.SkipZigTest;
+                const template_text = "  {{>partial}}\n>";
+                const partials_template_text = .{
+                    .{ "partial", ">\n>" },
+                };
+
+                const expected = "  >\n  >>";
+
+                var data = .{};
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // Standalone tags should not require a newline to follow them.
+            test "Standalone Without Newline" {
+
+                //Indentation needed
+                if (true) return error.SkipZigTest;
+                const template_text = ">\n  {{>partial}}";
+                const partials_template_text = .{
+                    .{ "partial", ">\n>" },
+                };
+
+                const expected = ">\n  >\n  >";
+
+                var data = .{};
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+
+            // Each line of the partial should be indented before rendering.
+            test "Standalone Indentation" {
+                if (true) return error.SkipZigTest;
+            }
+
+            // Superfluous in-tag whitespace should be ignored.
+            test "Padding Whitespace" {
+                const template_text = "|{{> partial }}|";
+                const partials_template_text = .{
+                    .{ "partial", "[]" },
+                };
+
+                const expected = "|[]|";
+
+                var data = .{ .boolean = true };
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
+            }
+        };
     };
 
     const extra = struct {
@@ -2527,9 +2862,131 @@ const tests = struct {
         }
     };
 
+    const partials_map = struct {
+        test "PartialsMap single tuple" {
+            var partials = partialsMap([]const u8, .{ "hello", "{{hello}}world" });
+
+            const hello = partials.get("hello");
+            try testing.expect(hello != null);
+            try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+            try testing.expect(partials.get("wrong") == null);
+        }
+
+        test "PartialsMap empty tuple" {
+            var partials = partialsMap([]const u8, .{});
+            try testing.expect(partials.get("wrong") == null);
+        }
+
+        test "PartialsMap void" {
+            var partials = partialsMap([]const u8, {});
+            try testing.expect(partials.get("wrong") == null);
+        }
+
+        test "PartialsMap multiple tuple" {
+            var partials = partialsMap([]const u8, .{
+                .{ "hello", "{{hello}}world" },
+                .{ "hi", "{{hi}}there" },
+            });
+
+            const hello = partials.get("hello");
+            try testing.expect(hello != null);
+            try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+            const hi = partials.get("hi");
+            try testing.expect(hi != null);
+            try testing.expectEqualStrings("{{hi}}there", hi.?);
+
+            try testing.expect(partials.get("wrong") == null);
+        }
+
+        test "PartialsMap array" {
+            const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
+
+            var partials = partialsMap([]const u8, [_]Tuple{
+                .{ "hello", "{{hello}}world" },
+                .{ "hi", "{{hi}}there" },
+            });
+
+            const hello = partials.get("hello");
+            try testing.expect(hello != null);
+            try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+            const hi = partials.get("hi");
+            try testing.expect(hi != null);
+            try testing.expectEqualStrings("{{hi}}there", hi.?);
+
+            try testing.expect(partials.get("wrong") == null);
+        }
+
+        test "PartialsMap ref array" {
+            const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
+
+            var partials = partialsMap([]const u8, &[_]Tuple{
+                .{ "hello", "{{hello}}world" },
+                .{ "hi", "{{hi}}there" },
+            });
+
+            const hello = partials.get("hello");
+            try testing.expect(hello != null);
+            try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+            const hi = partials.get("hi");
+            try testing.expect(hi != null);
+            try testing.expectEqualStrings("{{hi}}there", hi.?);
+
+            try testing.expect(partials.get("wrong") == null);
+        }
+
+        test "PartialsMap slice" {
+            const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
+            const array = [_]Tuple{
+                .{ "hello", "{{hello}}world" },
+                .{ "hi", "{{hi}}there" },
+            };
+
+            var partials = partialsMap([]const u8, array[0..]);
+
+            const hello = partials.get("hello");
+            try testing.expect(hello != null);
+            try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+            const hi = partials.get("hi");
+            try testing.expect(hi != null);
+            try testing.expectEqualStrings("{{hi}}there", hi.?);
+
+            try testing.expect(partials.get("wrong") == null);
+        }
+
+        test "PartialsMap hashmap" {
+            var map = std.StringHashMap([]const u8).init(testing.allocator);
+            defer map.deinit();
+
+            try map.put("hello", "{{hello}}world");
+            try map.put("hi", "{{hi}}there");
+
+            var partials = partialsMap([]const u8, map);
+
+            const hello = partials.get("hello");
+            try testing.expect(hello != null);
+            try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+            const hi = partials.get("hi");
+            try testing.expect(hi != null);
+            try testing.expectEqualStrings("{{hi}}there", hi.?);
+
+            try testing.expect(partials.get("wrong") == null);
+        }
+    };
+
     fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
         try expectCachedRender(template_text, data, expected);
         try expectStreamedRender(template_text, data, expected);
+    }
+
+    fn expectRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {
+        try expectCachedRenderPartials(template_text, partials, data, expected);
+        //try expectStreamedRender(template_text, data, expected);
     }
 
     fn expectParseTemplate(template_text: []const u8) !Template {
@@ -2554,6 +3011,35 @@ const tests = struct {
 
         var result = try allocRender(allocator, cached_template, data);
         defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    fn expectCachedRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {
+        const allocator = testing.allocator;
+
+        // Cached template render
+        var cached_template = try expectParseTemplate(template_text);
+        defer cached_template.deinit(allocator);
+
+        var hashMap = std.StringHashMap(Template).init(allocator);
+        defer {
+            var iterator = hashMap.valueIterator();
+            while (iterator.next()) |partial| {
+                partial.deinit(allocator);
+            }
+            hashMap.deinit();
+        }
+
+        inline for (partials) |item| {
+            var partial_template = try expectParseTemplate(item[1]);
+            errdefer partial_template.deinit(allocator);
+
+            try hashMap.put(item[0], partial_template);
+        }
+
+        var result = try allocRenderPartials(allocator, cached_template, hashMap, data);
+        defer allocator.free(result);
+
         try testing.expectEqualStrings(expected, result);
     }
 

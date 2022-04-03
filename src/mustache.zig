@@ -18,10 +18,15 @@ pub const parseText = template.parseText;
 pub const parseFile = template.parseFile;
 
 pub const render = rendering.render;
+pub const renderPartials = rendering.renderPartials;
 pub const allocRender = rendering.allocRender;
+pub const allocRenderPartials = rendering.allocRenderPartials;
 pub const allocRenderZ = rendering.allocRenderZ;
+pub const allocRenderPartialsZ = rendering.allocRenderPartialsZ;
 pub const bufRender = rendering.bufRender;
+pub const bufRenderPartials = rendering.bufRenderPartials;
 pub const bufRenderZ = rendering.bufRenderZ;
+pub const bufRenderPartialsZ = rendering.bufRenderPartialsZ;
 pub const renderText = rendering.renderText;
 pub const allocRenderText = rendering.allocRenderText;
 pub const allocRenderTextZ = rendering.allocRenderTextZ;
