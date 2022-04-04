@@ -59,6 +59,11 @@ pub const Escape = enum {
     Unescaped,
 };
 
+pub const IndentationStack = struct {
+    previous: ?*const IndentationStack,
+    indentation: []const u8,
+};
+
 pub fn getContext(comptime Writer: type, data: anytype) Context(Writer) {
     const Data = @TypeOf(data);
     const by_value = comptime Fields.byValue(Data);
@@ -99,8 +104,8 @@ pub fn Context(comptime Writer: type) type {
 
         const VTable = struct {
             get: fn (*const anyopaque, []const u8, ?usize) PathResolution(Self),
-            interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: fn (*const anyopaque, OutWriter, *const ContextStack, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape, ?*const IndentationStack) (Allocator.Error || Writer.Error)!PathResolution(void),
+            expandLambda: fn (*const anyopaque, OutWriter, *const ContextStack, []const u8, []const u8, Escape, ?*const IndentationStack, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = struct {
@@ -247,12 +252,18 @@ pub fn Context(comptime Writer: type) type {
             };
         }
 
-        pub inline fn interpolate(self: Self, out_writer: OutWriter, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try self.vtable.interpolate(&self.ctx, out_writer, path, escape);
+        pub inline fn interpolate(
+            self: Self,
+            out_writer: OutWriter,
+            path: []const u8,
+            escape: Escape,
+            indentation: ?*const IndentationStack,
+        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            return try self.vtable.interpolate(&self.ctx, out_writer, path, escape, indentation);
         }
 
-        pub inline fn expandLambda(self: Self, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try self.vtable.expandLambda(&self.ctx, out_writer, stack, path, inner_text, escape, delimiters);
+        pub inline fn expandLambda(self: Self, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, indentation: ?*const IndentationStack, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            return try self.vtable.expandLambda(&self.ctx, out_writer, stack, path, inner_text, escape, indentation, delimiters);
         }
     };
 }
@@ -297,17 +308,33 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
             );
         }
 
-        fn interpolate(ctx: *const anyopaque, out_writer: OutWriter, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        fn interpolate(
+            ctx: *const anyopaque,
+            out_writer: OutWriter,
+            path: []const u8,
+            escape: Escape,
+            indentation: ?*const IndentationStack,
+        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.interpolate(
                 out_writer,
                 getData(ctx),
                 &path_iterator,
                 escape,
+                indentation,
             );
         }
 
-        fn expandLambda(ctx: *const anyopaque, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        fn expandLambda(
+            ctx: *const anyopaque,
+            out_writer: OutWriter,
+            stack: *const ContextStack,
+            path: []const u8,
+            inner_text: []const u8,
+            escape: Escape,
+            indentation: ?*const IndentationStack,
+            delimiters: Delimiters,
+        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.expandLambda(
                 out_writer,
@@ -315,6 +342,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type) type {
                 stack,
                 inner_text,
                 escape,
+                indentation,
                 delimiters,
                 &path_iterator,
             );
@@ -475,14 +503,14 @@ const struct_tests = struct {
         const ContextInterface = Context(@TypeOf(writer));
         var out_writer: ContextInterface.OutWriter = .{ .Writer = writer };
 
-        switch (try ctx.interpolate(out_writer, path, escape)) {
+        switch (try ctx.interpolate(out_writer, path, escape, null)) {
             .Lambda => {
                 var stack = ContextInterface.ContextStack{
                     .parent = null,
                     .ctx = ctx,
                 };
 
-                _ = try ctx.expandLambda(out_writer, &stack, path, "", escape, .{});
+                _ = try ctx.expandLambda(out_writer, &stack, path, "", escape, null, .{});
             },
             else => {},
         }

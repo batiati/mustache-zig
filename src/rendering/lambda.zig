@@ -12,6 +12,7 @@ const Delimiters = mustache.Delimiters;
 const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
+const IndentationStack = context.IndentationStack;
 const Render = @import("render.zig").Render;
 
 const escapedWrite = @import("escape.zig").escapedWrite;
@@ -100,6 +101,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
 
         out_writer: OutWriter,
         stack: *const ContextStack,
+        indentation: ?*const IndentationStack,
         delimiters: Delimiters,
         escape: Escape,
 
@@ -130,7 +132,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             defer buffer.deinit();
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, template.elements, {});
+            try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, self.indentation, template.elements, {});
 
             return buffer.toOwnedSlice();
         }
@@ -145,17 +147,17 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             defer template.deinit(allocator);
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(self.out_writer, self.stack, template.elements, {});
+            try Impl.renderLevel(self.out_writer, self.stack, self.indentation, template.elements, {});
         }
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {
             var self = getSelf(ctx);
 
             switch (self.out_writer) {
-                .Writer => |writer| return try escapedWrite(writer, rendered_text, self.escape),
+                .Writer => |writer| return try escapedWrite(writer, rendered_text, self.escape, self.indentation),
                 .Buffer => |list| {
                     try list.ensureUnusedCapacity(rendered_text.len);
-                    return try escapedWrite(list.writer(), rendered_text, self.escape);
+                    return try escapedWrite(list.writer(), rendered_text, self.escape, self.indentation);
                 },
             }
         }

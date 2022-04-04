@@ -10,6 +10,7 @@ const context = @import("context.zig");
 const PathResolution = context.PathResolution;
 const Context = context.Context;
 const Escape = context.Escape;
+const IndentationStack = context.IndentationStack;
 
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
@@ -303,10 +304,11 @@ pub fn Invoker(comptime Writer: type) type {
             data: anytype,
             path_iterator: *std.mem.TokenIterator(u8),
             escape: Escape,
+            indentation: ?*const IndentationStack,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const Interpolate = PathInvoker(Allocator.Error || Writer.Error, void, interpolateAction);
             return try Interpolate.call(
-                escape,
+                .{ escape, indentation },
                 out_writer,
                 data,
                 path_iterator,
@@ -320,12 +322,13 @@ pub fn Invoker(comptime Writer: type) type {
             stack: anytype,
             tag_contents: []const u8,
             escape: Escape,
+            indentation: ?*const IndentationStack,
             delimiters: Delimiters,
             path_iterator: *std.mem.TokenIterator(u8),
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const ExpandLambdaAction = PathInvoker(Allocator.Error || Writer.Error, void, expandLambdaAction);
             return try ExpandLambdaAction.call(
-                .{ stack, tag_contents, escape, delimiters },
+                .{ stack, tag_contents, escape, indentation, delimiters },
                 out_writer,
                 data,
                 path_iterator,
@@ -340,13 +343,16 @@ pub fn Invoker(comptime Writer: type) type {
         }
 
         fn interpolateAction(
-            escape: Escape,
+            params: anytype,
             out_writer: OutWriter,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
+            const escape: Escape = params.@"0";
+            const indentation: ?*const IndentationStack = params.@"1";
+
             switch (out_writer) {
-                .Writer => |writer| try write(writer, value, escape),
-                .Buffer => |list| try write(list.writer(), value, escape),
+                .Writer => |writer| try write(writer, value, escape, indentation),
+                .Buffer => |list| try write(list.writer(), value, escape, indentation),
             }
         }
 
@@ -362,15 +368,17 @@ pub fn Invoker(comptime Writer: type) type {
 
             const Error = Allocator.Error || Writer.Error;
             const stack = params.@"0";
-            const inner_text = params.@"1";
-            const escape = params.@"2";
-            const delimiters = params.@"3";
+            const inner_text: []const u8 = params.@"1";
+            const escape: Escape = params.@"2";
+            const indentation: ?*const IndentationStack = params.@"3";
+            const delimiters: Delimiters = params.@"4";
 
             const Impl = lambda.LambdaContextImpl(Writer);
             var impl = Impl{
                 .out_writer = out_writer,
                 .stack = stack,
                 .escape = escape,
+                .indentation = indentation,
                 .delimiters = delimiters,
             };
 
@@ -388,6 +396,7 @@ pub fn Invoker(comptime Writer: type) type {
             writer: anytype,
             value: anytype,
             escape: Escape,
+            indentation: ?*const IndentationStack,
         ) (Allocator.Error || Writer.Error)!void {
             const TValue = @TypeOf(value);
 
@@ -399,16 +408,16 @@ pub fn Invoker(comptime Writer: type) type {
 
                 .Struct, .Opaque => {},
 
-                .Bool => _ = try escapedWrite(writer, if (value) "true" else "false", escape),
+                .Bool => _ = try escapedWrite(writer, if (value) "true" else "false", escape, indentation),
                 .Int, .ComptimeInt => try std.fmt.formatInt(value, 10, .lower, .{}, writer),
                 .Float, .ComptimeFloat => try std.fmt.formatFloatDecimal(value, .{}, writer),
-                .Enum => _ = try escapedWrite(writer, @tagName(value), escape),
+                .Enum => _ = try escapedWrite(writer, @tagName(value), escape, indentation),
 
                 .Pointer => |info| switch (info.size) {
-                    .One => try write(writer, value.*, escape),
+                    .One => try write(writer, value.*, escape, indentation),
                     .Slice => {
                         if (info.child == u8) {
-                            _ = try escapedWrite(writer, value, escape);
+                            _ = try escapedWrite(writer, value, escape, indentation);
                         }
                     },
                     .Many => @compileError("[*] pointers not supported"),
@@ -416,12 +425,12 @@ pub fn Invoker(comptime Writer: type) type {
                 },
                 .Array => |info| {
                     if (info.child == u8) {
-                        _ = try escapedWrite(writer, &value, escape);
+                        _ = try escapedWrite(writer, &value, escape, indentation);
                     }
                 },
                 .Optional => {
                     if (value) |not_null| {
-                        try write(writer, not_null, escape);
+                        try write(writer, not_null, escape, indentation);
                     }
                 },
                 else => {},

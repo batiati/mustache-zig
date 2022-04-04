@@ -19,6 +19,7 @@ const TemplateLoader = @import("../template.zig").TemplateLoader;
 const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
+const IndentationStack = context.IndentationStack;
 
 const invoker = @import("invoker.zig");
 const Fields = invoker.Fields;
@@ -27,6 +28,9 @@ const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 const BufError = std.io.FixedBufferStream([]u8).WriteError;
 
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
+
+const unescapedWrite = @import("escape.zig").unescapedWrite;
+const indentedWrite = @import("escape.zig").indentedWrite;
 
 /// Renders the `Template` with the given `data` to a writer.
 pub fn render(template: Template, data: anytype, writer: anytype) !void {
@@ -200,7 +204,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
                 .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
             };
 
-            try WriterRender.renderLevel(self.out_writer, &stack, elements, partials);
+            try WriterRender.renderLevel(self.out_writer, &stack, null, elements, partials);
         }
 
         pub fn bufRender(self: *Self, buffer: *std.ArrayList(u8), elements: []const Element, partials: anytype) Error!void {
@@ -211,7 +215,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
                 .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
             };
 
-            try WriterRender.renderLevel(.{ .Buffer = buffer }, &stack, elements, partials);
+            try WriterRender.renderLevel(.{ .Buffer = buffer }, &stack, null, elements, partials);
         }
 
         pub fn renderText(self: *Self, allocator: Allocator, template_text: []const u8) (ParseError || Error)!void {
@@ -285,16 +289,21 @@ pub fn Render(comptime Writer: type) type {
         pub const ContextInterface = Context(Writer);
         pub const ContextStack = ContextInterface.ContextStack;
         pub const OutWriter = ContextInterface.OutWriter;
-
         pub const Error = Allocator.Error || Writer.Error;
 
-        pub fn renderLevel(out_writer: OutWriter, stack: *const ContextStack, children: ?[]const Element, partials: anytype) Error!void {
+        pub fn renderLevel(
+            out_writer: OutWriter,
+            stack: *const ContextStack,
+            indentation: ?*const IndentationStack,
+            children: ?[]const Element,
+            partials: anytype,
+        ) Error!void {
             if (children) |elements| {
                 for (elements) |element| {
                     switch (element) {
-                        .StaticText => |content| try writeAll(out_writer, content),
-                        .Interpolation => |path| try interpolate(out_writer, stack, path, .Escaped),
-                        .UnescapedInterpolation => |path| try interpolate(out_writer, stack, path, .Unescaped),
+                        .StaticText => |content| try writeAll(out_writer, content, indentation),
+                        .Interpolation => |path| try interpolate(out_writer, stack, path, .Escaped, indentation),
+                        .UnescapedInterpolation => |path| try interpolate(out_writer, stack, path, .Unescaped, indentation),
                         .Section => |section| {
                             if (getIterator(stack, section.key)) |*iterator| {
                                 if (iterator.lambda()) |lambda_ctx| {
@@ -303,7 +312,7 @@ pub fn Render(comptime Writer: type) type {
                                     assert(section.inner_text != null);
                                     assert(section.delimiters != null);
 
-                                    const expand_result = try lambda_ctx.expandLambda(out_writer, stack, "", section.inner_text.?, .Unescaped, section.delimiters.?);
+                                    const expand_result = try lambda_ctx.expandLambda(out_writer, stack, "", section.inner_text.?, .Unescaped, indentation, section.delimiters.?);
                                     assert(expand_result == .Lambda);
                                 } else while (iterator.next()) |item_ctx| {
                                     var next_level = ContextStack{
@@ -311,7 +320,7 @@ pub fn Render(comptime Writer: type) type {
                                         .ctx = item_ctx,
                                     };
 
-                                    try renderLevel(out_writer, &next_level, section.content, partials);
+                                    try renderLevel(out_writer, &next_level, indentation, section.content, partials);
                                 }
                             }
                         },
@@ -322,14 +331,24 @@ pub fn Render(comptime Writer: type) type {
 
                             const truthy = if (getIterator(stack, section.key)) |*iterator| iterator.truthy() else false;
                             if (!truthy) {
-                                try renderLevel(out_writer, stack, section.content, partials);
+                                try renderLevel(out_writer, stack, indentation, section.content, partials);
                             }
                         },
 
                         .Partial => |partial| {
                             const MapInterface = PartialsMapInterface(Template, @TypeOf(partials));
                             if (MapInterface.get(partials, partial.key)) |partial_template| {
-                                try renderLevel(out_writer, stack, partial_template.elements, partials);
+                                if (partial.indentation) |value| {
+                                    var next_indentation = IndentationStack{
+                                        .previous = indentation,
+                                        .indentation = value,
+                                    };
+
+                                    try writeIndentation(out_writer, &next_indentation);
+                                    try renderLevel(out_writer, stack, &next_indentation, partial_template.elements, partials);
+                                } else {
+                                    try renderLevel(out_writer, stack, indentation, partial_template.elements, partials);
+                                }
                             }
                         },
 
@@ -340,11 +359,17 @@ pub fn Render(comptime Writer: type) type {
             }
         }
 
-        fn interpolate(out_writer: OutWriter, stack: *const ContextStack, path: []const u8, escape: Escape) (Allocator.Error || Writer.Error)!void {
+        fn interpolate(
+            out_writer: OutWriter,
+            stack: *const ContextStack,
+            path: []const u8,
+            escape: Escape,
+            identation: ?*const IndentationStack,
+        ) (Allocator.Error || Writer.Error)!void {
             var level: ?*const ContextStack = stack;
 
             while (level) |current| : (level = current.parent) {
-                const path_resolution = try current.ctx.interpolate(out_writer, path, escape);
+                const path_resolution = try current.ctx.interpolate(out_writer, path, escape, identation);
 
                 switch (path_resolution) {
                     .Field => {
@@ -355,7 +380,7 @@ pub fn Render(comptime Writer: type) type {
                     .Lambda => {
 
                         // Expand the lambda against the current context and break the loop
-                        const expand_result = try current.ctx.expandLambda(out_writer, stack, path, "", escape, .{});
+                        const expand_result = try current.ctx.expandLambda(out_writer, stack, path, "", escape, identation, .{});
                         assert(expand_result == .Lambda);
                         break;
                     },
@@ -373,10 +398,17 @@ pub fn Render(comptime Writer: type) type {
             }
         }
 
-        fn writeAll(out_writer: OutWriter, content: []const u8) (Allocator.Error || Writer.Error)!void {
+        fn writeAll(out_writer: OutWriter, content: []const u8, indentation: ?*const IndentationStack) (Allocator.Error || Writer.Error)!void {
             switch (out_writer) {
-                .Writer => |writer| try writer.writeAll(content),
-                .Buffer => |list| try list.appendSlice(content),
+                .Writer => |writer| _ = try unescapedWrite(writer, content, indentation),
+                .Buffer => |list| _ = try unescapedWrite(list.writer(), content, indentation),
+            }
+        }
+
+        fn writeIndentation(out_writer: OutWriter, indentation: *const IndentationStack) (Allocator.Error || Writer.Error)!void {
+            switch (out_writer) {
+                .Writer => |writer| _ = try indentedWrite(writer, indentation),
+                .Buffer => |list| _ = try indentedWrite(list.writer(), indentation),
             }
         }
 
@@ -2481,9 +2513,6 @@ const tests = struct {
 
             // Standalone tags should not require a newline to precede them.
             test "Standalone Without Previous Line" {
-
-                //Indentation needed
-                if (true) return error.SkipZigTest;
                 const template_text = "  {{>partial}}\n>";
                 const partials_template_text = .{
                     .{ "partial", ">\n>" },
@@ -2497,9 +2526,6 @@ const tests = struct {
 
             // Standalone tags should not require a newline to follow them.
             test "Standalone Without Newline" {
-
-                //Indentation needed
-                if (true) return error.SkipZigTest;
                 const template_text = ">\n  {{>partial}}";
                 const partials_template_text = .{
                     .{ "partial", ">\n>" },
@@ -2512,8 +2538,40 @@ const tests = struct {
             }
 
             // Each line of the partial should be indented before rendering.
-            test "Standalone Indentation" {
+            test "Standalone indentation" {
+
                 if (true) return error.SkipZigTest;
+
+                const template_text =
+                    \\ \
+                    \\  {{>partial}}
+                    \\ /
+                    \\
+                ;
+
+                const partials_template_text = .{
+                    .{
+                        "partial",
+                        \\|
+                        \\{{{content}}}
+                        \\|
+                        \\
+                        ,
+                    },
+                };
+
+                const expected =
+                    \\ \
+                    \\  |
+                    \\  <
+                    \\  ->
+                    \\  |
+                    \\ /
+                    \\
+                ;
+
+                const data = .{ .content = "<\n->" };
+                try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
             // Superfluous in-tag whitespace should be ignored.
@@ -2715,6 +2773,80 @@ const tests = struct {
 
             var header = Header{ .id = 100, .content = "This is some content" };
             try expectRender(template_text, header, "<header id='100' hash='4174482081'/>");
+        }
+
+        test "Section Line breaks" {
+            const template_text =
+                \\TODO LIST
+                \\{{#list}}
+                \\- {{item}}
+                \\{{/list}}
+                \\DONE
+            ;
+
+            const expected =
+                \\TODO LIST
+                \\- 1
+                \\- 2
+                \\- 3
+                \\DONE
+            ;
+
+            var data = .{
+                .list = .{
+                    .{ .item = 1 },
+                    .{ .item = 2 },
+                    .{ .item = 3 },
+                },
+            };
+            try expectRender(template_text, data, expected);
+        }
+
+        test "Partials Line breaks" {
+            if (true) return error.SkipZigTest;
+            const template_text =
+                \\TODO LIST
+                \\  {{>todo}}
+                \\DONE
+            ;
+
+            const partials = .{
+                .{
+                    "todo",
+                    \\My tasks
+                    \\  {{>list}}
+                    \\--------
+                    \\
+                },
+
+                .{
+                    "list",
+                    \\{{#list}}
+                    \\- {{item}}
+                    \\{{/list}}
+                    \\
+                },
+            };
+
+            const expected =
+                \\TODO LIST
+                \\  My tasks
+                \\    - 1
+                \\    - 2
+                \\    - 3
+                \\  --------
+                \\DONE
+            ;
+
+            var data = .{
+                .list = .{
+                    .{ .item = 1 },
+                    .{ .item = 2 },
+                    .{ .item = 3 },
+                },
+            };
+
+            try expectRenderPartials(template_text, partials, data, expected);
         }
     };
 
