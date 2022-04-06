@@ -12,7 +12,9 @@ const Delimiters = mustache.Delimiters;
 const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
-const IndentationStack = context.IndentationStack;
+const Indentation = context.Indentation;
+const IndentationQueue = context.IndentationQueue;
+
 const Render = @import("render.zig").Render;
 
 const escapedWrite = @import("escape.zig").escapedWrite;
@@ -101,7 +103,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
 
         out_writer: OutWriter,
         stack: *const ContextStack,
-        indentation: ?*const IndentationStack,
+        indentation: ?Indentation,
         delimiters: Delimiters,
         escape: Escape,
 
@@ -132,7 +134,8 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             defer buffer.deinit();
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, self.indentation, template.elements, {});
+            var indentation = IndentationQueue{};
+            try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, &indentation, template.elements, {});
 
             return buffer.toOwnedSlice();
         }
@@ -147,7 +150,8 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             defer template.deinit(allocator);
 
             const Impl = Render(Writer);
-            try Impl.renderLevel(self.out_writer, self.stack, self.indentation, template.elements, {});
+            var indentation = IndentationQueue{};
+            try Impl.renderLevel(self.out_writer, self.stack, &indentation, template.elements, {});
         }
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {

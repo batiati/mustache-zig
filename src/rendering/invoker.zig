@@ -10,7 +10,7 @@ const context = @import("context.zig");
 const PathResolution = context.PathResolution;
 const Context = context.Context;
 const Escape = context.Escape;
-const IndentationStack = context.IndentationStack;
+const Indentation = context.Indentation;
 
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
@@ -304,7 +304,7 @@ pub fn Invoker(comptime Writer: type) type {
             data: anytype,
             path_iterator: *std.mem.TokenIterator(u8),
             escape: Escape,
-            indentation: ?*const IndentationStack,
+            indentation: ?Indentation,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const Interpolate = PathInvoker(Allocator.Error || Writer.Error, void, interpolateAction);
             return try Interpolate.call(
@@ -322,7 +322,7 @@ pub fn Invoker(comptime Writer: type) type {
             stack: anytype,
             tag_contents: []const u8,
             escape: Escape,
-            indentation: ?*const IndentationStack,
+            indentation: ?Indentation,
             delimiters: Delimiters,
             path_iterator: *std.mem.TokenIterator(u8),
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
@@ -348,7 +348,7 @@ pub fn Invoker(comptime Writer: type) type {
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
             const escape: Escape = params.@"0";
-            const indentation: ?*const IndentationStack = params.@"1";
+            const indentation: ?Indentation = params.@"1";
 
             switch (out_writer) {
                 .Writer => |writer| try write(writer, value, escape, indentation),
@@ -370,7 +370,7 @@ pub fn Invoker(comptime Writer: type) type {
             const stack = params.@"0";
             const inner_text: []const u8 = params.@"1";
             const escape: Escape = params.@"2";
-            const indentation: ?*const IndentationStack = params.@"3";
+            const indentation: ?Indentation = params.@"3";
             const delimiters: Delimiters = params.@"4";
 
             const Impl = lambda.LambdaContextImpl(Writer);
@@ -396,7 +396,7 @@ pub fn Invoker(comptime Writer: type) type {
             writer: anytype,
             value: anytype,
             escape: Escape,
-            indentation: ?*const IndentationStack,
+            indentation: ?Indentation,
         ) (Allocator.Error || Writer.Error)!void {
             const TValue = @TypeOf(value);
 

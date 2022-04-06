@@ -251,6 +251,16 @@ pub const Element = union(Element.Type) {
         }
     }
 
+    pub fn children(self: Element) ?[]const Element {
+        return switch (self) {
+            .Section => |section| section.content,
+            .InvertedSection => |section| section.content,
+            .Parent => |inheritance| inheritance.content,
+            .Block => |block| block.content,
+            else => null,
+        };
+    }
+
     pub fn deinitMany(allocator: Allocator, owns_string: bool, many: ?[]const Element) void {
         if (many) |items| {
             for (items) |item| {
@@ -267,6 +277,15 @@ pub const Template = struct {
 
     pub fn deinit(self: Template, allocator: Allocator) void {
         Element.deinitMany(allocator, self.owns_string, self.elements);
+    }
+
+    pub fn last(self: Template) *const Element {
+        var last_element = &self.elements[self.elements.len - 1];
+        while (last_element.children()) |children| {
+            last_element = &children[children.len - 1];
+        }
+
+        return last_element;
     }
 };
 

@@ -4,7 +4,8 @@ const trait = std.meta.trait;
 
 const context = @import("context.zig");
 const Escape = context.Escape;
-const IndentationStack = context.IndentationStack;
+const Indentation = context.Indentation;
+const IndentationQueue = context.IndentationQueue;
 
 const testing = std.testing;
 const assert = std.debug.assert;
@@ -13,7 +14,7 @@ pub fn escapedWrite(
     writer: anytype,
     value: []const u8,
     escape: Escape,
-    indentation: ?*const IndentationStack,
+    indentation: ?Indentation,
 ) @TypeOf(writer).Error!usize {
 
     // Avoid too many runtime comparations inside the loop, by epecializing versions of the same function at comptime
@@ -33,7 +34,7 @@ pub fn escapedWrite(
 pub fn unescapedWrite(
     writer: anytype,
     value: []const u8,
-    indentation: ?*const IndentationStack,
+    indentation: ?Indentation,
 ) @TypeOf(writer).Error!usize {
 
     // Avoid too many runtime comparations inside the loop, by epecializing versions of the same function at comptime
@@ -47,7 +48,7 @@ fn write(
     comptime escaped: bool,
     comptime indented: bool,
     writer: anytype,
-    indentation: if (indented) *const IndentationStack else void,
+    indentation: if (indented) Indentation else void,
     value: []const u8,
 ) @TypeOf(writer).Error!usize {
     if (comptime escaped or indented) {
@@ -76,7 +77,7 @@ fn write(
                         written_bytes += slice.len;
                     }
 
-                    written_bytes += try indentedWrite(writer, indentation);
+                    written_bytes += try indentation.write(.Middle, writer);
 
                     index = char_index;
                 } else if (char == '\n') {
@@ -116,7 +117,7 @@ fn write(
         }
 
         if (comptime indented) {
-            if (new_line) written_bytes += try indentedWrite(writer, indentation);
+            if (new_line) written_bytes += try indentation.write(.Last, writer);
         }
 
         return written_bytes;
@@ -124,19 +125,6 @@ fn write(
         try writer.writeAll(value);
         return value.len;
     }
-}
-
-pub fn indentedWrite(writer: anytype, indentation: *const IndentationStack) !usize {
-    var written_bytes: usize = 0;
-    var current_level_indentation: ?*const IndentationStack = indentation;
-    while (current_level_indentation) |level_indentation| {
-        defer current_level_indentation = level_indentation.previous;
-
-        try writer.writeAll(level_indentation.indentation);
-        written_bytes += level_indentation.indentation.len;
-    }
-
-    return written_bytes;
 }
 
 test "Escape" {
@@ -155,27 +143,59 @@ test "Escape" {
 }
 
 test "Escape and Indentation" {
-    var indent_1 = IndentationStack{ .previous = null, .indentation = ">>" };
+    var root = IndentationQueue{};
 
-    try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .Escaped, &indent_1);
-    try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, &indent_1);
+    var node_1 = IndentationQueue.Node{
+        .indentation = ">>",
+        .last_indented_element = undefined,
+    };
+    var level_1 = root.indent(&node_1);
 
-    var indent_2 = IndentationStack{ .previous = &indent_1, .indentation = ">>" };
+    try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .Escaped, level_1.get(undefined));
+    try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, level_1.get(undefined));
 
-    try expectEscapeAndIndent("&gt;a\n>>>>&gt;b\n>>>>&gt;c", ">a\n>b\n>c", .Escaped, &indent_2);
-    try expectEscapeAndIndent("&gt;a\r\n>>>>&gt;b\r\n>>>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, &indent_2);
+    {
+        var node_2 = IndentationQueue.Node{
+            .indentation = ">>",
+            .last_indented_element = undefined,
+        };
+        var level_2 = level_1.indent(&node_2);
+        defer level_1.unindent();
+
+        try expectEscapeAndIndent("&gt;a\n>>>>&gt;b\n>>>>&gt;c", ">a\n>b\n>c", .Escaped, level_2.get(undefined));
+        try expectEscapeAndIndent("&gt;a\r\n>>>>&gt;b\r\n>>>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, level_2.get(undefined));
+    }
+
+    try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .Escaped, level_1.get(undefined));
+    try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, level_1.get(undefined));
 }
 
 test "Indentation" {
-    var indent_1 = IndentationStack{ .previous = null, .indentation = ">>" };
+    var root = IndentationQueue{};
 
-    try expectIndent("a\n>>b\n>>c", "a\nb\nc", &indent_1);
-    try expectIndent("a\r\n>>b\r\n>>c", "a\r\nb\r\nc", &indent_1);
+    var node_1 = IndentationQueue.Node{
+        .indentation = ">>",
+        .last_indented_element = undefined,
+    };
+    var level_1 = root.indent(&node_1);
 
-    var indent_2 = IndentationStack{ .previous = &indent_1, .indentation = ">>" };
+    try expectIndent("a\n>>b\n>>c", "a\nb\nc", level_1.get(undefined));
+    try expectIndent("a\r\n>>b\r\n>>c", "a\r\nb\r\nc", level_1.get(undefined));
 
-    try expectIndent("a\n>>>>b\n>>>>c", "a\nb\nc", &indent_2);
-    try expectIndent("a\r\n>>>>b\r\n>>>>c", "a\r\nb\r\nc", &indent_2);
+    {
+        var node_2 = IndentationQueue.Node{
+            .indentation = ">>",
+            .last_indented_element = undefined,
+        };
+        var level_2 = level_1.indent(&node_2);
+        defer level_1.unindent();
+
+        try expectIndent("a\n>>>>b\n>>>>c", "a\nb\nc", level_2.get(undefined));
+        try expectIndent("a\r\n>>>>b\r\n>>>>c", "a\r\nb\r\nc", level_2.get(undefined));
+    }
+
+    try expectIndent("a\n>>b\n>>c", "a\nb\nc", level_1.get(undefined));
+    try expectIndent("a\r\n>>b\r\n>>c", "a\r\nb\r\nc", level_1.get(undefined));
 }
 
 fn expectEscape(expected: []const u8, value: []const u8, escape: Escape) !void {
@@ -188,7 +208,7 @@ fn expectEscape(expected: []const u8, value: []const u8, escape: Escape) !void {
     try testing.expectEqual(expected.len, written_bytes);
 }
 
-fn expectIndent(expected: []const u8, value: []const u8, indentation: *IndentationStack) !void {
+fn expectIndent(expected: []const u8, value: []const u8, indentation: ?Indentation) !void {
     const allocator = testing.allocator;
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
@@ -198,7 +218,7 @@ fn expectIndent(expected: []const u8, value: []const u8, indentation: *Indentati
     try testing.expectEqual(expected.len, written_bytes);
 }
 
-fn expectEscapeAndIndent(expected: []const u8, value: []const u8, escape: Escape, indentation: *IndentationStack) !void {
+fn expectEscapeAndIndent(expected: []const u8, value: []const u8, escape: Escape, indentation: ?Indentation) !void {
     const allocator = testing.allocator;
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
