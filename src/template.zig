@@ -2454,8 +2454,6 @@ const tests = struct {
         }
 
         test "Large DOM File test" {
-            if (true) return error.SkipZigTest;
-
             const template_text =
                 \\{{! Comments block }}
                 \\  Hello

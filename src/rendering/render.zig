@@ -2159,12 +2159,49 @@ const tests = struct {
 
             // Delimiters set in a parent template should not affect a partial.
             test "Partial Inheritence" {
-                return error.SkipZigTest;
+                const template_text =
+                    \\[ {{>include}} ]
+                    \\{{= | | =}}
+                    \\[ |>include| ]
+                ;
+
+                const partials_text = .{
+                    .{
+                        "include",
+                        ".{{value}}.",
+                    },
+                };
+
+                const expected =
+                    \\[ .yes. ]
+                    \\[ .yes. ]
+                ;
+
+                var data = .{ .value = "yes" };
+                try expectRenderPartials(template_text, partials_text, data, expected);
             }
 
             // Delimiters set in a partial should not affect the parent template.
             test "Post-Partial Behavior" {
-                return error.SkipZigTest;
+                const template_text =
+                    \\[ {{>include}} ]
+                    \\[ .{{value}}.  .|value|. ]
+                ;
+
+                const partials_text = .{
+                    .{
+                        "include",
+                        ".{{value}}. {{= | | =}} .|value|.",
+                    },
+                };
+
+                const expected =
+                    \\[ .yes.  .yes. ]
+                    \\[ .yes.  .|value|. ]
+                ;
+
+                var data = .{ .value = "yes" };
+                try expectRenderPartials(template_text, partials_text, data, expected);
             }
 
             // Surrounding whitespace should be left untouched.
