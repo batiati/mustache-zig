@@ -28,6 +28,8 @@ pub fn main() anyerror!void {
         try simpleTemplate(std.heap.raw_c_allocator, .Counter, std.io.null_writer);
         try simpleTemplate(std.heap.raw_c_allocator, .String, std.io.null_writer);
         try simpleTemplate(std.heap.raw_c_allocator, .Writer, file.writer());
+        try partialTemplates(std.heap.raw_c_allocator, .Counter, std.io.null_writer);
+        try partialTemplates(std.heap.raw_c_allocator, .String, std.io.null_writer);        
     }
 }
 
@@ -55,6 +57,52 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype
     _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, mode, template, data, writer }, reference);
     _ = try repeat("Mustache not parsed", notParsed, .{ allocator, mode, template_text, data, writer }, reference);
     std.debug.print("\n\n", .{});
+}
+
+pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anytype) !void {
+
+    const template_text = 
+        \\{{>head.html}}
+        \\<body>
+        \\    <div>{{body}}</div>
+        \\    {{>footer.html}}
+        \\</body>
+        ;
+
+    const head_partial_text =
+        \\<head>
+        \\    <title>{{title}}</title>
+        \\</head>
+        ;
+
+    const footer_partial_text = "<footer>Sup?</footer>";
+
+
+    var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false })).Success;
+    defer template.deinit(allocator);
+
+    var head_template = (try mustache.parseText(allocator, head_partial_text, .{}, .{ .copy_strings = false })).Success;
+    defer head_template.deinit(allocator);
+
+    var footer_template = (try mustache.parseText(allocator, footer_partial_text, .{}, .{ .copy_strings = false })).Success;
+    defer footer_template.deinit(allocator);
+
+    var partial_templates = std.StringHashMap(mustache.Template).init(allocator);
+    defer partial_templates.deinit();
+
+    try partial_templates.put("head.html",  head_template );
+    try partial_templates.put( "footer.html", footer_template);
+
+    var data = .{
+        .title = "Hello, Mustache!",
+        .body = "This is a really simple test of the rendering!",
+    };
+
+    std.debug.print("Mode {s}\n", .{@tagName(mode)});
+    std.debug.print("----------------------------------\n", .{});
+    _ = try repeat("Mustache pre-parsed partials", preParsedPartials, .{ allocator, mode, template, partial_templates, data, writer }, null);
+    std.debug.print("\n\n", .{});    
+
 }
 
 fn repeat(comptime caption: []const u8, comptime func: anytype, args: anytype, reference: ?i128) !i128 {
@@ -115,6 +163,22 @@ fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data
         },
     }
 }
+
+fn preParsedPartials(allocator: Allocator, mode: Mode, template: mustache.Template, partial_templates: anytype, data: anytype, writer: anytype) !usize {
+    switch (mode) {
+        .Counter, .Writer => {
+            var counter = std.io.countingWriter(writer);
+            try mustache.renderPartials(template, partial_templates, data, counter.writer());
+            return counter.bytes_written;
+        },
+        .String => {
+            const ret = try mustache.allocRenderPartials(allocator, template, partial_templates, data);
+            defer allocator.free(ret);
+            return ret.len;
+        },
+    }
+}
+
 
 fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: anytype, writer: anytype) !usize {
     switch (mode) {
