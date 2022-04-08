@@ -4,6 +4,7 @@ const meta = std.meta;
 const trait = std.meta.trait;
 
 const mustache = @import("../mustache.zig");
+const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 
 const context = @import("context.zig");
@@ -21,7 +22,7 @@ const assert = std.debug.assert;
 
 const escapedWrite = @import("escape.zig").escapedWrite;
 
-pub fn Invoker(comptime Writer: type) type {
+pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
     return struct {
         pub const ContextInterface = context.Context(Writer);
         pub const ContextStack = ContextInterface.ContextStack;
@@ -339,7 +340,7 @@ pub fn Invoker(comptime Writer: type) type {
         fn getAction(param: void, out_writer: void, value: anytype) error{}!ContextInterface {
             _ = param;
             _ = out_writer;
-            return context.getContext(Writer, value);
+            return context.getContext(Writer, value, options);
         }
 
         fn interpolateAction(
@@ -373,7 +374,7 @@ pub fn Invoker(comptime Writer: type) type {
             const indentation: ?Indentation = params.@"3";
             const delimiters: Delimiters = params.@"4";
 
-            const Impl = lambda.LambdaContextImpl(Writer);
+            const Impl = lambda.LambdaContextImpl(Writer, options);
             var impl = Impl{
                 .out_writer = out_writer,
                 .stack = stack,

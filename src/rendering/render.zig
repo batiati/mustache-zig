@@ -8,6 +8,7 @@ const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
+const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 const Section = mustache.Section;
@@ -35,30 +36,54 @@ const indentedWrite = @import("escape.zig").indentedWrite;
 
 /// Renders the `Template` with the given `data` to a writer.
 pub fn render(template: Template, data: anytype, writer: anytype) !void {
-    return try renderPartials(template, {}, data, writer);
+    return try renderPartialsWithOptions(template, {}, data, writer, .{});
+}
+
+/// Renders the `Template` with the given `data` to a writer.
+pub fn renderWithOptions(template: Template, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
+    return try renderPartialsWithOptions(template, {}, data, writer, options);
 }
 
 /// Renders the `Template` with the given `data` to a writer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 pub fn renderPartials(template: Template, partials: anytype, data: anytype, writer: anytype) !void {
-    var data_render = getDataRender(writer, data);
+    return try renderPartialsWithOptions(template, partials, data, writer, .{});
+}
+
+/// Renders the `Template` with the given `data` to a writer.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+pub fn renderPartialsWithOptions(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
+    var data_render = getDataRender(writer, data, options);
     try data_render.render(template.elements, partials);
 }
 
 /// Renders the `Template` with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
 pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allocator.Error![]const u8 {
-    return try allocRenderPartials(allocator, template, {}, data);
+    return try allocRenderPartialsWithOptions(allocator, template, {}, data, .{});
+}
+
+/// Renders the `Template` with the given `data` and returns an owned slice with the content.
+/// Caller must free the memory
+pub fn allocRenderWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: RenderOptions) Allocator.Error![]const u8 {
+    return try allocRenderPartialsWithOptions(allocator, template, {}, data, options);
 }
 
 /// Renders the `Template` with the given `data` to a writer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// Caller must free the memory
 pub fn allocRenderPartials(allocator: Allocator, template: Template, partials: anytype, data: anytype) Allocator.Error![]const u8 {
+    return try allocRenderPartialsWithOptions(allocator, template, partials, data, .{});
+}
+
+/// Renders the `Template` with the given `data` to a writer.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// Caller must free the memory
+pub fn allocRenderPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) Allocator.Error![]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data);
+    var data_render = getDataRender(std.io.null_writer, data, options);
     try data_render.bufRender(&list, template.elements, partials);
 
     return list.toOwnedSlice();
@@ -67,17 +92,30 @@ pub fn allocRenderPartials(allocator: Allocator, template: Template, partials: a
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
 pub fn allocRenderZ(allocator: Allocator, template: Template, data: anytype) Allocator.Error![:0]const u8 {
-    return try allocRenderPartialsZ(allocator, template, {}, data);
+    return try allocRenderPartialsZWithOptions(allocator, template, {}, data, .{});
+}
+
+/// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
+/// Caller must free the memory
+pub fn allocRenderZWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: RenderOptions) Allocator.Error![:0]const u8 {
+    return try allocRenderPartialsZWithOptions(allocator, template, {}, data, options);
 }
 
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// Caller must free the memory
 pub fn allocRenderPartialsZ(allocator: Allocator, template: Template, partials: anytype, data: anytype) Allocator.Error![:0]const u8 {
+    return try allocRenderPartialsZWithOptions(allocator, template, partials, data, .{});
+}
+
+/// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// Caller must free the memory
+pub fn allocRenderPartialsZWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) Allocator.Error![:0]const u8 {
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data);
+    var data_render = getDataRender(std.io.null_writer, data, options);
     try data_render.bufRender(&list, template.elements, partials);
 
     return list.toOwnedSliceSentinel('\x00');
@@ -85,14 +123,25 @@ pub fn allocRenderPartialsZ(allocator: Allocator, template: Template, partials: 
 
 /// Renders the `Template` with the given `data` to a buffer.
 pub fn bufRender(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![]const u8 {
-    return try bufRenderPartials(buf, template, {}, data);
+    return try bufRenderPartialsWithOptions(buf, template, {}, data, .{});
+}
+
+/// Renders the `Template` with the given `data` to a buffer.
+pub fn bufRenderWithOptions(buf: []u8, template: Template, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![]const u8 {
+    return try bufRenderPartialsWithOptions(buf, template, {}, data, options);
 }
 
 /// Renders the `Template` with the given `data` to a buffer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 pub fn bufRenderPartials(buf: []u8, template: Template, partials: anytype, data: anytype) (Allocator.Error || BufError)![]const u8 {
+    return bufRenderPartialsWithOptions(buf, template, partials, data, .{});
+}
+
+/// Renders the `Template` with the given `data` to a buffer.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+pub fn bufRenderPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![]const u8 {
     var fbs = std.io.fixedBufferStream(buf);
-    var data_render = getDataRender(fbs.writer(), data);
+    var data_render = getDataRender(fbs.writer(), data, options);
     try data_render.render(template.elements, partials);
 
     return fbs.getWritten();
@@ -100,12 +149,22 @@ pub fn bufRenderPartials(buf: []u8, template: Template, partials: anytype, data:
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
 pub fn bufRenderZ(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
-    return try bufRenderPartialsZ(buf, template, {}, data);
+    return try bufRenderPartialsZWithOptions(buf, template, {}, data, .{});
+}
+
+/// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
+pub fn bufRenderZWithOptions(buf: []u8, template: Template, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![:0]const u8 {
+    return try bufRenderPartialsZWithOptions(buf, template, {}, data, options);
 }
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
 pub fn bufRenderPartialsZ(buf: []u8, template: Template, partials: anytype, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
-    var ret = try bufRenderPartials(buf, template, partials, data);
+    return try bufRenderPartialsZWithOptions(buf, template, partials, data, .{});
+}
+
+/// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
+pub fn bufRenderPartialsZWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![:0]const u8 {
+    var ret = try bufRenderPartialsWithOptions(buf, template, partials, data, options);
 
     if (ret.len < buf.len) {
         buf[ret.len] = '\x00';
@@ -117,7 +176,7 @@ pub fn bufRenderPartialsZ(buf: []u8, template: Template, partials: anytype, data
 
 /// Parses the `template_text` and renders with the given `data` to a writer
 pub fn renderText(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
-    var data_render = getDataRender(writer, data);
+    var data_render = getDataRender(writer, data, RenderOptions{});
     try data_render.renderText(allocator, template_text);
 }
 
@@ -127,7 +186,7 @@ pub fn allocRenderText(allocator: Allocator, template_text: []const u8, data: an
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data);
+    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
     try data_render.bufRenderText(allocator, &list, template_text);
 
     return list.toOwnedSlice();
@@ -139,7 +198,7 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data);
+    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
     try data_render.bufRenderText(allocator, &list, template_text);
 
     return list.toOwnedSliceSentinel('\x00');
@@ -147,7 +206,7 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
 pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
-    var data_render = getDataRender(writer, data);
+    var data_render = getDataRender(writer, data, RenderOptions{});
     try data_render.renderFile(allocator, template_absolute_path);
 }
 
@@ -157,7 +216,7 @@ pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8,
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data);
+    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
     try data_render.bufRenderFile(allocator, &list, template_absolute_path);
 
     return list.toOwnedSlice();
@@ -169,26 +228,26 @@ pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data);
+    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
     try data_render.bufRenderFile(allocator, &list, template_absolute_path);
 
     return list.toOwnedSliceSentinel('\x00');
 }
 
-fn getDataRender(writer: anytype, data: anytype) DataRender(@TypeOf(writer), @TypeOf(data)) {
+fn getDataRender(writer: anytype, data: anytype, comptime options: RenderOptions) DataRender(@TypeOf(writer), @TypeOf(data), options) {
     const Writer = @TypeOf(writer);
 
-    return DataRender(Writer, @TypeOf(data)){
+    return DataRender(Writer, @TypeOf(data), options){
         .out_writer = .{ .Writer = writer },
         .data = data,
     };
 }
 
-fn DataRender(comptime Writer: type, comptime Data: type) type {
+fn DataRender(comptime Writer: type, comptime Data: type, comptime options: RenderOptions) type {
     return struct {
         const Self = @This();
 
-        const WriterRender = Render(Writer);
+        const WriterRender = Render(Writer, options);
         const ContextInterface = Context(Writer);
         const OutWriter = ContextInterface.OutWriter;
 
@@ -202,7 +261,11 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
 
             var stack = WriterRender.ContextStack{
                 .parent = null,
-                .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
+                .ctx = context.getContext(
+                    Writer,
+                    if (by_value) self.data else @as(*const Data, &self.data),
+                    options,
+                ),
             };
 
             var indentation = IndentationQueue{};
@@ -214,7 +277,11 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
 
             var stack = WriterRender.ContextStack{
                 .parent = null,
-                .ctx = context.getContext(Writer, if (by_value) self.data else @as(*const Data, &self.data)),
+                .ctx = context.getContext(
+                    Writer,
+                    if (by_value) self.data else @as(*const Data, &self.data),
+                    options,
+                ),
             };
 
             var indentation = IndentationQueue{};
@@ -287,7 +354,9 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
     };
 }
 
-pub fn Render(comptime Writer: type) type {
+pub fn Render(comptime Writer: type, comptime options: RenderOptions) type {
+    _ = options;
+
     return struct {
         pub const ContextInterface = Context(Writer);
         pub const ContextStack = ContextInterface.ContextStack;

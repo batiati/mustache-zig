@@ -7,6 +7,7 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 const mustache = @import("../mustache.zig");
+const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 
 const context = @import("context.zig");
@@ -94,7 +95,7 @@ pub const LambdaContext = struct {
     }
 };
 
-pub fn LambdaContextImpl(comptime Writer: type) type {
+pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions) type {
     return struct {
         const Self = @This();
         const ContextInterface = Context(Writer);
@@ -133,7 +134,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             var buffer = std.ArrayList(u8).init(allocator);
             defer buffer.deinit();
 
-            const Impl = Render(Writer);
+            const Impl = Render(Writer, options);
             var indentation = IndentationQueue{};
             try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, &indentation, template.elements, {});
 
@@ -149,7 +150,7 @@ pub fn LambdaContextImpl(comptime Writer: type) type {
             };
             defer template.deinit(allocator);
 
-            const Impl = Render(Writer);
+            const Impl = Render(Writer, options);
             var indentation = IndentationQueue{};
             try Impl.renderLevel(self.out_writer, self.stack, &indentation, template.elements, {});
         }

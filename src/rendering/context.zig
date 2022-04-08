@@ -6,6 +6,7 @@ const trait = std.meta.trait;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
+const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 
@@ -164,12 +165,12 @@ pub const IndentationQueue = struct {
     }
 };
 
-pub fn getContext(comptime Writer: type, data: anytype) Context(Writer) {
+pub fn getContext(comptime Writer: type, data: anytype, comptime options: RenderOptions) Context(Writer) {
     const Data = @TypeOf(data);
     const by_value = comptime Fields.byValue(Data);
     if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
 
-    const Impl = ContextImpl(Writer, Data);
+    const Impl = ContextImpl(Writer, Data, options);
     return Impl.context(data);
 }
 
@@ -364,12 +365,12 @@ pub fn Context(comptime Writer: type) type {
     };
 }
 
-fn ContextImpl(comptime Writer: type, comptime Data: type) type {
+fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: RenderOptions) type {
     return struct {
         const ContextInterface = Context(Writer);
         const ContextStack = ContextInterface.ContextStack;
         const OutWriter = ContextInterface.OutWriter;
-        const Invoker = invoker.Invoker(Writer);
+        const Invoker = invoker.Invoker(Writer, options);
 
         const vtable = ContextInterface.VTable{
             .get = get,
@@ -590,7 +591,7 @@ const struct_tests = struct {
         const by_value = comptime Fields.byValue(Data);
 
         const Writer = @TypeOf(writer);
-        var ctx = getContext(Writer, if (by_value) data else @as(*const Data, &data));
+        var ctx = getContext(Writer, if (by_value) data else @as(*const Data, &data), RenderOptions{});
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
@@ -1167,7 +1168,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = getContext(@TypeOf(writer), &person);
+        var person_ctx = getContext(@TypeOf(writer), &person, .{});
 
         list.clearAndFree();
 
@@ -1221,7 +1222,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = getContext(@TypeOf(writer), &person);
+        var person_ctx = getContext(@TypeOf(writer), &person, .{});
 
         list.clearAndFree();
 
@@ -1285,7 +1286,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var person_ctx = getContext(Writer, &person);
+        var person_ctx = getContext(Writer, &person, .{});
 
         // Person.address
         var address_ctx = switch (person_ctx.get("address")) {
@@ -1336,7 +1337,7 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Person
-        var ctx = getContext(@TypeOf(writer), &person);
+        var ctx = getContext(@TypeOf(writer), &person, .{});
 
         var iterator = switch (ctx.iterator("items")) {
             .Field => |found| found,
@@ -1378,7 +1379,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var ctx = getContext(Writer, &person);
+        var ctx = getContext(Writer, &person, .{});
 
         {
             // iterator over true
@@ -1420,7 +1421,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var ctx = getContext(Writer, &person);
+        var ctx = getContext(Writer, &person, .{});
 
         {
             // iterator over true
