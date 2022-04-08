@@ -302,6 +302,11 @@ pub fn parseText(
     default_delimiters: Delimiters,
     comptime options: mustache.options.ParseTextOptions,
 ) Allocator.Error!ParseResult {
+
+    //Note: the "default_delimiters" parameter must be runtime-known
+    //This field could be inserted on "ParseTextOptions" when comptime fields get fixed
+    //https://github.com/ziglang/zig/issues/5497
+
     const source = Source{ .String = .{ .copy_strings = options.copy_strings } };
     return try parseSource(source, options.features, allocator, template_text, default_delimiters);
 }
@@ -319,6 +324,11 @@ pub fn parseFile(
     default_delimiters: Delimiters,
     comptime options: mustache.options.ParseFileOptions,
 ) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseResult {
+
+    //Note: the "default_delimiters" parameter must be runtime-known
+    //This field could be inserted on "ParseTextOptions" when comptime fields get fixed
+    //https://github.com/ziglang/zig/issues/5497
+
     const source = Source{ .Stream = .{ .read_buffer_size = options.read_buffer_size } };
     return try parseSource(source, options.features, allocator, template_absolute_path, default_delimiters);
 }

@@ -7,7 +7,7 @@ const testing = std.testing;
 const mustache = @import("../mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
 
-const memory = @import("../memory.zig");
+const memory = @import("memory.zig");
 
 const parsing = @import("parsing.zig");
 const BlockType = parsing.BlockType;

@@ -12,7 +12,7 @@ const mustache = @import("../mustache.zig");
 const ParseError = mustache.ParseError;
 const TemplateOptions = mustache.options.TemplateOptions;
 
-const memory = @import("../memory.zig");
+const memory = @import("memory.zig");
 
 const parsing = @import("parsing.zig");
 const Event = parsing.Event;

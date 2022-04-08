@@ -22,7 +22,7 @@ const tokens = parsing.tokens;
 const BlockType = parsing.BlockType;
 const FileReader = parsing.FileReader;
 
-const memory = @import("../memory.zig");
+const memory = @import("memory.zig");
 
 pub fn Parser(comptime options: TemplateOptions) type {
     const copy_string = options.copyStrings();

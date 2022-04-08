@@ -8,7 +8,7 @@ const testing = std.testing;
 const mustache = @import("../mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
 
-const memory = @import("../memory.zig");
+const memory = @import("memory.zig");
 
 const File = std.fs.File;
 

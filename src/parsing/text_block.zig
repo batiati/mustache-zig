@@ -9,7 +9,7 @@ const assert = std.debug.assert;
 const mustache = @import("../mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
 
-const memory = @import("../memory.zig");
+const memory = @import("memory.zig");
 
 const parsing = @import("parsing.zig");
 const tokens = parsing.tokens;
