@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
 const memory = @import("../memory.zig");
 
@@ -18,7 +18,7 @@ const BlockType = parsing.BlockType;
 const Mark = parsing.Mark;
 const Delimiters = parsing.Delimiters;
 
-pub fn TextBlock(comptime options: Options) type {
+pub fn TextBlock(comptime options: TemplateOptions) type {
     const RefCounter = memory.RefCounter(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 

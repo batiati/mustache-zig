@@ -7,7 +7,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 const Section = mustache.Section;
@@ -222,7 +222,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
         }
 
         pub fn renderText(self: *Self, allocator: Allocator, template_text: []const u8) (ParseError || Error)!void {
-            const render_text_options = Options{
+            const render_text_options = TemplateOptions{
                 .source = .{ .String = .{ .copy_strings = false } },
                 .output = .Render,
             };
@@ -236,7 +236,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
         }
 
         pub fn bufRenderText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8) (ParseError || Error)!void {
-            const render_text_options = Options{
+            const render_text_options = TemplateOptions{
                 .source = .{ .String = .{ .copy_strings = false } },
                 .output = .Render,
             };
@@ -254,7 +254,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
         }
 
         pub fn renderFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8) !void {
-            const render_file_options = Options{
+            const render_file_options = TemplateOptions{
                 .source = .{ .Stream = .{} },
                 .output = .Render,
             };
@@ -268,7 +268,7 @@ fn DataRender(comptime Writer: type, comptime Data: type) type {
         }
 
         pub fn bufRenderFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8) !void {
-            const render_file_options = Options{
+            const render_file_options = TemplateOptions{
                 .source = .{ .Stream = .{} },
                 .output = .Render,
             };

@@ -29,7 +29,7 @@ pub fn main() anyerror!void {
         try simpleTemplate(std.heap.raw_c_allocator, .String, std.io.null_writer);
         try simpleTemplate(std.heap.raw_c_allocator, .Writer, file.writer());
         try partialTemplates(std.heap.raw_c_allocator, .Counter, std.io.null_writer);
-        try partialTemplates(std.heap.raw_c_allocator, .String, std.io.null_writer);        
+        try partialTemplates(std.heap.raw_c_allocator, .String, std.io.null_writer);
     }
 }
 
@@ -60,23 +60,21 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype
 }
 
 pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anytype) !void {
-
-    const template_text = 
+    const template_text =
         \\{{>head.html}}
         \\<body>
         \\    <div>{{body}}</div>
         \\    {{>footer.html}}
         \\</body>
-        ;
+    ;
 
     const head_partial_text =
         \\<head>
         \\    <title>{{title}}</title>
         \\</head>
-        ;
+    ;
 
     const footer_partial_text = "<footer>Sup?</footer>";
-
 
     var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false })).Success;
     defer template.deinit(allocator);
@@ -90,8 +88,8 @@ pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anyty
     var partial_templates = std.StringHashMap(mustache.Template).init(allocator);
     defer partial_templates.deinit();
 
-    try partial_templates.put("head.html",  head_template );
-    try partial_templates.put( "footer.html", footer_template);
+    try partial_templates.put("head.html", head_template);
+    try partial_templates.put("footer.html", footer_template);
 
     var data = .{
         .title = "Hello, Mustache!",
@@ -101,8 +99,7 @@ pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anyty
     std.debug.print("Mode {s}\n", .{@tagName(mode)});
     std.debug.print("----------------------------------\n", .{});
     _ = try repeat("Mustache pre-parsed partials", preParsedPartials, .{ allocator, mode, template, partial_templates, data, writer }, null);
-    std.debug.print("\n\n", .{});    
-
+    std.debug.print("\n\n", .{});
 }
 
 fn repeat(comptime caption: []const u8, comptime func: anytype, args: anytype, reference: ?i128) !i128 {
@@ -178,7 +175,6 @@ fn preParsedPartials(allocator: Allocator, mode: Mode, template: mustache.Templa
         },
     }
 }
-
 
 fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: anytype, writer: anytype) !usize {
     switch (mode) {

@@ -5,14 +5,14 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
 const memory = @import("../memory.zig");
 
 const parsing = @import("parsing.zig");
 const BlockType = parsing.BlockType;
 
-pub fn Node(comptime options: Options) type {
+pub fn Node(comptime options: TemplateOptions) type {
     const RefCountedSlice = memory.RefCountedSlice(options);
     const TextBlock = parsing.TextBlock(options);
 

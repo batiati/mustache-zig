@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -86,7 +86,7 @@ pub const Event = union(enum) {
     Eof,
 };
 
-pub fn TrimmingIndex(comptime options: Options) type {
+pub fn TrimmingIndex(comptime options: TemplateOptions) type {
     return if (options.features.preseve_line_breaks_and_indentation)
         union(enum) {
             PreserveWhitespaces,

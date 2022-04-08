@@ -6,20 +6,20 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 const mustache = @import("mustache.zig");
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
-pub fn RefCountedSlice(comptime options: Options) type {
+pub fn RefCountedSlice(comptime options: TemplateOptions) type {
     return struct {
         content: []const u8,
         ref_counter: RefCounter(options),
     };
 }
 
-pub fn RefCounter(comptime options: Options) type {
+pub fn RefCounter(comptime options: TemplateOptions) type {
     return if (options.isRefCounted()) RefCounterImpl else NoOpRefCounter;
 }
 
-pub fn RefCounterHolder(comptime options: Options) type {
+pub fn RefCounterHolder(comptime options: TemplateOptions) type {
     return if (options.isRefCounted()) RefCounterHolderImpl else NoOpRefCounterHolder;
 }
 
@@ -161,7 +161,7 @@ const NoOpRefCounterHolder = struct {
     }
 };
 
-pub fn EpochArena(comptime options: Options) type {
+pub fn EpochArena(comptime options: TemplateOptions) type {
     const is_epoch_arena = options.output == .Render;
 
     return struct {
@@ -204,7 +204,7 @@ pub fn EpochArena(comptime options: Options) type {
     };
 }
 
-const testing_options = Options{
+const testing_options = TemplateOptions{
     .source = .{ .Stream = .{} },
     .output = .Render,
 };

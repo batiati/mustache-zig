@@ -6,7 +6,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const mustache = @import("mustache.zig");
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 const Source = mustache.options.Source;
 
 const parsing = @import("parsing/parsing.zig");
@@ -330,7 +330,7 @@ fn parseSource(
     source_content: []const u8,
     delimiters: Delimiters,
 ) !ParseResult {
-    const options = Options{
+    const options = TemplateOptions{
         .source = source,
         .output = .Parse,
         .features = features,
@@ -355,7 +355,7 @@ fn parseSource(
     }
 }
 
-pub fn TemplateLoader(comptime options: Options) type {
+pub fn TemplateLoader(comptime options: TemplateOptions) type {
     return struct {
         const Self = @This();
 
@@ -499,7 +499,7 @@ const tests = struct {
         _ = api;
     }
 
-    const options = Options{
+    const options = TemplateOptions{
         .source = .{ .String = .{} },
         .output = .Parse,
     };

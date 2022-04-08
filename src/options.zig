@@ -1,9 +1,11 @@
 const mustache = @import("mustache.zig");
 const Delimiters = mustache.Delimiters;
 
+const builtin = @import("builtin");
+
 ///
 /// General options for processing a mustache template
-pub const Options = struct {
+pub const TemplateOptions = struct {
 
     ///
     /// Template source options
@@ -112,6 +114,34 @@ pub const Features = struct {
     ///
     /// Lambda expansion support
     lambdas: bool = true,
+};
+
+pub const RenderOptions = struct {
+
+    ///
+    /// Defines the behavior when rendering a unknown context
+    /// Mustache's spec says it must be rendered as an empty string
+    /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
+    context_misses: enum { Empty, Error } = if (builtin.mode == .Debug) .Error else .Empty,
+
+    ///
+    /// Allows redefining the delimiters through the tags '{{=' and '=}}'
+    /// Disabling this option speeds up the parsing process.
+    /// If disabled, any occurrence of '{{=' will result in a parse error
+    allow_redefining_delimiters: bool = true,
+
+    ///
+    /// Preserve line breaks and indentations.
+    /// This option is useful when rendering documents sensible to spaces such as `yaml` for example.
+    /// Disabling this option speeds up the parsing process.
+    /// Examples:
+    /// [Line breaks](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/comments.yml#L38)
+    /// [Indentation](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/partials.yml#L82)
+    preseve_line_breaks_and_indentation: bool = true,
+
+    ///
+    /// Lambda expansion support
+    lambdas: Lambdas = .{ .Enabled = .{} },
 };
 
 pub const Lambdas = union(enum) {

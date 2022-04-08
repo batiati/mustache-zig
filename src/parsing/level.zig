@@ -5,7 +5,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const mustache = @import("../mustache.zig");
 const Delimiters = mustache.Delimiters;
 const ParseError = mustache.ParseError;
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
 const parsing = @import("parsing.zig");
 const BlockType = parsing.BlockType;
@@ -13,7 +13,7 @@ const BlockType = parsing.BlockType;
 const assert = std.debug.assert;
 const testing = std.testing;
 
-pub fn Level(comptime options: Options) type {
+pub fn Level(comptime options: TemplateOptions) type {
     const TextBlock = parsing.TextBlock(options);
     const Node = parsing.Node(options);
 

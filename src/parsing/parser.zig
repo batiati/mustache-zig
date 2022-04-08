@@ -11,7 +11,7 @@ const Block = mustache.Block;
 const ParseError = mustache.ParseError;
 const ParseErrorDetail = mustache.ParseErrorDetail;
 
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -24,7 +24,7 @@ const FileReader = parsing.FileReader;
 
 const memory = @import("../memory.zig");
 
-pub fn Parser(comptime options: Options) type {
+pub fn Parser(comptime options: TemplateOptions) type {
     const copy_string = options.copyStrings();
     const allow_lambdas = options.features.lambdas;
 

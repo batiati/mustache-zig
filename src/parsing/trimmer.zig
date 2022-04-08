@@ -12,7 +12,7 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
 const parsing = @import("parsing.zig");
 
@@ -140,7 +140,7 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
         };
 }
 
-const testing_options = Options{
+const testing_options = TemplateOptions{
     .source = .{ .String = .{} },
     .output = .Render,
 };

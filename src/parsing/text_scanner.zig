@@ -10,7 +10,7 @@ const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
 const ParseError = mustache.ParseError;
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
 const memory = @import("../memory.zig");
 
@@ -23,7 +23,7 @@ const Delimiters = parsing.Delimiters;
 const FileReader = parsing.FileReader;
 const Trimmer = parsing.Trimmer;
 
-pub fn TextScanner(comptime options: Options) type {
+pub fn TextScanner(comptime options: TemplateOptions) type {
     const RefCounter = memory.RefCounter(options);
     const RefCountedSlice = memory.RefCountedSlice(options);
     const TextBlock = parsing.TextBlock(options);

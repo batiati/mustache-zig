@@ -6,13 +6,13 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 const mustache = @import("../mustache.zig");
-const Options = mustache.options.Options;
+const TemplateOptions = mustache.options.TemplateOptions;
 
 const memory = @import("../memory.zig");
 
 const File = std.fs.File;
 
-pub fn FileReader(comptime options: Options) type {
+pub fn FileReader(comptime options: TemplateOptions) type {
     const read_buffer_size = switch (options.source) {
         .Stream => |stream| stream.read_buffer_size,
         .String => return void,
