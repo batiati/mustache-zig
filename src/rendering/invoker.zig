@@ -11,7 +11,6 @@ const context = @import("context.zig");
 const PathResolution = context.PathResolution;
 const Context = context.Context;
 const Escape = context.Escape;
-const Indentation = context.Indentation;
 
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
@@ -20,13 +19,14 @@ const LambdaInvoker = lambda.LambdaInvoker;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const escapedWrite = @import("escape.zig").escapedWrite;
-
 pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
+    const escapedWrite = @import("escape.zig").TextWriter(options).escapedWrite;
+
     return struct {
-        pub const ContextInterface = context.Context(Writer);
+        pub const ContextInterface = context.Context(Writer, options);
         pub const ContextStack = ContextInterface.ContextStack;
         pub const OutWriter = ContextInterface.OutWriter;
+        const Indentation = ContextInterface.Indentation;
 
         fn PathInvoker(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
             const action_type_info = @typeInfo(@TypeOf(action_fn));
@@ -289,8 +289,8 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             data: anytype,
             path_iterator: *std.mem.TokenIterator(u8),
             index: ?usize,
-        ) PathResolution(Context(Writer)) {
-            const Get = PathInvoker(error{}, Context(Writer), getAction);
+        ) PathResolution(ContextInterface) {
+            const Get = PathInvoker(error{}, ContextInterface, getAction);
             return try Get.call(
                 {},
                 {},
@@ -305,7 +305,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             data: anytype,
             path_iterator: *std.mem.TokenIterator(u8),
             escape: Escape,
-            indentation: ?Indentation,
+            indentation: Indentation,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const Interpolate = PathInvoker(Allocator.Error || Writer.Error, void, interpolateAction);
             return try Interpolate.call(
@@ -323,7 +323,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             stack: anytype,
             tag_contents: []const u8,
             escape: Escape,
-            indentation: ?Indentation,
+            indentation: Indentation,
             delimiters: Delimiters,
             path_iterator: *std.mem.TokenIterator(u8),
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
@@ -349,7 +349,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
             const escape: Escape = params.@"0";
-            const indentation: ?Indentation = params.@"1";
+            const indentation: Indentation = params.@"1";
 
             switch (out_writer) {
                 .Writer => |writer| try write(writer, value, escape, indentation),
@@ -371,7 +371,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             const stack = params.@"0";
             const inner_text: []const u8 = params.@"1";
             const escape: Escape = params.@"2";
-            const indentation: ?Indentation = params.@"3";
+            const indentation: Indentation = params.@"3";
             const delimiters: Delimiters = params.@"4";
 
             const Impl = lambda.LambdaContextImpl(Writer, options);
@@ -397,7 +397,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             writer: anytype,
             value: anytype,
             escape: Escape,
-            indentation: ?Indentation,
+            indentation: Indentation,
         ) (Allocator.Error || Writer.Error)!void {
             const TValue = @TypeOf(value);
 

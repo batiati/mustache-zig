@@ -20,8 +20,6 @@ const TemplateLoader = @import("../template.zig").TemplateLoader;
 const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
-const Indentation = context.Indentation;
-const IndentationQueue = context.IndentationQueue;
 
 const invoker = @import("invoker.zig");
 const Fields = invoker.Fields;
@@ -30,9 +28,6 @@ const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 const BufError = std.io.FixedBufferStream([]u8).WriteError;
 
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
-
-const unescapedWrite = @import("escape.zig").unescapedWrite;
-const indentedWrite = @import("escape.zig").indentedWrite;
 
 /// Renders the `Template` with the given `data` to a writer.
 pub fn render(template: Template, data: anytype, writer: anytype) !void {
@@ -244,11 +239,13 @@ fn getDataRender(writer: anytype, data: anytype, comptime options: RenderOptions
 }
 
 fn DataRender(comptime Writer: type, comptime Data: type, comptime options: RenderOptions) type {
+    const IndentationQueue = @import("indentation.zig").IndentationQueue(options);
+
     return struct {
         const Self = @This();
 
         const WriterRender = Render(Writer, options);
-        const ContextInterface = Context(Writer);
+        const ContextInterface = Context(Writer, options);
         const OutWriter = ContextInterface.OutWriter;
 
         pub const Error = Allocator.Error || Writer.Error;
@@ -355,13 +352,15 @@ fn DataRender(comptime Writer: type, comptime Data: type, comptime options: Rend
 }
 
 pub fn Render(comptime Writer: type, comptime options: RenderOptions) type {
-    _ = options;
+    const unescapedWrite = @import("escape.zig").TextWriter(options).unescapedWrite;
 
     return struct {
-        pub const ContextInterface = Context(Writer);
+        pub const ContextInterface = Context(Writer, options);
         pub const ContextStack = ContextInterface.ContextStack;
         pub const OutWriter = ContextInterface.OutWriter;
         pub const Error = Allocator.Error || Writer.Error;
+        const IndentationQueue = ContextInterface.IndentationQueue;
+        const Indentation = ContextInterface.Indentation;
 
         pub fn renderLevel(
             out_writer: OutWriter,
@@ -413,11 +412,11 @@ pub fn Render(comptime Writer: type, comptime options: RenderOptions) type {
                         .Partial => |partial| {
                             const MapInterface = PartialsMapInterface(Template, @TypeOf(partials));
                             if (MapInterface.get(partials, partial.key)) |partial_template| {
-                                if (partial.indentation) |value| {
+                                if (if (comptime options.preseve_line_breaks_and_indentation) partial.indentation else null) |value| {
                                     var next_indentation = indentation.indent(&IndentationQueue.Node{ .indentation = value, .last_indented_element = partial_template.last() });
                                     defer indentation.unindent();
 
-                                    try writeAll(out_writer, value, null);
+                                    try writeAll(out_writer, value, .{});
                                     try renderLevel(out_writer, stack, &next_indentation, partial_template.elements, partials);
                                 } else {
                                     try renderLevel(out_writer, stack, indentation, partial_template.elements, partials);
@@ -437,7 +436,7 @@ pub fn Render(comptime Writer: type, comptime options: RenderOptions) type {
             stack: *const ContextStack,
             path: []const u8,
             escape: Escape,
-            identation: ?Indentation,
+            identation: Indentation,
         ) (Allocator.Error || Writer.Error)!void {
             var level: ?*const ContextStack = stack;
 
@@ -471,7 +470,7 @@ pub fn Render(comptime Writer: type, comptime options: RenderOptions) type {
             }
         }
 
-        fn writeAll(out_writer: OutWriter, content: []const u8, indentation: ?Indentation) (Allocator.Error || Writer.Error)!void {
+        fn writeAll(out_writer: OutWriter, content: []const u8, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
             switch (out_writer) {
                 .Writer => |writer| _ = try unescapedWrite(writer, content, indentation),
                 .Buffer => |list| _ = try unescapedWrite(list.writer(), content, indentation),

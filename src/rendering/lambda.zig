@@ -13,12 +13,8 @@ const Delimiters = mustache.Delimiters;
 const context = @import("context.zig");
 const Context = context.Context;
 const Escape = context.Escape;
-const Indentation = context.Indentation;
-const IndentationQueue = context.IndentationQueue;
 
 const Render = @import("render.zig").Render;
-
-const escapedWrite = @import("escape.zig").escapedWrite;
 
 ///
 /// Context for a lambda call,
@@ -96,15 +92,19 @@ pub const LambdaContext = struct {
 };
 
 pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions) type {
+    const escapedWrite = @import("escape.zig").TextWriter(options).escapedWrite;
+
     return struct {
         const Self = @This();
-        const ContextInterface = Context(Writer);
+        const ContextInterface = Context(Writer, options);
         const ContextStack = ContextInterface.ContextStack;
         const OutWriter = ContextInterface.OutWriter;
+        const IndentationQueue = ContextInterface.IndentationQueue;
+        const Indentation = ContextInterface.Indentation;
 
         out_writer: OutWriter,
         stack: *const ContextStack,
-        indentation: ?Indentation,
+        indentation: Indentation,
         delimiters: Delimiters,
         escape: Escape,
 

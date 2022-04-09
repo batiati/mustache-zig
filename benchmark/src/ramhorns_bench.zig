@@ -165,11 +165,11 @@ fn preParsedPartials(allocator: Allocator, mode: Mode, template: mustache.Templa
     switch (mode) {
         .Counter, .Writer => {
             var counter = std.io.countingWriter(writer);
-            try mustache.renderPartials(template, partial_templates, data, counter.writer());
+            try mustache.renderPartialsWithOptions(template, partial_templates, data, counter.writer(), .{ .preseve_line_breaks_and_indentation = false });
             return counter.bytes_written;
         },
         .String => {
-            const ret = try mustache.allocRenderPartials(allocator, template, partial_templates, data);
+            const ret = try mustache.allocRenderPartialsWithOptions(allocator, template, partial_templates, data, .{ .preseve_line_breaks_and_indentation = false });
             defer allocator.free(ret);
             return ret.len;
         },

@@ -60,112 +60,7 @@ pub const Escape = enum {
     Unescaped,
 };
 
-pub const Indentation = struct {
-    const Self = @This();
-
-    first: *const IndentationQueue.Node,
-    trim_last_line: bool = false,
-
-    const LinePos = enum { Middle, Last };
-
-    pub fn write(self: Self, comptime line: LinePos, writer: anytype) !usize {
-        var written_bytes: usize = 0;
-        var node: ?*const IndentationQueue.Node = self.first;
-        while (node) |level| {
-            if (line == .Last)
-                if (self.trim_last_line and level.next == null) break;
-
-            defer node = level.next;
-
-            try writer.writeAll(level.indentation);
-            written_bytes += level.indentation.len;
-        }
-
-        return written_bytes;
-    }
-};
-
-pub const IndentationQueue = struct {
-    const Self = @This();
-
-    pub const IteratorState = enum {
-        None,
-        Fetching,
-        Consumed,
-    };
-
-    pub const Node = struct {
-        next: ?*const @This() = null,
-        indentation: []const u8,
-        last_indented_element: *const Element,
-        iterator_state: IteratorState = .None,
-    };
-
-    list: ?struct {
-        head: *Node,
-        tail: *Node,
-        last_iterator_state: ?IteratorState = null,
-    } = null,
-
-    pub fn indent(self: Self, node: *Node) Self {
-        if (self.list) |list| {
-            list.tail.next = node;
-            return .{
-                .list = .{
-                    .head = list.head,
-                    .tail = node,
-                },
-            };
-        } else {
-            return .{ .list = .{
-                .head = node,
-                .tail = node,
-            } };
-        }
-    }
-
-    pub fn unindent(self: Self) void {
-        if (self.list) |list| {
-            list.tail.next = null;
-        }
-    }
-
-    pub inline fn get(self: *const Self, element: *const Element) ?Indentation {
-        if (self.list) |list| {
-            const tail = list.tail;
-            const trim_last_line = tail.last_indented_element == element and tail.iterator_state != .Fetching;
-
-            return Indentation{
-                .first = list.head,
-                .trim_last_line = trim_last_line,
-            };
-        } else {
-            return null;
-        }
-    }
-
-    pub inline fn indentSection(self: *Self, has_next: bool) void {
-        if (self.list) |*list| {
-            assert(list.last_iterator_state == null);
-
-            const tail = list.tail;
-            list.last_iterator_state = tail.iterator_state;
-            tail.iterator_state = if (has_next) .Fetching else .Consumed;
-        }
-    }
-
-    pub inline fn unindentSection(self: *Self) void {
-        if (self.list) |*list| {
-            assert(list.last_iterator_state != null);
-
-            const tail = list.tail;
-            tail.iterator_state = list.last_iterator_state.?;
-            list.last_iterator_state = null;
-        }
-    }
-};
-
-pub fn getContext(comptime Writer: type, data: anytype, comptime options: RenderOptions) Context(Writer) {
+pub fn getContext(comptime Writer: type, data: anytype, comptime options: RenderOptions) Context(Writer, options) {
     const Data = @TypeOf(data);
     const by_value = comptime Fields.byValue(Data);
     if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
@@ -176,7 +71,7 @@ pub fn getContext(comptime Writer: type, data: anytype, comptime options: Render
 
 const FlattenedType = [4]usize;
 
-pub fn Context(comptime Writer: type) type {
+pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
     return struct {
         const Self = @This();
 
@@ -184,6 +79,9 @@ pub fn Context(comptime Writer: type) type {
             parent: ?*const @This(),
             ctx: Self,
         };
+
+        pub const IndentationQueue = @import("indentation.zig").IndentationQueue(options);
+        pub const Indentation = IndentationQueue.Indentation;
 
         ///
         /// Provides the ability to choose between two writers
@@ -200,13 +98,10 @@ pub fn Context(comptime Writer: type) type {
             Buffer: *std.ArrayList(u8),
         };
 
-        ctx: FlattenedType = undefined,
-        vtable: *const VTable,
-
         const VTable = struct {
             get: fn (*const anyopaque, []const u8, ?usize) PathResolution(Self),
-            interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape, ?Indentation) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: fn (*const anyopaque, OutWriter, *const ContextStack, []const u8, []const u8, Escape, ?Indentation, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape, Indentation) (Allocator.Error || Writer.Error)!PathResolution(void),
+            expandLambda: fn (*const anyopaque, OutWriter, *const ContextStack, []const u8, []const u8, Escape, Indentation, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = struct {
@@ -327,6 +222,9 @@ pub fn Context(comptime Writer: type) type {
             }
         };
 
+        ctx: FlattenedType = undefined,
+        vtable: *const VTable,
+
         pub inline fn get(self: Self, path: []const u8) PathResolution(Self) {
             return self.vtable.get(&self.ctx, path, null);
         }
@@ -354,12 +252,21 @@ pub fn Context(comptime Writer: type) type {
             out_writer: OutWriter,
             path: []const u8,
             escape: Escape,
-            indentation: ?Indentation,
+            indentation: Indentation,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             return try self.vtable.interpolate(&self.ctx, out_writer, path, escape, indentation);
         }
 
-        pub inline fn expandLambda(self: Self, out_writer: OutWriter, stack: *const ContextStack, path: []const u8, inner_text: []const u8, escape: Escape, indentation: ?Indentation, delimiters: Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        pub inline fn expandLambda(
+            self: Self,
+            out_writer: OutWriter,
+            stack: *const ContextStack,
+            path: []const u8,
+            inner_text: []const u8,
+            escape: Escape,
+            indentation: Indentation,
+            delimiters: Delimiters,
+        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             return try self.vtable.expandLambda(&self.ctx, out_writer, stack, path, inner_text, escape, indentation, delimiters);
         }
     };
@@ -367,10 +274,11 @@ pub fn Context(comptime Writer: type) type {
 
 fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: RenderOptions) type {
     return struct {
-        const ContextInterface = Context(Writer);
+        const ContextInterface = Context(Writer, options);
         const ContextStack = ContextInterface.ContextStack;
         const OutWriter = ContextInterface.OutWriter;
         const Invoker = invoker.Invoker(Writer, options);
+        const Indentation = ContextInterface.Indentation;
 
         const vtable = ContextInterface.VTable{
             .get = get,
@@ -410,7 +318,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: Ren
             out_writer: OutWriter,
             path: []const u8,
             escape: Escape,
-            indentation: ?Indentation,
+            indentation: Indentation,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.interpolate(
@@ -429,7 +337,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: Ren
             path: []const u8,
             inner_text: []const u8,
             escape: Escape,
-            indentation: ?Indentation,
+            indentation: Indentation,
             delimiters: Delimiters,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
@@ -591,23 +499,23 @@ const struct_tests = struct {
         const by_value = comptime Fields.byValue(Data);
 
         const Writer = @TypeOf(writer);
-        var ctx = getContext(Writer, if (by_value) data else @as(*const Data, &data), RenderOptions{});
+        var ctx = getContext(Writer, if (by_value) data else @as(*const Data, &data), .{});
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
 
-    fn interpolateCtx(writer: anytype, ctx: Context(@TypeOf(writer)), path: []const u8, escape: Escape) anyerror!void {
-        const ContextInterface = Context(@TypeOf(writer));
+    fn interpolateCtx(writer: anytype, ctx: Context(@TypeOf(writer), .{}), path: []const u8, escape: Escape) anyerror!void {
+        const ContextInterface = Context(@TypeOf(writer), .{});
         var out_writer: ContextInterface.OutWriter = .{ .Writer = writer };
 
-        switch (try ctx.interpolate(out_writer, path, escape, null)) {
+        switch (try ctx.interpolate(out_writer, path, escape, .{})) {
             .Lambda => {
                 var stack = ContextInterface.ContextStack{
                     .parent = null,
                     .ctx = ctx,
                 };
 
-                _ = try ctx.expandLambda(out_writer, &stack, path, "", escape, null, .{});
+                _ = try ctx.expandLambda(out_writer, &stack, path, "", escape, .{}, .{});
             },
             else => {},
         }
