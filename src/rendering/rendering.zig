@@ -18,11 +18,12 @@ const Template = mustache.Template;
 const TemplateLoader = @import("../template.zig").TemplateLoader;
 
 const context = @import("context.zig");
-const Context = context.Context;
 const Escape = context.Escape;
 
 const invoker = @import("invoker.zig");
 const Fields = invoker.Fields;
+
+const indent = @import("indent.zig");
 
 const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 const BufError = std.io.FixedBufferStream([]u8).WriteError;
@@ -229,283 +230,394 @@ pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8
     return list.toOwnedSliceSentinel('\x00');
 }
 
-fn getDataRender(writer: anytype, data: anytype, comptime options: RenderOptions) DataRender(@TypeOf(writer), @TypeOf(data), options) {
+fn getDataRender(writer: anytype, data: anytype, comptime options: RenderOptions) DataRender: {
     const Writer = @TypeOf(writer);
+    const Data = @TypeOf(data);
 
-    return DataRender(Writer, @TypeOf(data), options){
+    const Engine = RenderEngine(Writer, options);
+    break :DataRender Engine.DataRender(Data);
+} {
+    return .{
         .out_writer = .{ .Writer = writer },
         .data = data,
     };
 }
 
-fn DataRender(comptime Writer: type, comptime Data: type, comptime options: RenderOptions) type {
-    const IndentationQueue = @import("indentation.zig").IndentationQueue(options);
-
+///
+/// Group functions and structs that are denpendent of Writer and RenderOptions
+pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type {
     return struct {
-        const Self = @This();
+        pub const Context = context.Context(Writer, options);
+        pub const ContextStack = Context.ContextStack;
+        pub const OutWriter = Context.OutWriter;
 
-        const WriterRender = Render(Writer, options);
-        const ContextInterface = Context(Writer, options);
-        const OutWriter = ContextInterface.OutWriter;
+        pub const IndentationQueue = indent.IndentationQueue(options);
+        pub const Indentation = IndentationQueue.Indentation;
 
-        pub const Error = Allocator.Error || Writer.Error;
+        pub const Invoker = invoker.Invoker(Writer, options);
 
-        out_writer: OutWriter,
-        data: Data,
+        fn DataRender(comptime Data: type) type {
+            return struct {
+                const Self = @This();
+                pub const Error = Allocator.Error || Writer.Error;
 
-        pub fn render(self: *Self, elements: []const Element, partials: anytype) Error!void {
-            const by_value = comptime Fields.byValue(Data);
+                out_writer: OutWriter,
+                data: Data,
 
-            var stack = WriterRender.ContextStack{
-                .parent = null,
-                .ctx = context.getContext(
-                    Writer,
-                    if (by_value) self.data else @as(*const Data, &self.data),
-                    options,
-                ),
+                pub fn render(self: *Self, elements: []const Element, partials: anytype) Error!void {
+                    const by_value = comptime Fields.byValue(Data);
+
+                    var stack = ContextStack{
+                        .parent = null,
+                        .ctx = context.getContext(
+                            Writer,
+                            if (by_value) self.data else @as(*const Data, &self.data),
+                            options,
+                        ),
+                    };
+
+                    var indentation = IndentationQueue{};
+                    try Render.renderLevel(self.out_writer, &stack, &indentation, elements, partials);
+                }
+
+                pub fn bufRender(self: *Self, buffer: *std.ArrayList(u8), elements: []const Element, partials: anytype) Error!void {
+                    const by_value = comptime Fields.byValue(Data);
+
+                    var stack = ContextStack{
+                        .parent = null,
+                        .ctx = context.getContext(
+                            Writer,
+                            if (by_value) self.data else @as(*const Data, &self.data),
+                            options,
+                        ),
+                    };
+
+                    var indentation = IndentationQueue{};
+                    try Render.renderLevel(.{ .Buffer = buffer }, &stack, &indentation, elements, partials);
+                }
+
+                pub fn renderText(self: *Self, allocator: Allocator, template_text: []const u8) (ParseError || Error)!void {
+                    const render_text_options = TemplateOptions{
+                        .source = .{ .String = .{ .copy_strings = false } },
+                        .output = .Render,
+                    };
+
+                    var template = TemplateLoader(render_text_options){
+                        .allocator = allocator,
+                    };
+                    errdefer template.deinit();
+
+                    try template.collectElements(template_text, self);
+                }
+
+                pub fn bufRenderText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8) (ParseError || Error)!void {
+                    const render_text_options = TemplateOptions{
+                        .source = .{ .String = .{ .copy_strings = false } },
+                        .output = .Render,
+                    };
+
+                    var template = TemplateLoader(render_text_options){
+                        .allocator = allocator,
+                    };
+                    errdefer template.deinit();
+
+                    const current_writer = self.out_writer;
+                    defer self.out_writer = current_writer;
+
+                    self.out_writer = .{ .Buffer = buffer };
+                    try template.collectElements(template_text, self);
+                }
+
+                pub fn renderFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8) !void {
+                    const render_file_options = TemplateOptions{
+                        .source = .{ .Stream = .{} },
+                        .output = .Render,
+                    };
+
+                    var template = TemplateLoader(render_file_options){
+                        .allocator = allocator,
+                    };
+                    errdefer template.deinit();
+
+                    try template.collectElementsFromFile(template_absolute_path, self);
+                }
+
+                pub fn bufRenderFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8) !void {
+                    const render_file_options = TemplateOptions{
+                        .source = .{ .Stream = .{} },
+                        .output = .Render,
+                    };
+
+                    var template = TemplateLoader(render_file_options){
+                        .allocator = allocator,
+                    };
+                    errdefer template.deinit();
+
+                    const current_writer = self.out_writer;
+                    defer self.out_writer = current_writer;
+
+                    self.out_writer = .{ .Buffer = buffer };
+                    try template.collectElementsFromFile(template_absolute_path, self);
+                }
             };
-
-            var indentation = IndentationQueue{};
-            try WriterRender.renderLevel(self.out_writer, &stack, &indentation, elements, partials);
         }
 
-        pub fn bufRender(self: *Self, buffer: *std.ArrayList(u8), elements: []const Element, partials: anytype) Error!void {
-            const by_value = comptime Fields.byValue(Data);
+        pub const Render = struct {
+            pub fn renderLevel(
+                out_writer: OutWriter,
+                stack: *const ContextStack,
+                indentation: *IndentationQueue,
+                children: ?[]const Element,
+                partials: anytype,
+            ) (Allocator.Error || Writer.Error)!void {
+                if (children) |elements| {
+                    for (elements) |*element| {
+                        switch (element.*) {
+                            .StaticText => |content| try writeAll(out_writer, content, indentation.get(element)),
+                            .Interpolation => |path| try interpolate(out_writer, stack, path, .Escaped, indentation.get(element)),
+                            .UnescapedInterpolation => |path| try interpolate(out_writer, stack, path, .Unescaped, indentation.get(element)),
+                            .Section => |section| {
+                                if (getIterator(stack, section.key)) |*iterator| {
+                                    if (iterator.lambda()) |lambda_ctx| {
 
-            var stack = WriterRender.ContextStack{
-                .parent = null,
-                .ctx = context.getContext(
-                    Writer,
-                    if (by_value) self.data else @as(*const Data, &self.data),
-                    options,
-                ),
-            };
+                                        //TODO: Add template options
+                                        assert(section.inner_text != null);
+                                        assert(section.delimiters != null);
 
-            var indentation = IndentationQueue{};
-            try WriterRender.renderLevel(.{ .Buffer = buffer }, &stack, &indentation, elements, partials);
-        }
+                                        const expand_result = try lambda_ctx.expandLambda(out_writer, stack, "", section.inner_text.?, .Unescaped, indentation.get(element), section.delimiters.?);
+                                        assert(expand_result == .Lambda);
+                                    } else while (iterator.next()) |item_ctx| {
+                                        var next_level = ContextStack{
+                                            .parent = stack,
+                                            .ctx = item_ctx,
+                                        };
 
-        pub fn renderText(self: *Self, allocator: Allocator, template_text: []const u8) (ParseError || Error)!void {
-            const render_text_options = TemplateOptions{
-                .source = .{ .String = .{ .copy_strings = false } },
-                .output = .Render,
-            };
+                                        indentation.indentSection(iterator.hasNext());
+                                        defer indentation.unindentSection();
 
-            var template = TemplateLoader(render_text_options){
-                .allocator = allocator,
-            };
-            errdefer template.deinit();
-
-            try template.collectElements(template_text, self);
-        }
-
-        pub fn bufRenderText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8) (ParseError || Error)!void {
-            const render_text_options = TemplateOptions{
-                .source = .{ .String = .{ .copy_strings = false } },
-                .output = .Render,
-            };
-
-            var template = TemplateLoader(render_text_options){
-                .allocator = allocator,
-            };
-            errdefer template.deinit();
-
-            const current_writer = self.out_writer;
-            defer self.out_writer = current_writer;
-
-            self.out_writer = .{ .Buffer = buffer };
-            try template.collectElements(template_text, self);
-        }
-
-        pub fn renderFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8) !void {
-            const render_file_options = TemplateOptions{
-                .source = .{ .Stream = .{} },
-                .output = .Render,
-            };
-
-            var template = TemplateLoader(render_file_options){
-                .allocator = allocator,
-            };
-            errdefer template.deinit();
-
-            try template.collectElementsFromFile(template_absolute_path, self);
-        }
-
-        pub fn bufRenderFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8) !void {
-            const render_file_options = TemplateOptions{
-                .source = .{ .Stream = .{} },
-                .output = .Render,
-            };
-
-            var template = TemplateLoader(render_file_options){
-                .allocator = allocator,
-            };
-            errdefer template.deinit();
-
-            const current_writer = self.out_writer;
-            defer self.out_writer = current_writer;
-
-            self.out_writer = .{ .Buffer = buffer };
-            try template.collectElementsFromFile(template_absolute_path, self);
-        }
-    };
-}
-
-pub fn Render(comptime Writer: type, comptime options: RenderOptions) type {
-    const unescapedWrite = @import("escape.zig").TextWriter(options).unescapedWrite;
-
-    return struct {
-        pub const ContextInterface = Context(Writer, options);
-        pub const ContextStack = ContextInterface.ContextStack;
-        pub const OutWriter = ContextInterface.OutWriter;
-        pub const Error = Allocator.Error || Writer.Error;
-        const IndentationQueue = ContextInterface.IndentationQueue;
-        const Indentation = ContextInterface.Indentation;
-
-        pub fn renderLevel(
-            out_writer: OutWriter,
-            stack: *const ContextStack,
-            indentation: *IndentationQueue,
-            children: ?[]const Element,
-            partials: anytype,
-        ) Error!void {
-            if (children) |elements| {
-                for (elements) |*element| {
-                    switch (element.*) {
-                        .StaticText => |content| try writeAll(out_writer, content, indentation.get(element)),
-                        .Interpolation => |path| try interpolate(out_writer, stack, path, .Escaped, indentation.get(element)),
-                        .UnescapedInterpolation => |path| try interpolate(out_writer, stack, path, .Unescaped, indentation.get(element)),
-                        .Section => |section| {
-                            if (getIterator(stack, section.key)) |*iterator| {
-                                if (iterator.lambda()) |lambda_ctx| {
-
-                                    //TODO: Add template options
-                                    assert(section.inner_text != null);
-                                    assert(section.delimiters != null);
-
-                                    const expand_result = try lambda_ctx.expandLambda(out_writer, stack, "", section.inner_text.?, .Unescaped, indentation.get(element), section.delimiters.?);
-                                    assert(expand_result == .Lambda);
-                                } else while (iterator.next()) |item_ctx| {
-                                    var next_level = ContextStack{
-                                        .parent = stack,
-                                        .ctx = item_ctx,
-                                    };
-
-                                    indentation.indentSection(iterator.hasNext());
-                                    defer indentation.unindentSection();
-
-                                    try renderLevel(out_writer, &next_level, indentation, section.content, partials);
+                                        try renderLevel(out_writer, &next_level, indentation, section.content, partials);
+                                    }
                                 }
-                            }
-                        },
-                        .InvertedSection => |section| {
+                            },
+                            .InvertedSection => |section| {
 
-                            // Lambdas aways evaluate as "true" for inverted section
-                            // Broken paths, empty lists, null and false evaluates as "false"
+                                // Lambdas aways evaluate as "true" for inverted section
+                                // Broken paths, empty lists, null and false evaluates as "false"
 
-                            const truthy = if (getIterator(stack, section.key)) |*iterator| iterator.truthy() else false;
-                            if (!truthy) {
-                                try renderLevel(out_writer, stack, indentation, section.content, partials);
-                            }
-                        },
-
-                        .Partial => |partial| {
-                            const MapInterface = PartialsMapInterface(Template, @TypeOf(partials));
-                            if (MapInterface.get(partials, partial.key)) |partial_template| {
-                                if (if (comptime options.preseve_line_breaks_and_indentation) partial.indentation else null) |value| {
-                                    var next_indentation = indentation.indent(&IndentationQueue.Node{ .indentation = value, .last_indented_element = partial_template.last() });
-                                    defer indentation.unindent();
-
-                                    try writeAll(out_writer, value, .{});
-                                    try renderLevel(out_writer, stack, &next_indentation, partial_template.elements, partials);
-                                } else {
-                                    try renderLevel(out_writer, stack, indentation, partial_template.elements, partials);
+                                const truthy = if (getIterator(stack, section.key)) |*iterator| iterator.truthy() else false;
+                                if (!truthy) {
+                                    try renderLevel(out_writer, stack, indentation, section.content, partials);
                                 }
-                            }
-                        },
+                            },
 
-                        //TODO Parent, Block
-                        else => {},
+                            .Partial => |partial| {
+                                const MapInterface = PartialsMapInterface(Template, @TypeOf(partials));
+                                if (MapInterface.get(partials, partial.key)) |partial_template| {
+                                    if (if (comptime options.preseve_line_breaks_and_indentation) partial.indentation else null) |value| {
+                                        var next_indentation = indentation.indent(&IndentationQueue.Node{ .indentation = value, .last_indented_element = partial_template.last() });
+                                        defer indentation.unindent();
+
+                                        try writeAll(out_writer, value, .{});
+                                        try renderLevel(out_writer, stack, &next_indentation, partial_template.elements, partials);
+                                    } else {
+                                        try renderLevel(out_writer, stack, indentation, partial_template.elements, partials);
+                                    }
+                                }
+                            },
+
+                            //TODO Parent, Block
+                            else => {},
+                        }
                     }
                 }
             }
-        }
 
-        fn interpolate(
-            out_writer: OutWriter,
-            stack: *const ContextStack,
-            path: []const u8,
+            fn interpolate(
+                out_writer: OutWriter,
+                stack: *const ContextStack,
+                path: []const u8,
+                escape: Escape,
+                identation: Indentation,
+            ) (Allocator.Error || Writer.Error)!void {
+                var level: ?*const ContextStack = stack;
+
+                while (level) |current| : (level = current.parent) {
+                    const path_resolution = try current.ctx.interpolate(out_writer, path, escape, identation);
+
+                    switch (path_resolution) {
+                        .Field => {
+                            // Success, break the loop
+                            break;
+                        },
+
+                        .Lambda => {
+
+                            // Expand the lambda against the current context and break the loop
+                            const expand_result = try current.ctx.expandLambda(out_writer, stack, path, "", escape, identation, .{});
+                            assert(expand_result == .Lambda);
+                            break;
+                        },
+
+                        .IteratorConsumed, .ChainBroken => {
+                            // Not rendered, but should NOT try against the parent context
+                            break;
+                        },
+
+                        .NotFoundInContext => {
+                            // Not rendered, should try against the parent context
+                            continue;
+                        },
+                    }
+                }
+            }
+
+            fn writeAll(out_writer: OutWriter, content: []const u8, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
+                switch (out_writer) {
+                    .Writer => |writer| _ = try unescapedWrite(writer, content, indentation),
+                    .Buffer => |list| _ = try unescapedWrite(list.writer(), content, indentation),
+                }
+            }
+
+            fn writeIndentation(out_writer: OutWriter, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
+                switch (out_writer) {
+                    .Writer => |writer| _ = try indentation.write(writer),
+                    .Buffer => |list| _ = try indentation.write(list.writer()),
+                }
+            }
+
+            fn getIterator(stack: *const ContextStack, path: []const u8) ?Context.Iterator {
+                var level: ?*const ContextStack = stack;
+
+                while (level) |current| : (level = current.parent) {
+                    switch (current.ctx.iterator(path)) {
+                        .Field => |found| return found,
+
+                        .Lambda => |found| return found,
+
+                        .IteratorConsumed, .ChainBroken => {
+                            // Not found, but should NOT try against the parent context
+                            break;
+                        },
+
+                        .NotFoundInContext => {
+                            // Should try against the parent context
+                            continue;
+                        },
+                    }
+                }
+
+                return null;
+            }
+        };
+
+        pub fn escapedWrite(
+            writer: anytype,
+            value: []const u8,
             escape: Escape,
-            identation: Indentation,
-        ) (Allocator.Error || Writer.Error)!void {
-            var level: ?*const ContextStack = stack;
+            indentation: Indentation,
+        ) @TypeOf(writer).Error!usize {
 
-            while (level) |current| : (level = current.parent) {
-                const path_resolution = try current.ctx.interpolate(out_writer, path, escape, identation);
+            // Avoid too many runtime comparations inside the loop, by epecializing versions of the same function at comptime
 
-                switch (path_resolution) {
-                    .Field => {
-                        // Success, break the loop
-                        break;
-                    },
+            return switch (escape) {
+                .Escaped => try write(writer, .Escaped, indentation, value),
+                .Unescaped => return try write(writer, .Unescaped, indentation, value),
+            };
+        }
 
-                    .Lambda => {
+        pub fn unescapedWrite(
+            writer: anytype,
+            value: []const u8,
+            indentation: Indentation,
+        ) @TypeOf(writer).Error!usize {
 
-                        // Expand the lambda against the current context and break the loop
-                        const expand_result = try current.ctx.expandLambda(out_writer, stack, path, "", escape, identation, .{});
-                        assert(expand_result == .Lambda);
-                        break;
-                    },
+            // Avoid too many runtime comparations inside the loop, by epecializing versions of the same function at comptime
+            return try write(writer, .Unescaped, indentation, value);
+        }
 
-                    .IteratorConsumed, .ChainBroken => {
-                        // Not rendered, but should NOT try against the parent context
-                        break;
-                    },
+        fn write(
+            writer: anytype,
+            comptime escape: Escape,
+            indentation: Indentation,
+            value: []const u8,
+        ) @TypeOf(writer).Error!usize {
+            const escaped = escape == .Escaped;
+            const indented = @sizeOf(Indentation) > 0;
 
-                    .NotFoundInContext => {
-                        // Not rendered, should try against the parent context
-                        continue;
-                    },
+            if (comptime escaped or indented) {
+                const @"null" = '\x00';
+                const html_null: []const u8 = "\u{fffd}";
+
+                var index: usize = 0;
+                var written_bytes: usize = 0;
+                var new_line: if (indented) bool else void = if (indented) false else {};
+
+                var char_index: usize = 0;
+                while (char_index < value.len) : (char_index += 1) {
+                    const char = value[char_index];
+
+                    if (comptime indented) {
+
+                        // The indentation must be inserted after the line break
+                        // Supports both \n and \r\n
+
+                        if (new_line) {
+                            defer new_line = false;
+
+                            if (char_index > index) {
+                                const slice = value[index..char_index];
+                                try writer.writeAll(slice);
+                                written_bytes += slice.len;
+                            }
+
+                            written_bytes += try indentation.write(.Middle, writer);
+
+                            index = char_index;
+                        } else if (char == '\n') {
+                            new_line = true;
+                            continue;
+                        }
+                    }
+
+                    if (comptime escaped) {
+                        const replace = switch (char) {
+                            '"' => "&quot;",
+                            '\'' => "&#39;",
+                            '&' => "&amp;",
+                            '<' => "&lt;",
+                            '>' => "&gt;",
+                            @"null" => html_null,
+                            else => continue,
+                        };
+
+                        if (char_index > index) {
+                            const slice = value[index..char_index];
+                            try writer.writeAll(slice);
+                            written_bytes += slice.len;
+                        }
+
+                        try writer.writeAll(replace);
+                        written_bytes += replace.len;
+
+                        index = char_index + 1;
+                    }
                 }
-            }
-        }
 
-        fn writeAll(out_writer: OutWriter, content: []const u8, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
-            switch (out_writer) {
-                .Writer => |writer| _ = try unescapedWrite(writer, content, indentation),
-                .Buffer => |list| _ = try unescapedWrite(list.writer(), content, indentation),
-            }
-        }
-
-        fn writeIndentation(out_writer: OutWriter, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
-            switch (out_writer) {
-                .Writer => |writer| _ = try indentation.write(writer),
-                .Buffer => |list| _ = try indentation.write(list.writer()),
-            }
-        }
-
-        fn getIterator(stack: *const ContextStack, path: []const u8) ?ContextInterface.Iterator {
-            var level: ?*const ContextStack = stack;
-
-            while (level) |current| : (level = current.parent) {
-                switch (current.ctx.iterator(path)) {
-                    .Field => |found| return found,
-
-                    .Lambda => |found| return found,
-
-                    .IteratorConsumed, .ChainBroken => {
-                        // Not found, but should NOT try against the parent context
-                        break;
-                    },
-
-                    .NotFoundInContext => {
-                        // Should try against the parent context
-                        continue;
-                    },
+                if (index < value.len) {
+                    const slice = value[index..];
+                    try writer.writeAll(slice);
+                    written_bytes += slice.len;
                 }
-            }
 
-            return null;
+                if (comptime indented) {
+                    if (new_line) written_bytes += try indentation.write(.Last, writer);
+                }
+
+                return written_bytes;
+            } else {
+                try writer.writeAll(value);
+                return value.len;
+            }
         }
     };
 }
@@ -651,10 +763,11 @@ fn PartialsMapInterface(comptime TTemplate: type, comptime TPartials: type) type
 
 test {
     _ = context;
-    _ = tests.partials_map;
     _ = tests.spec;
+    _ = tests.partials_map;
     _ = tests.extra;
     _ = tests.api;
+    _ = tests.escape_tests;
 }
 
 const tests = struct {
@@ -3227,6 +3340,115 @@ const tests = struct {
             try testing.expectEqualStrings("{{hi}}there", hi.?);
 
             try testing.expect(Map.get(data, "wrong") == null);
+        }
+    };
+
+    const escape_tests = struct {
+        const Engine = RenderEngine(std.ArrayList(u8).Writer, .{});
+        const escapedWrite = Engine.escapedWrite;
+        const unescapedWrite = Engine.unescapedWrite;
+        const IndentationQueue = Engine.IndentationQueue;
+        const Indentation = Engine.Indentation;
+
+        test "Escape" {
+            try expectEscape("&gt;abc", ">abc", .Escaped);
+            try expectEscape("abc&lt;", "abc<", .Escaped);
+            try expectEscape("&gt;abc&lt;", ">abc<", .Escaped);
+            try expectEscape("ab&amp;cd", "ab&cd", .Escaped);
+            try expectEscape("&gt;ab&amp;cd", ">ab&cd", .Escaped);
+            try expectEscape("ab&amp;cd&lt;", "ab&cd<", .Escaped);
+            try expectEscape("&gt;ab&amp;cd&lt;", ">ab&cd<", .Escaped);
+            try expectEscape("&quot;ab&#39;&amp;&#39;cd&quot;",
+                \\"ab'&'cd"
+            , .Escaped);
+
+            try expectEscape(">ab&cd<", ">ab&cd<", .Unescaped);
+        }
+
+        test "Escape and Indentation" {
+            var root = IndentationQueue{};
+
+            var node_1 = IndentationQueue.Node{
+                .indentation = ">>",
+                .last_indented_element = undefined,
+            };
+            var level_1 = root.indent(&node_1);
+
+            try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .Escaped, level_1.get(undefined));
+            try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, level_1.get(undefined));
+
+            {
+                var node_2 = IndentationQueue.Node{
+                    .indentation = ">>",
+                    .last_indented_element = undefined,
+                };
+                var level_2 = level_1.indent(&node_2);
+                defer level_1.unindent();
+
+                try expectEscapeAndIndent("&gt;a\n>>>>&gt;b\n>>>>&gt;c", ">a\n>b\n>c", .Escaped, level_2.get(undefined));
+                try expectEscapeAndIndent("&gt;a\r\n>>>>&gt;b\r\n>>>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, level_2.get(undefined));
+            }
+
+            try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .Escaped, level_1.get(undefined));
+            try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, level_1.get(undefined));
+        }
+
+        test "Indentation" {
+            var root = IndentationQueue{};
+
+            var node_1 = IndentationQueue.Node{
+                .indentation = ">>",
+                .last_indented_element = undefined,
+            };
+            var level_1 = root.indent(&node_1);
+
+            try expectIndent("a\n>>b\n>>c", "a\nb\nc", level_1.get(undefined));
+            try expectIndent("a\r\n>>b\r\n>>c", "a\r\nb\r\nc", level_1.get(undefined));
+
+            {
+                var node_2 = IndentationQueue.Node{
+                    .indentation = ">>",
+                    .last_indented_element = undefined,
+                };
+                var level_2 = level_1.indent(&node_2);
+                defer level_1.unindent();
+
+                try expectIndent("a\n>>>>b\n>>>>c", "a\nb\nc", level_2.get(undefined));
+                try expectIndent("a\r\n>>>>b\r\n>>>>c", "a\r\nb\r\nc", level_2.get(undefined));
+            }
+
+            try expectIndent("a\n>>b\n>>c", "a\nb\nc", level_1.get(undefined));
+            try expectIndent("a\r\n>>b\r\n>>c", "a\r\nb\r\nc", level_1.get(undefined));
+        }
+
+        fn expectEscape(expected: []const u8, value: []const u8, escape: Escape) !void {
+            const allocator = testing.allocator;
+            var list = std.ArrayList(u8).init(allocator);
+            defer list.deinit();
+
+            var written_bytes = try escapedWrite(list.writer(), value, escape, .{});
+            try testing.expectEqualStrings(expected, list.items);
+            try testing.expectEqual(expected.len, written_bytes);
+        }
+
+        fn expectIndent(expected: []const u8, value: []const u8, indentation: Indentation) !void {
+            const allocator = testing.allocator;
+            var list = std.ArrayList(u8).init(allocator);
+            defer list.deinit();
+
+            var written_bytes = try escapedWrite(list.writer(), value, .Unescaped, indentation);
+            try testing.expectEqualStrings(expected, list.items);
+            try testing.expectEqual(expected.len, written_bytes);
+        }
+
+        fn expectEscapeAndIndent(expected: []const u8, value: []const u8, escape: Escape, indentation: Indentation) !void {
+            const allocator = testing.allocator;
+            var list = std.ArrayList(u8).init(allocator);
+            defer list.deinit();
+
+            var written_bytes = try escapedWrite(list.writer(), value, escape, indentation);
+            try testing.expectEqualStrings(expected, list.items);
+            try testing.expectEqual(expected.len, written_bytes);
         }
     };
 

@@ -11,10 +11,9 @@ const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 
 const context = @import("context.zig");
-const Context = context.Context;
 const Escape = context.Escape;
 
-const Render = @import("render.zig").Render;
+const rendering = @import("rendering.zig");
 
 ///
 /// Context for a lambda call,
@@ -92,15 +91,18 @@ pub const LambdaContext = struct {
 };
 
 pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions) type {
-    const escapedWrite = @import("escape.zig").TextWriter(options).escapedWrite;
+    const RenderEngine = rendering.RenderEngine(Writer, options);
+    const Render = RenderEngine.Render;
+    const Context = RenderEngine.Context;
+    const ContextStack = Context.ContextStack;
+    const OutWriter = Context.OutWriter;
+    const IndentationQueue = RenderEngine.IndentationQueue;
+    const Indentation = RenderEngine.Indentation;
+
+    const escapedWrite = RenderEngine.escapedWrite;
 
     return struct {
         const Self = @This();
-        const ContextInterface = Context(Writer, options);
-        const ContextStack = ContextInterface.ContextStack;
-        const OutWriter = ContextInterface.OutWriter;
-        const IndentationQueue = ContextInterface.IndentationQueue;
-        const Indentation = ContextInterface.Indentation;
 
         out_writer: OutWriter,
         stack: *const ContextStack,
@@ -134,9 +136,8 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions)
             var buffer = std.ArrayList(u8).init(allocator);
             defer buffer.deinit();
 
-            const Impl = Render(Writer, options);
             var indentation = IndentationQueue{};
-            try Impl.renderLevel(.{ .Buffer = &buffer }, self.stack, &indentation, template.elements, {});
+            try Render.renderLevel(.{ .Buffer = &buffer }, self.stack, &indentation, template.elements, {});
 
             return buffer.toOwnedSlice();
         }
@@ -150,9 +151,8 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions)
             };
             defer template.deinit(allocator);
 
-            const Impl = Render(Writer, options);
             var indentation = IndentationQueue{};
-            try Impl.renderLevel(self.out_writer, self.stack, &indentation, template.elements, {});
+            try Render.renderLevel(self.out_writer, self.stack, &indentation, template.elements, {});
         }
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {

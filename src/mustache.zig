@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const template = @import("template.zig");
-const rendering = @import("rendering/render.zig");
+const rendering = @import("rendering/rendering.zig");
 
 pub const ParseError = template.ParseError;
 pub const ParseErrorDetail = template.ParseErrorDetail;

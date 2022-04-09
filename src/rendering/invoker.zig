@@ -9,8 +9,9 @@ const Delimiters = mustache.Delimiters;
 
 const context = @import("context.zig");
 const PathResolution = context.PathResolution;
-const Context = context.Context;
 const Escape = context.Escape;
+
+const rendering = @import("rendering.zig");
 
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
@@ -20,14 +21,14 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
-    const escapedWrite = @import("escape.zig").TextWriter(options).escapedWrite;
+    const RenderEngine = rendering.RenderEngine(Writer, options);
+    const Context = RenderEngine.Context;
+    const OutWriter = RenderEngine.OutWriter;
+    const Indentation = RenderEngine.Indentation;
+
+    const escapedWrite = RenderEngine.escapedWrite;
 
     return struct {
-        pub const ContextInterface = context.Context(Writer, options);
-        pub const ContextStack = ContextInterface.ContextStack;
-        pub const OutWriter = ContextInterface.OutWriter;
-        const Indentation = ContextInterface.Indentation;
-
         fn PathInvoker(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
             const action_type_info = @typeInfo(@TypeOf(action_fn));
             if (action_type_info != .Fn) @compileError("action_fn must be a function");
@@ -289,8 +290,8 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             data: anytype,
             path_iterator: *std.mem.TokenIterator(u8),
             index: ?usize,
-        ) PathResolution(ContextInterface) {
-            const Get = PathInvoker(error{}, ContextInterface, getAction);
+        ) PathResolution(Context) {
+            const Get = PathInvoker(error{}, Context, getAction);
             return try Get.call(
                 {},
                 {},
@@ -337,7 +338,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             );
         }
 
-        fn getAction(param: void, out_writer: void, value: anytype) error{}!ContextInterface {
+        fn getAction(param: void, out_writer: void, value: anytype) error{}!Context {
             _ = param;
             _ = out_writer;
             return context.getContext(Writer, value, options);
@@ -1523,7 +1524,6 @@ pub const Fields = struct {
 };
 
 test {
-    _ = @import("escape.zig");
     _ = Invoker;
     _ = Fields;
 }

@@ -10,6 +10,8 @@ const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 
+const rendering = @import("rendering.zig");
+
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
 
@@ -60,18 +62,24 @@ pub const Escape = enum {
     Unescaped,
 };
 
-pub fn getContext(comptime Writer: type, data: anytype, comptime options: RenderOptions) Context(Writer, options) {
+pub fn getContext(comptime Writer: type, data: anytype, comptime options: RenderOptions) Context: {
     const Data = @TypeOf(data);
-    const by_value = comptime Fields.byValue(Data);
+    const by_value = Fields.byValue(Data);
     if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
 
-    const Impl = ContextImpl(Writer, Data, options);
+    const RenderEngine = rendering.RenderEngine(Writer, options);
+    break :Context RenderEngine.Context;
+} {
+    const Impl = ContextImpl(Writer, @TypeOf(data), options);
     return Impl.context(data);
 }
 
 const FlattenedType = [4]usize;
 
 pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(Writer, options);
+    const Indentation = RenderEngine.Indentation;
+
     return struct {
         const Self = @This();
 
@@ -79,9 +87,6 @@ pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
             parent: ?*const @This(),
             ctx: Self,
         };
-
-        pub const IndentationQueue = @import("indentation.zig").IndentationQueue(options);
-        pub const Indentation = IndentationQueue.Indentation;
 
         ///
         /// Provides the ability to choose between two writers
@@ -273,13 +278,14 @@ pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
 }
 
 fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: RenderOptions) type {
-    return struct {
-        const ContextInterface = Context(Writer, options);
-        const ContextStack = ContextInterface.ContextStack;
-        const OutWriter = ContextInterface.OutWriter;
-        const Invoker = invoker.Invoker(Writer, options);
-        const Indentation = ContextInterface.Indentation;
+    const RenderEngine = rendering.RenderEngine(Writer, options);
+    const ContextInterface = RenderEngine.Context;
+    const ContextStack = RenderEngine.ContextStack;
+    const OutWriter = RenderEngine.OutWriter;
+    const Invoker = RenderEngine.Invoker;
+    const Indentation = RenderEngine.Indentation;
 
+    return struct {
         const vtable = ContextInterface.VTable{
             .get = get,
             .interpolate = interpolate,
