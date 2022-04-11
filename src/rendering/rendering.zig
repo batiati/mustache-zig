@@ -173,7 +173,7 @@ pub fn bufRenderPartialsZWithOptions(buf: []u8, template: Template, partials: an
 /// Parses the `template_text` and renders with the given `data` to a writer
 pub fn renderText(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
     var data_render = getDataRender(writer, data, RenderOptions{});
-    try data_render.renderText(allocator, template_text);
+    try data_render.collectText(allocator, template_text);
 }
 
 /// Parses the `template_text` and renders with the given `data` and returns an owned slice with the content.
@@ -183,7 +183,7 @@ pub fn allocRenderText(allocator: Allocator, template_text: []const u8, data: an
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
-    try data_render.bufRenderText(allocator, &list, template_text);
+    try data_render.bufCollectText(allocator, &list, template_text);
 
     return list.toOwnedSlice();
 }
@@ -195,7 +195,7 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
-    try data_render.bufRenderText(allocator, &list, template_text);
+    try data_render.bufCollectText(allocator, &list, template_text);
 
     return list.toOwnedSliceSentinel('\x00');
 }
@@ -203,7 +203,7 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
 pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
     var data_render = getDataRender(writer, data, RenderOptions{});
-    try data_render.renderFile(allocator, template_absolute_path);
+    try data_render.collectFile(allocator, template_absolute_path);
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
@@ -213,7 +213,7 @@ pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8,
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
-    try data_render.bufRenderFile(allocator, &list, template_absolute_path);
+    try data_render.bufCollectFile(allocator, &list, template_absolute_path);
 
     return list.toOwnedSlice();
 }
@@ -225,7 +225,7 @@ pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8
     defer list.deinit();
 
     var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
-    try data_render.bufRenderFile(allocator, &list, template_absolute_path);
+    try data_render.bufCollectFile(allocator, &list, template_absolute_path);
 
     return list.toOwnedSliceSentinel('\x00');
 }
@@ -296,7 +296,7 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
                     try Render.renderLevel(.{ .Buffer = buffer }, &stack, &indentation, elements, partials);
                 }
 
-                pub fn renderText(self: *Self, allocator: Allocator, template_text: []const u8) (ParseError || Error)!void {
+                pub fn collectText(self: *Self, allocator: Allocator, template_text: []const u8) (ParseError || Error)!void {
                     const render_text_options = TemplateOptions{
                         .source = .{ .String = .{ .copy_strings = false } },
                         .output = .Render,
@@ -310,7 +310,7 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
                     try template.collectElements(template_text, self);
                 }
 
-                pub fn bufRenderText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8) (ParseError || Error)!void {
+                pub fn bufCollectText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8) (ParseError || Error)!void {
                     const render_text_options = TemplateOptions{
                         .source = .{ .String = .{ .copy_strings = false } },
                         .output = .Render,
@@ -328,7 +328,7 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
                     try template.collectElements(template_text, self);
                 }
 
-                pub fn renderFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8) !void {
+                pub fn collectFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8) !void {
                     const render_file_options = TemplateOptions{
                         .source = .{ .Stream = .{} },
                         .output = .Render,
@@ -342,7 +342,7 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
                     try template.collectElementsFromFile(template_absolute_path, self);
                 }
 
-                pub fn bufRenderFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8) !void {
+                pub fn bufCollectFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8) !void {
                     const render_file_options = TemplateOptions{
                         .source = .{ .Stream = .{} },
                         .output = .Render,
