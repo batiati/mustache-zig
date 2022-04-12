@@ -20,11 +20,11 @@ pub const TemplateOptions = struct {
     /// Defaults to full-spec compatible.
     features: Features = .{},
 
-    pub fn isRefCounted(comptime self: @This()) bool {
+    pub fn isRefCounted(self: @This()) bool {
         return self.source == .Stream;
     }
 
-    pub fn copyStrings(comptime self: @This()) bool {
+    pub fn copyStrings(self: @This()) bool {
         return switch (self.output) {
             .Render => false,
             .Parse => switch (self.source) {

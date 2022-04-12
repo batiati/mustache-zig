@@ -273,10 +273,10 @@ pub const Element = union(Element.Type) {
 
 pub const Template = struct {
     elements: []const Element,
-    owns_string: bool,
+    options: *const TemplateOptions,
 
     pub fn deinit(self: Template, allocator: Allocator) void {
-        Element.deinitMany(allocator, self.owns_string, self.elements);
+        Element.deinitMany(allocator, self.options.copyStrings(), self.elements);
     }
 
     pub fn last(self: Template) *const Element {
@@ -360,7 +360,7 @@ fn parseSource(
 
     switch (template.result) {
         .Error => |last_error| return ParseResult{ .ParseError = last_error },
-        .Elements => |elements| return ParseResult{ .Success = .{ .elements = elements, .owns_string = options.copyStrings() } },
+        .Elements => |elements| return ParseResult{ .Success = .{ .elements = elements, .options = &options } },
         .NotLoaded => unreachable,
     }
 }
