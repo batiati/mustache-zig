@@ -49,7 +49,7 @@ pub fn renderPartials(template: Template, partials: anytype, data: anytype, writ
 /// Renders the `Template` with the given `data` to a writer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 pub fn renderPartialsWithOptions(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
-    var data_render = getDataRender(writer, data, options);
+    var data_render = getDataRender(writer, data, partials, options);
     try data_render.render(template.elements, partials);
 }
 
@@ -79,7 +79,7 @@ pub fn allocRenderPartialsWithOptions(allocator: Allocator, template: Template, 
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, options);
+    var data_render = getDataRender(std.io.null_writer, data, partials, options);
     try data_render.bufRender(&list, template.elements, partials);
 
     return list.toOwnedSlice();
@@ -111,7 +111,7 @@ pub fn allocRenderPartialsZWithOptions(allocator: Allocator, template: Template,
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, options);
+    var data_render = getDataRender(std.io.null_writer, data, partials, options);
     try data_render.bufRender(&list, template.elements, partials);
 
     return list.toOwnedSliceSentinel('\x00');
@@ -137,7 +137,7 @@ pub fn bufRenderPartials(buf: []u8, template: Template, partials: anytype, data:
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 pub fn bufRenderPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![]const u8 {
     var fbs = std.io.fixedBufferStream(buf);
-    var data_render = getDataRender(fbs.writer(), data, options);
+    var data_render = getDataRender(fbs.writer(), data, partials, options);
     try data_render.render(template.elements, partials);
 
     return fbs.getWritten();
@@ -172,7 +172,7 @@ pub fn bufRenderPartialsZWithOptions(buf: []u8, template: Template, partials: an
 
 /// Parses the `template_text` and renders with the given `data` to a writer
 pub fn renderText(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
-    var data_render = getDataRender(writer, data, RenderOptions{});
+    var data_render = getDataRender(writer, data, {}, RenderOptions{});
     try data_render.collectText(allocator, template_text);
 }
 
@@ -182,7 +182,7 @@ pub fn allocRenderText(allocator: Allocator, template_text: []const u8, data: an
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
+    var data_render = getDataRender(std.io.null_writer, data, {}, RenderOptions{});
     try data_render.bufCollectText(allocator, &list, template_text);
 
     return list.toOwnedSlice();
@@ -194,7 +194,7 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
+    var data_render = getDataRender(std.io.null_writer, data, {}, RenderOptions{});
     try data_render.bufCollectText(allocator, &list, template_text);
 
     return list.toOwnedSliceSentinel('\x00');
@@ -202,7 +202,7 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
 pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
-    var data_render = getDataRender(writer, data, RenderOptions{});
+    var data_render = getDataRender(writer, data, {}, RenderOptions{});
     try data_render.collectFile(allocator, template_absolute_path);
 }
 
@@ -212,7 +212,7 @@ pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8,
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
+    var data_render = getDataRender(std.io.null_writer, data, {}, RenderOptions{});
     try data_render.bufCollectFile(allocator, &list, template_absolute_path);
 
     return list.toOwnedSlice();
@@ -224,17 +224,25 @@ pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
+    var data_render = getDataRender(std.io.null_writer, data, {}, RenderOptions{});
     try data_render.bufCollectFile(allocator, &list, template_absolute_path);
 
     return list.toOwnedSliceSentinel('\x00');
 }
 
-fn getDataRender(writer: anytype, data: anytype, comptime options: RenderOptions) DataRender: {
+fn getDataRender(writer: anytype, data: anytype, partials: anytype, comptime options: RenderOptions) DataRender: {
+    const TPartials = @TypeOf(partials);
     const Writer = @TypeOf(writer);
     const Data = @TypeOf(data);
 
-    const Engine = RenderEngine(Writer, options);
+    const x = RenderOptions{
+        .preseve_line_breaks_and_indentation = !isEmptyPartials(TPartials) and options.allow_redefining_delimiters,
+        .context_misses = options.context_misses,
+        .allow_redefining_delimiters = options.allow_redefining_delimiters,
+        .lambdas = options.lambdas,
+    };
+
+    const Engine = RenderEngine(Writer, x);
     break :DataRender Engine.DataRender(Data);
 } {
     return .{
@@ -246,13 +254,15 @@ fn getDataRender(writer: anytype, data: anytype, comptime options: RenderOptions
 ///
 /// Group functions and structs that are denpendent of Writer and RenderOptions
 pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type {
+    const has_indentation = options.preseve_line_breaks_and_indentation;
+
     return struct {
         pub const Context = context.Context(Writer, options);
         pub const ContextStack = Context.ContextStack;
         pub const OutWriter = Context.OutWriter;
 
-        pub const IndentationQueue = indent.IndentationQueue(options);
-        pub const Indentation = IndentationQueue.Indentation;
+        pub const Indentation = if (has_indentation) indent.Indentation else indent.Indentation.Null;
+        pub const IndentationQueue = if (has_indentation) indent.IndentationQueue else indent.IndentationQueue.Null;
 
         pub const Invoker = invoker.Invoker(Writer, options);
 
@@ -622,6 +632,13 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
     };
 }
 
+fn isEmptyPartials(comptime TPartials: type) bool {
+    comptime {
+        return TPartials == void or
+            (trait.isTuple(TPartials) and meta.fields(TPartials).len == 0);
+    }
+}
+
 /// Comptime interface to handle tuples and HashMaps in the same way
 fn PartialsMapInterface(comptime TTemplate: type, comptime TPartials: type) type {
     return struct {
@@ -737,10 +754,7 @@ fn PartialsMapInterface(comptime TTemplate: type, comptime TPartials: type) type
         }
 
         fn isEmpty() bool {
-            comptime {
-                return TPartials == void or
-                    (trait.isTuple(TPartials) and meta.fields(TPartials).len == 0);
-            }
+            return isEmptyPartials(TPartials);
         }
 
         fn isValidMap() bool {
