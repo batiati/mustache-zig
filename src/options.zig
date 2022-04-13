@@ -137,7 +137,7 @@ pub const Lambdas = union(enum) {
     },
 };
 
-pub const RenderOptions = struct {
+pub const RenderTemplateOptions = struct {
 
     ///
     /// Defines the behavior when rendering a unknown context
@@ -178,18 +178,18 @@ pub const RenderFileOptions = struct {
     features: Features = .{},
 };
 
-pub const EngineOptions = struct {
+pub const RenderOptions = struct {
     has_partials: bool = true,
 
     options: union(enum) {
-        Parsed: RenderOptions,
+        Template: RenderTemplateOptions,
         Text: RenderTextOptions,
         File: RenderFileOptions,
-    } = .{ .Parsed = .{} },
+    } = .{ .Template = .{} },
 
     pub fn hasIdentation(comptime self: @This()) bool {
         return self.has_partials and switch (self.options) {
-            .Parsed => true,
+            .Template => true,
             .Text => |options| options.features.preseve_line_breaks_and_indentation,
             .File => |options| options.features.preseve_line_breaks_and_indentation,
         };

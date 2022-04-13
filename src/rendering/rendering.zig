@@ -7,11 +7,11 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const TemplateOptions = mustache.options.TemplateOptions;
 const RenderOptions = mustache.options.RenderOptions;
+const TemplateOptions = mustache.options.TemplateOptions;
+const RenderTemplateOptions = mustache.options.RenderTemplateOptions;
 const RenderTextOptions = mustache.options.RenderTextOptions;
 const RenderFileOptions = mustache.options.RenderFileOptions;
-const EngineOptions = mustache.options.EngineOptions;
 
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
@@ -40,7 +40,7 @@ pub fn render(template: Template, data: anytype, writer: anytype) !void {
 }
 
 /// Renders the `Template` with the given `data` to a writer.
-pub fn renderWithOptions(template: Template, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
+pub fn renderWithOptions(template: Template, data: anytype, writer: anytype, comptime options: RenderTemplateOptions) !void {
     return try renderPartialsWithOptions(template, {}, data, writer, options);
 }
 
@@ -52,13 +52,13 @@ pub fn renderPartials(template: Template, partials: anytype, data: anytype, writ
 
 /// Renders the `Template` with the given `data` to a writer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
-pub fn renderPartialsWithOptions(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
-    const engine_options = comptime EngineOptions{
+pub fn renderPartialsWithOptions(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderTemplateOptions) !void {
+    const render_options = comptime RenderOptions{
         .has_partials = !isEmptyPartials(@TypeOf(partials)),
-        .options = .{ .Parsed = options },
+        .options = .{ .Template = options },
     };
 
-    var data_render = getDataRender(writer, data, engine_options);
+    var data_render = getDataRender(writer, data, render_options);
     try data_render.render(template.elements, partials);
 }
 
@@ -70,7 +70,7 @@ pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allo
 
 /// Renders the `Template` with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
-pub fn allocRenderWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: RenderOptions) Allocator.Error![]const u8 {
+pub fn allocRenderWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: RenderTemplateOptions) Allocator.Error![]const u8 {
     return try allocRenderPartialsWithOptions(allocator, template, {}, data, options);
 }
 
@@ -84,16 +84,16 @@ pub fn allocRenderPartials(allocator: Allocator, template: Template, partials: a
 /// Renders the `Template` with the given `data` to a writer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// Caller must free the memory
-pub fn allocRenderPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) Allocator.Error![]const u8 {
-    const engine_options = comptime EngineOptions{
+pub fn allocRenderPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderTemplateOptions) Allocator.Error![]const u8 {
+    const render_options = comptime RenderOptions{
         .has_partials = !isEmptyPartials(@TypeOf(partials)),
-        .options = .{ .Parsed = options },
+        .options = .{ .Template = options },
     };
 
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, engine_options);
+    var data_render = getDataRender(std.io.null_writer, data, render_options);
     try data_render.bufRender(&list, template.elements, partials);
 
     return list.toOwnedSlice();
@@ -107,7 +107,7 @@ pub fn allocRenderZ(allocator: Allocator, template: Template, data: anytype) All
 
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
-pub fn allocRenderZWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: RenderOptions) Allocator.Error![:0]const u8 {
+pub fn allocRenderZWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: RenderTemplateOptions) Allocator.Error![:0]const u8 {
     return try allocRenderPartialsZWithOptions(allocator, template, {}, data, options);
 }
 
@@ -121,16 +121,16 @@ pub fn allocRenderPartialsZ(allocator: Allocator, template: Template, partials: 
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// Caller must free the memory
-pub fn allocRenderPartialsZWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) Allocator.Error![:0]const u8 {
-    const engine_options = comptime EngineOptions{
+pub fn allocRenderPartialsZWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderTemplateOptions) Allocator.Error![:0]const u8 {
+    const render_options = comptime RenderOptions{
         .has_partials = !isEmptyPartials(@TypeOf(partials)),
-        .options = .{ .Parsed = options },
+        .options = .{ .Template = options },
     };
 
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, engine_options);
+    var data_render = getDataRender(std.io.null_writer, data, render_options);
     try data_render.bufRender(&list, template.elements, partials);
 
     return list.toOwnedSliceSentinel('\x00');
@@ -142,7 +142,7 @@ pub fn bufRender(buf: []u8, template: Template, data: anytype) (Allocator.Error 
 }
 
 /// Renders the `Template` with the given `data` to a buffer.
-pub fn bufRenderWithOptions(buf: []u8, template: Template, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![]const u8 {
+pub fn bufRenderWithOptions(buf: []u8, template: Template, data: anytype, comptime options: RenderTemplateOptions) (Allocator.Error || BufError)![]const u8 {
     return try bufRenderPartialsWithOptions(buf, template, {}, data, options);
 }
 
@@ -154,14 +154,14 @@ pub fn bufRenderPartials(buf: []u8, template: Template, partials: anytype, data:
 
 /// Renders the `Template` with the given `data` to a buffer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
-pub fn bufRenderPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![]const u8 {
-    const engine_options = comptime EngineOptions{
+pub fn bufRenderPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: RenderTemplateOptions) (Allocator.Error || BufError)![]const u8 {
+    const render_options = comptime RenderOptions{
         .has_partials = !isEmptyPartials(@TypeOf(partials)),
-        .options = .{ .Parsed = options },
+        .options = .{ .Template = options },
     };
 
     var fbs = std.io.fixedBufferStream(buf);
-    var data_render = getDataRender(fbs.writer(), data, engine_options);
+    var data_render = getDataRender(fbs.writer(), data, render_options);
     try data_render.render(template.elements, partials);
 
     return fbs.getWritten();
@@ -173,7 +173,7 @@ pub fn bufRenderZ(buf: []u8, template: Template, data: anytype) (Allocator.Error
 }
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
-pub fn bufRenderZWithOptions(buf: []u8, template: Template, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![:0]const u8 {
+pub fn bufRenderZWithOptions(buf: []u8, template: Template, data: anytype, comptime options: RenderTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
     return try bufRenderPartialsZWithOptions(buf, template, {}, data, options);
 }
 
@@ -183,7 +183,7 @@ pub fn bufRenderPartialsZ(buf: []u8, template: Template, partials: anytype, data
 }
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
-pub fn bufRenderPartialsZWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions) (Allocator.Error || BufError)![:0]const u8 {
+pub fn bufRenderPartialsZWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: RenderTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
     var ret = try bufRenderPartialsWithOptions(buf, template, partials, data, options);
 
     if (ret.len < buf.len) {
@@ -206,12 +206,12 @@ pub fn renderTextPartials(allocator: Allocator, template_text: []const u8, parti
 
 /// Parses the `template_text` and renders with the given `data` to a writer
 pub fn renderTextPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderTextOptions) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
-    const engine_options = comptime EngineOptions{
+    const render_options = comptime RenderOptions{
         .has_partials = !isEmptyPartials(@TypeOf(partials)),
         .options = .{ .Text = options },
     };
 
-    var data_render = getDataRender(writer, data, engine_options);
+    var data_render = getDataRender(writer, data, render_options);
     try data_render.collectText(allocator, template_text, partials);
 }
 
@@ -230,7 +230,7 @@ pub fn allocRenderTextPartials(allocator: Allocator, template_text: []const u8, 
 /// Parses the `template_text` and renders with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
 pub fn allocRenderTextPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, comptime options: RenderTextOptions) (Allocator.Error || ParseError)![]const u8 {
-    const engine_options = comptime EngineOptions{
+    const render_options = comptime RenderOptions{
         .has_partials = !isEmptyPartials(@TypeOf(partials)),
         .options = .{ .Text = options },
     };
@@ -238,7 +238,7 @@ pub fn allocRenderTextPartialsWithOptions(allocator: Allocator, template_text: [
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, engine_options);
+    var data_render = getDataRender(std.io.null_writer, data, render_options);
     try data_render.bufCollectText(allocator, &list, template_text, partials);
 
     return list.toOwnedSlice();
@@ -259,7 +259,7 @@ pub fn allocRenderTextZPartials(allocator: Allocator, template_text: []const u8,
 /// Parses the `template_text` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
 pub fn allocRenderTextZPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, comptime options: RenderTextOptions) (Allocator.Error || ParseError)![:0]const u8 {
-    const engine_options = comptime EngineOptions{
+    const render_options = comptime RenderOptions{
         .has_partials = !isEmptyPartials(@TypeOf(partials)),
         .options = .{ .Text = options },
     };
@@ -267,7 +267,7 @@ pub fn allocRenderTextZPartialsWithOptions(allocator: Allocator, template_text: 
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, engine_options);
+    var data_render = getDataRender(std.io.null_writer, data, render_options);
     try data_render.bufCollectText(allocator, &list, template_text, partials);
 
     return list.toOwnedSliceSentinel('\x00');
@@ -275,7 +275,7 @@ pub fn allocRenderTextZPartialsWithOptions(allocator: Allocator, template_text: 
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
 pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
-    var data_render = getDataRender(writer, data, EngineOptions{});
+    var data_render = getDataRender(writer, data, RenderOptions{});
     try data_render.collectFile(allocator, template_absolute_path);
 }
 
@@ -285,7 +285,7 @@ pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8,
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, EngineOptions{});
+    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
     try data_render.bufCollectFile(allocator, &list, template_absolute_path);
 
     return list.toOwnedSlice();
@@ -297,13 +297,13 @@ pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, EngineOptions{});
+    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
     try data_render.bufCollectFile(allocator, &list, template_absolute_path);
 
     return list.toOwnedSliceSentinel('\x00');
 }
 
-fn getDataRender(writer: anytype, data: anytype, comptime options: EngineOptions) DataRender: {
+fn getDataRender(writer: anytype, data: anytype, comptime options: RenderOptions) DataRender: {
     const Writer = @TypeOf(writer);
     const Data = @TypeOf(data);
 
@@ -317,8 +317,8 @@ fn getDataRender(writer: anytype, data: anytype, comptime options: EngineOptions
 }
 
 ///
-/// Group functions and structs that are denpendent of Writer and EngineOptions
-pub fn RenderEngine(comptime Writer: type, comptime options: EngineOptions) type {
+/// Group functions and structs that are denpendent of Writer and RenderOptions
+pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type {
     const has_indentation = options.hasIdentation();
 
     return struct {

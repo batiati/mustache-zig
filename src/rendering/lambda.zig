@@ -7,7 +7,7 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 const mustache = @import("../mustache.zig");
-const EngineOptions = mustache.options.EngineOptions;
+const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 
 const context = @import("context.zig");
@@ -90,7 +90,7 @@ pub const LambdaContext = struct {
     }
 };
 
-pub fn LambdaContextImpl(comptime Writer: type, comptime options: EngineOptions) type {
+pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, options);
     const Render = RenderEngine.Render;
     const Context = RenderEngine.Context;

@@ -4,7 +4,7 @@ const meta = std.meta;
 const trait = std.meta.trait;
 
 const mustache = @import("../mustache.zig");
-const EngineOptions = mustache.options.EngineOptions;
+const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 
 const context = @import("context.zig");
@@ -20,7 +20,7 @@ const LambdaInvoker = lambda.LambdaInvoker;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-pub fn Invoker(comptime Writer: type, comptime options: EngineOptions) type {
+pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, options);
     const Context = RenderEngine.Context;
     const OutWriter = RenderEngine.OutWriter;
