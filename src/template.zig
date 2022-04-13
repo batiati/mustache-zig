@@ -396,7 +396,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             defer parser.deinit();
 
             var collector = Collector{};
-            try self.produceElements(&parser, &collector);
+            try self.produceElements(&parser, {}, &collector);
 
             self.result = .{
                 .Elements = collector.elements,
@@ -408,32 +408,33 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             defer parser.deinit();
 
             var collector = Collector{};
-            try self.produceElements(&parser, &collector);
+            try self.produceElements(&parser, {}, &collector);
 
             self.result = .{
                 .Elements = collector.elements,
             };
         }
 
-        pub fn collectElements(self: *Self, template_text: []const u8, out_render: anytype) ErrorSet(Parser, @TypeOf(out_render))!void {
+        pub fn collectElements(self: *Self, template_text: []const u8, partials: anytype, render: anytype) ErrorSet(Parser, @TypeOf(render))!void {
             var parser = try Parser.init(self.allocator, template_text, self.delimiters);
             defer parser.deinit();
 
-            try self.produceElements(&parser, out_render);
+            try self.produceElements(&parser, partials, render);
         }
 
-        pub fn collectElementsFromFile(self: *Self, absolute_path: []const u8, out_render: anytype) ErrorSet(Parser, @TypeOf(out_render))!void {
+        pub fn collectElementsFromFile(self: *Self, absolute_path: []const u8, partials: anytype, render: anytype) ErrorSet(Parser, @TypeOf(render))!void {
             var parser = try Parser.init(self.allocator, absolute_path, self.delimiters);
             defer parser.deinit();
 
-            try self.produceElements(&parser, out_render);
+            try self.produceElements(&parser, partials, render);
         }
 
         fn produceElements(
             self: *Self,
             parser: *Parser,
-            out_render: anytype,
-        ) ErrorSet(Parser, @TypeOf(out_render))!void {
+            partials: anytype,
+            render: anytype,
+        ) ErrorSet(Parser, @TypeOf(render))!void {
             while (true) {
                 var parse_result = try parser.parse();
                 defer parser.ref_counter_holder.free(self.allocator);
@@ -450,10 +451,10 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
                         const elements = parser.createElements(null, &siblings) catch |err| switch (err) {
                             // TODO: implement a renderError function to render the error message on the output writer
                             error.ParserAbortedError => return,
-                            else => return @errSetCast(ErrorSet(@TypeOf(parser), @TypeOf(out_render)), err),
+                            else => return @errSetCast(ErrorSet(@TypeOf(parser), @TypeOf(render)), err),
                         };
                         defer if (options.output == .Render) Element.deinitMany(self.allocator, options.copyStrings(), elements);
-                        try out_render.render(elements, {});
+                        try render.render(elements, partials);
 
                         // No need for loop again
                         // when output == .Parse, all nodes are produced at once
@@ -2578,7 +2579,7 @@ const tests = struct {
             };
 
             var dummy_render = DummyRender{};
-            try template.collectElementsFromFile(test_10MB_file, &dummy_render);
+            try template.collectElementsFromFile(test_10MB_file, {}, &dummy_render);
 
             try testing.expectEqual(@as(usize, 3 * REPEAT), dummy_render.count);
         }

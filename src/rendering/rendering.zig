@@ -275,30 +275,79 @@ pub fn allocRenderTextZPartialsWithOptions(allocator: Allocator, template_text: 
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
 pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
-    var data_render = getDataRender(writer, data, RenderOptions{});
-    try data_render.collectFile(allocator, template_absolute_path);
+    try renderFilePartialsWithOptions(allocator, template_absolute_path, {}, data, writer, .{});
+}
+
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
+pub fn renderFilePartials(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
+    try renderFilePartialsWithOptions(allocator, template_absolute_path, partials, data, writer, .{});
+}
+
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
+pub fn renderFilePartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderFileOptions) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
+    const render_options = comptime RenderOptions{
+        .has_partials = !isEmptyPartials(@TypeOf(partials)),
+        .options = .{ .File = options },
+    };
+
+    var data_render = getDataRender(writer, data, render_options);
+    try data_render.collectFile(allocator, template_absolute_path, partials);
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
 pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
+    return try allocRenderFilePartialsWithOptions(allocator, template_absolute_path, {}, data, .{});
+}
+
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// Caller must free the memory
+pub fn allocRenderFilePartials(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
+    return try allocRenderFilePartialsWithOptions(allocator, template_absolute_path, partials, data, .{});
+}
+
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// Caller must free the memory
+pub fn allocRenderFilePartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, comptime options: RenderFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
+    const render_options = comptime RenderOptions{
+        .has_partials = !isEmptyPartials(@TypeOf(partials)),
+        .options = .{ .File = options },
+    };
+
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
-    try data_render.bufCollectFile(allocator, &list, template_absolute_path);
+    var data_render = getDataRender(std.io.null_writer, data, render_options);
+    try data_render.bufCollectFile(allocator, &list, template_absolute_path, partials);
 
     return list.toOwnedSlice();
 }
 
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// Caller must free the memory
+pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
+    return try allocRenderFileZPartialsWithOptions(allocator, template_absolute_path, {}, data, .{});
+}
+
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// Caller must free the memory
+pub fn allocRenderFileZPartials(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
+    return try allocRenderFileZPartialsWithOptions(allocator, template_absolute_path, partials, data, .{});
+}
+
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
-pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![:0]const u8 {
+pub fn allocRenderFileZPartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, comptime options: RenderFileOptions) (Allocator.Error || ParseError || FileError)![:0]const u8 {
+    const render_options = comptime RenderOptions{
+        .has_partials = !isEmptyPartials(@TypeOf(partials)),
+        .options = .{ .File = options },
+    };
+
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    var data_render = getDataRender(std.io.null_writer, data, RenderOptions{});
-    try data_render.bufCollectFile(allocator, &list, template_absolute_path);
+    var data_render = getDataRender(std.io.null_writer, data, render_options);
+    try data_render.bufCollectFile(allocator, &list, template_absolute_path, partials);
 
     return list.toOwnedSliceSentinel('\x00');
 }
@@ -384,7 +433,7 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
                     };
                     errdefer template.deinit();
 
-                    try template.collectElements(template_text, self);
+                    try template.collectElements(template_text, partials, self);
                 }
 
                 pub fn bufCollectText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8, partials: anytype) (ParseError || Error)!void {
@@ -404,10 +453,10 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
                     defer self.out_writer = current_writer;
 
                     self.out_writer = .{ .Buffer = buffer };
-                    try template.collectElements(template_text, self);
+                    try template.collectElements(template_text, partials, self);
                 }
 
-                pub fn collectFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8) !void {
+                pub fn collectFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8, partials: anytype) !void {
                     const render_file_options = TemplateOptions{
                         .source = .{ .Stream = .{} },
                         .output = .Render,
@@ -418,10 +467,10 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
                     };
                     errdefer template.deinit();
 
-                    try template.collectElementsFromFile(template_absolute_path, self);
+                    try template.collectElementsFromFile(template_absolute_path, partials, self);
                 }
 
-                pub fn bufCollectFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8) !void {
+                pub fn bufCollectFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8, partials: anytype) !void {
                     const render_file_options = TemplateOptions{
                         .source = .{ .Stream = .{} },
                         .output = .Render,
@@ -436,7 +485,7 @@ pub fn RenderEngine(comptime Writer: type, comptime options: RenderOptions) type
                     defer self.out_writer = current_writer;
 
                     self.out_writer = .{ .Buffer = buffer };
-                    try template.collectElementsFromFile(template_absolute_path, self);
+                    try template.collectElementsFromFile(template_absolute_path, partials, self);
                 }
             };
         }
