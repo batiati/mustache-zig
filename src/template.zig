@@ -7,7 +7,8 @@ const assert = std.debug.assert;
 
 const mustache = @import("mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
-const Source = mustache.options.Source;
+const TemplateSource = mustache.options.TemplateSource;
+const Features = mustache.options.Features;
 
 const parsing = @import("parsing/parsing.zig");
 const Node = parsing.Node;
@@ -307,7 +308,7 @@ pub fn parseText(
     //This field could be inserted on "ParseTextOptions" when comptime fields get fixed
     //https://github.com/ziglang/zig/issues/5497
 
-    const source = Source{ .String = .{ .copy_strings = options.copy_strings } };
+    const source = TemplateSource{ .String = .{ .copy_strings = options.copy_strings } };
     return try parseSource(source, options.features, allocator, template_text, default_delimiters);
 }
 
@@ -329,13 +330,13 @@ pub fn parseFile(
     //This field could be inserted on "ParseTextOptions" when comptime fields get fixed
     //https://github.com/ziglang/zig/issues/5497
 
-    const source = Source{ .Stream = .{ .read_buffer_size = options.read_buffer_size } };
+    const source = TemplateSource{ .Stream = .{ .read_buffer_size = options.read_buffer_size } };
     return try parseSource(source, options.features, allocator, template_absolute_path, default_delimiters);
 }
 
 fn parseSource(
-    comptime source: mustache.options.Source,
-    comptime features: mustache.options.Features,
+    comptime source: TemplateSource,
+    comptime features: Features,
     allocator: Allocator,
     source_content: []const u8,
     delimiters: Delimiters,

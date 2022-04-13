@@ -3,7 +3,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const RenderOptions = mustache.options.RenderOptions;
 const Element = mustache.Element;
 
 pub const IndentationQueue = struct {

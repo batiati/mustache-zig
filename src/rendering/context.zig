@@ -6,7 +6,7 @@ const trait = std.meta.trait;
 const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
-const RenderOptions = mustache.options.RenderOptions;
+const EngineOptions = mustache.options.EngineOptions;
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 
@@ -62,7 +62,7 @@ pub const Escape = enum {
     Unescaped,
 };
 
-pub fn getContext(comptime Writer: type, data: anytype, comptime options: RenderOptions) Context: {
+pub fn getContext(comptime Writer: type, data: anytype, comptime options: EngineOptions) Context: {
     const Data = @TypeOf(data);
     const by_value = Fields.byValue(Data);
     if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
@@ -76,7 +76,7 @@ pub fn getContext(comptime Writer: type, data: anytype, comptime options: Render
 
 const FlattenedType = [4]usize;
 
-pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
+pub fn Context(comptime Writer: type, comptime options: EngineOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, options);
     const Indentation = RenderEngine.Indentation;
 
@@ -277,7 +277,7 @@ pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
     };
 }
 
-fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: RenderOptions) type {
+fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: EngineOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, options);
     const ContextInterface = RenderEngine.Context;
     const ContextStack = RenderEngine.ContextStack;

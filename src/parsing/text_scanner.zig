@@ -29,7 +29,7 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
     const TextBlock = parsing.TextBlock(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 
-    const allow_lambdas = options.features.lambdas;
+    const allow_lambdas = options.features.lambdas == .Enabled;
 
     return struct {
         const Self = @This();

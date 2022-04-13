@@ -9,11 +9,11 @@ pub const TemplateOptions = struct {
 
     ///
     /// Template source options
-    source: Source,
+    source: TemplateSource,
 
     ///
     /// Template output options
-    output: Output,
+    output: ParserOutput,
 
     ///
     /// Those options affect both performance and supported Mustache features.
@@ -34,6 +34,43 @@ pub const TemplateOptions = struct {
         };
     }
 };
+
+pub const TemplateSource = union(enum) {
+
+    ///
+    /// Loads a template from string
+    String: struct {
+
+        ///
+        /// Use 'false' if the source string is static or lives enough
+        copy_strings: bool = true,
+    },
+
+    ///
+    /// Loads a template from a file or stream
+    Stream: struct {
+
+        ///
+        /// Define the buffer size for reading the stream
+        read_buffer_size: usize = 4 * 1024,
+    },
+};
+
+pub const ParserOutput = enum {
+
+    ///
+    /// Parses a template
+    /// Use this option for validation and to store a template for future rendering
+    /// This option speeds up the rendering process when the same template is rendered many times
+    Parse,
+
+    ///
+    /// Parses just enough to render directly, without storing the template.
+    /// This option saves memory.
+    Render,
+};
+
+// ----------------------------------
 
 pub const ParseTextOptions = struct {
 
@@ -59,70 +96,7 @@ pub const ParseFileOptions = struct {
     features: Features = .{},
 };
 
-pub const Source = union(enum) {
-
-    ///
-    /// Loads a template from string
-    String: struct {
-
-        ///
-        /// Use 'false' if the source string is static or lives enough
-        copy_strings: bool = true,
-    },
-
-    ///
-    /// Loads a template from a file or stream
-    Stream: struct {
-
-        ///
-        /// Define the buffer size for reading the stream
-        read_buffer_size: usize = 4 * 1024,
-    },
-};
-
-pub const Output = enum {
-
-    ///
-    /// Parses a template
-    /// Use this option for validation and to store a template for future rendering
-    /// This option speeds up the rendering process when the same template is rendered many times
-    Parse,
-
-    ///
-    /// Parses just enough to render directly, without storing the template.
-    /// This option saves memory.
-    Render,
-};
-
 pub const Features = struct {
-
-    ///
-    /// Allows redefining the delimiters through the tags '{{=' and '=}}'
-    /// Disabling this option speeds up the parsing process.
-    /// If disabled, any occurrence of '{{=' will result in a parse error
-    allow_redefining_delimiters: bool = true,
-
-    ///
-    /// Preserve line breaks and indentations.
-    /// This option is useful when rendering documents sensible to spaces such as `yaml` for example.
-    /// Disabling this option speeds up the parsing process.
-    /// Examples:
-    /// [Line breaks](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/comments.yml#L38)
-    /// [Indentation](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/partials.yml#L82)
-    preseve_line_breaks_and_indentation: bool = true,
-
-    ///
-    /// Lambda expansion support
-    lambdas: bool = true,
-};
-
-pub const RenderOptions = struct {
-
-    ///
-    /// Defines the behavior when rendering a unknown context
-    /// Mustache's spec says it must be rendered as an empty string
-    /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
-    context_misses: enum { Empty, Error } = if (builtin.mode == .Debug) .Error else .Empty,
 
     ///
     /// Allows redefining the delimiters through the tags '{{=' and '=}}'
@@ -159,6 +133,65 @@ pub const Lambdas = union(enum) {
         /// Lambdas can expand to new tags, including another lambda
         /// Defines the max recursion depth to avoid infinite recursion when evaluating lambdas
         /// A recursive lambda will interpolate as an empty string, without erros
-        max_recursion: comptime_int = 100,
+        max_recursion: u32 = 100,
     },
+};
+
+pub const RenderOptions = struct {
+
+    ///
+    /// Defines the behavior when rendering a unknown context
+    /// Mustache's spec says it must be rendered as an empty string
+    /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
+    context_misses: enum { Empty, Error } = if (builtin.mode == .Debug) .Error else .Empty,
+};
+
+pub const RenderTextOptions = struct {
+
+    ///
+    /// Defines the behavior when rendering a unknown context
+    /// Mustache's spec says it must be rendered as an empty string
+    /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
+    context_misses: enum { Empty, Error } = if (builtin.mode == .Debug) .Error else .Empty,
+
+    ///
+    /// Those options affect both performance and supported Mustache features.
+    /// Defaults to full-spec compatible.
+    features: Features = .{},
+};
+
+pub const RenderFileOptions = struct {
+
+    ///
+    /// Defines the behavior when rendering a unknown context
+    /// Mustache's spec says it must be rendered as an empty string
+    /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
+    context_misses: enum { Empty, Error } = if (builtin.mode == .Debug) .Error else .Empty,
+
+    ///
+    /// Define the buffer size for reading the stream
+    read_buffer_size: usize = 4 * 1024,
+
+    ///
+    /// Those options affect both performance and supported Mustache features.
+    /// Defaults to full-spec compatible.
+    features: Features = .{},
+};
+
+pub const EngineOptions = struct {
+    has_partials: bool = true,
+
+    options: union(enum) {
+        Parsed: RenderOptions,
+        Text: RenderTextOptions,
+        File: RenderFileOptions,
+    } = .{ .Parsed = .{} },
+
+    pub fn hasIdentation(comptime self: @This()) bool {
+        return self.has_partials and switch (self.options) {
+            .Parsed => true,
+            .Text => |options| options.features.preseve_line_breaks_and_indentation,
+            .File => |options| options.features.preseve_line_breaks_and_indentation,
+        };
+    }
 };
