@@ -90,8 +90,8 @@ pub const LambdaContext = struct {
     }
 };
 
-pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, options);
+pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     const Render = RenderEngine.Render;
     const Context = RenderEngine.Context;
     const ContextStack = Context.ContextStack;
@@ -106,6 +106,7 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions)
 
         out_writer: OutWriter,
         stack: *const ContextStack,
+        partials_map: PartialsMap,
         indentation: Indentation,
         delimiters: Delimiters,
         escape: Escape,
@@ -137,7 +138,7 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions)
             defer buffer.deinit();
 
             var indentation = IndentationQueue{};
-            try Render.renderLevel(.{ .Buffer = &buffer }, self.stack, &indentation, template.elements, {});
+            try Render.renderLevel(.{ .Buffer = &buffer }, self.stack, &indentation, template.elements, self.partials_map);
 
             return buffer.toOwnedSlice();
         }
@@ -152,7 +153,7 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime options: RenderOptions)
             defer template.deinit(allocator);
 
             var indentation = IndentationQueue{};
-            try Render.renderLevel(self.out_writer, self.stack, &indentation, template.elements, {});
+            try Render.renderLevel(self.out_writer, self.stack, &indentation, template.elements, self.partials_map);
         }
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {

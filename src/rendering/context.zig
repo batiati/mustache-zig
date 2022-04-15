@@ -18,6 +18,8 @@ const LambdaContext = lambda.LambdaContext;
 const invoker = @import("invoker.zig");
 const Fields = invoker.Fields;
 
+const map = @import("partials_map.zig");
+
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
 
@@ -62,22 +64,22 @@ pub const Escape = enum {
     Unescaped,
 };
 
-pub fn getContext(comptime Writer: type, data: anytype, comptime options: RenderOptions) Context: {
+pub fn getContext(comptime Writer: type, data: anytype, comptime PartialsMap: type, comptime options: RenderOptions) Context: {
     const Data = @TypeOf(data);
     const by_value = Fields.byValue(Data);
     if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
 
-    const RenderEngine = rendering.RenderEngine(Writer, options);
+    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     break :Context RenderEngine.Context;
 } {
-    const Impl = ContextImpl(Writer, @TypeOf(data), options);
+    const Impl = ContextImpl(Writer, @TypeOf(data), PartialsMap, options);
     return Impl.context(data);
 }
 
 const FlattenedType = [4]usize;
 
-pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, options);
+pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     const Indentation = RenderEngine.Indentation;
 
     return struct {
@@ -106,7 +108,7 @@ pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
         const VTable = struct {
             get: fn (*const anyopaque, []const u8, ?usize) PathResolution(Self),
             interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape, Indentation) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: fn (*const anyopaque, OutWriter, *const ContextStack, []const u8, []const u8, Escape, Indentation, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            expandLambda: fn (*const anyopaque, OutWriter, *const ContextStack, PartialsMap, []const u8, []const u8, Escape, Indentation, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = struct {
@@ -266,19 +268,20 @@ pub fn Context(comptime Writer: type, comptime options: RenderOptions) type {
             self: Self,
             out_writer: OutWriter,
             stack: *const ContextStack,
+            partials_map: PartialsMap,
             path: []const u8,
             inner_text: []const u8,
             escape: Escape,
             indentation: Indentation,
             delimiters: Delimiters,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try self.vtable.expandLambda(&self.ctx, out_writer, stack, path, inner_text, escape, indentation, delimiters);
+            return try self.vtable.expandLambda(&self.ctx, out_writer, stack, partials_map, path, inner_text, escape, indentation, delimiters);
         }
     };
 }
 
-fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, options);
+fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     const ContextInterface = RenderEngine.Context;
     const ContextStack = RenderEngine.ContextStack;
     const OutWriter = RenderEngine.OutWriter;
@@ -340,6 +343,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: Ren
             ctx: *const anyopaque,
             out_writer: OutWriter,
             stack: *const ContextStack,
+            partials_map: PartialsMap,
             path: []const u8,
             inner_text: []const u8,
             escape: Escape,
@@ -351,6 +355,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime options: Ren
                 out_writer,
                 getData(ctx),
                 stack,
+                partials_map,
                 inner_text,
                 escape,
                 indentation,
@@ -500,18 +505,22 @@ const struct_tests = struct {
         return person_2;
     }
 
+    const dummy_options = RenderOptions{ .Template = .{} };
+    const DummyPartialsMap = map.PartialsMap(void, dummy_options);
+    const dummy_map = DummyPartialsMap.init({});
+
     fn interpolate(writer: anytype, data: anytype, path: []const u8) anyerror!void {
         const Data = @TypeOf(data);
         const by_value = comptime Fields.byValue(Data);
 
         const Writer = @TypeOf(writer);
-        var ctx = getContext(Writer, if (by_value) data else @as(*const Data, &data), .{});
+        var ctx = getContext(Writer, if (by_value) data else @as(*const Data, &data), DummyPartialsMap, dummy_options);
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
 
-    fn interpolateCtx(writer: anytype, ctx: Context(@TypeOf(writer), .{}), path: []const u8, escape: Escape) anyerror!void {
-        const ContextInterface = Context(@TypeOf(writer), .{});
+    fn interpolateCtx(writer: anytype, ctx: Context(@TypeOf(writer), DummyPartialsMap, dummy_options), path: []const u8, escape: Escape) anyerror!void {
+        const ContextInterface = Context(@TypeOf(writer), DummyPartialsMap, dummy_options);
         var out_writer: ContextInterface.OutWriter = .{ .Writer = writer };
 
         switch (try ctx.interpolate(out_writer, path, escape, .{})) {
@@ -521,7 +530,7 @@ const struct_tests = struct {
                     .ctx = ctx,
                 };
 
-                _ = try ctx.expandLambda(out_writer, &stack, path, "", escape, .{}, .{});
+                _ = try ctx.expandLambda(out_writer, &stack, dummy_map, path, "", escape, .{}, .{});
             },
             else => {},
         }
@@ -1082,7 +1091,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = getContext(@TypeOf(writer), &person, .{});
+        var person_ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
 
         list.clearAndFree();
 
@@ -1136,7 +1145,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = getContext(@TypeOf(writer), &person, .{});
+        var person_ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
 
         list.clearAndFree();
 
@@ -1200,7 +1209,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var person_ctx = getContext(Writer, &person, .{});
+        var person_ctx = getContext(Writer, &person, DummyPartialsMap, dummy_options);
 
         // Person.address
         var address_ctx = switch (person_ctx.get("address")) {
@@ -1251,7 +1260,7 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Person
-        var ctx = getContext(@TypeOf(writer), &person, .{});
+        var ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
 
         var iterator = switch (ctx.iterator("items")) {
             .Field => |found| found,
@@ -1293,7 +1302,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var ctx = getContext(Writer, &person, .{});
+        var ctx = getContext(Writer, &person, DummyPartialsMap, dummy_options);
 
         {
             // iterator over true
@@ -1335,7 +1344,7 @@ const struct_tests = struct {
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         const Writer = @TypeOf(std.io.null_writer);
-        var ctx = getContext(Writer, &person, .{});
+        var ctx = getContext(Writer, &person, DummyPartialsMap, dummy_options);
 
         {
             // iterator over true

@@ -178,17 +178,13 @@ pub const RenderFileOptions = struct {
     features: Features = .{},
 };
 
-pub const RenderOptions = struct {
-    has_partials: bool = true,
+pub const RenderOptions = union(enum) {
+    Template: RenderTemplateOptions,
+    Text: RenderTextOptions,
+    File: RenderFileOptions,
 
-    options: union(enum) {
-        Template: RenderTemplateOptions,
-        Text: RenderTextOptions,
-        File: RenderFileOptions,
-    } = .{ .Template = .{} },
-
-    pub fn hasIdentation(comptime self: @This()) bool {
-        return self.has_partials and switch (self.options) {
+    pub fn preseveLineBreaksAndIndentation(comptime self: @This()) bool {
+        return switch (self) {
             .Template => true,
             .Text => |options| options.features.preseve_line_breaks_and_indentation,
             .File => |options| options.features.preseve_line_breaks_and_indentation,

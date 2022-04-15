@@ -20,8 +20,8 @@ const LambdaInvoker = lambda.LambdaInvoker;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, options);
+pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     const Context = RenderEngine.Context;
     const OutWriter = RenderEngine.OutWriter;
     const Indentation = RenderEngine.Indentation;
@@ -322,6 +322,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             out_writer: OutWriter,
             data: anytype,
             stack: anytype,
+            partials_map: PartialsMap,
             tag_contents: []const u8,
             escape: Escape,
             indentation: Indentation,
@@ -330,7 +331,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const ExpandLambdaAction = PathInvoker(Allocator.Error || Writer.Error, void, expandLambdaAction);
             return try ExpandLambdaAction.call(
-                .{ stack, tag_contents, escape, indentation, delimiters },
+                .{ stack, tag_contents, escape, indentation, delimiters, partials_map },
                 out_writer,
                 data,
                 path_iterator,
@@ -341,7 +342,7 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
         fn getAction(param: void, out_writer: void, value: anytype) error{}!Context {
             _ = param;
             _ = out_writer;
-            return context.getContext(Writer, value, options);
+            return context.getContext(Writer, value, PartialsMap, options);
         }
 
         fn interpolateAction(
@@ -374,11 +375,13 @@ pub fn Invoker(comptime Writer: type, comptime options: RenderOptions) type {
             const escape: Escape = params.@"2";
             const indentation: Indentation = params.@"3";
             const delimiters: Delimiters = params.@"4";
+            const partials_map: PartialsMap = params.@"5";
 
-            const Impl = lambda.LambdaContextImpl(Writer, options);
+            const Impl = lambda.LambdaContextImpl(Writer, PartialsMap, options);
             var impl = Impl{
                 .out_writer = out_writer,
                 .stack = stack,
+                .partials_map = partials_map,
                 .escape = escape,
                 .indentation = indentation,
                 .delimiters = delimiters,
