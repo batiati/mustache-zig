@@ -10,18 +10,13 @@ const mustache = @import("../mustache.zig");
 const RenderOptions = mustache.options.RenderOptions;
 const Template = mustache.Template;
 
-pub fn isEmptyPartials(comptime TPartials: type) bool {
-    comptime {
-        return TPartials == void or
-            (trait.isTuple(TPartials) and meta.fields(TPartials).len == 0);
-    }
-}
-
 /// Partials map from a comptime known type
 /// It works like a HashMap, but can be initialized from a tuple, slice or Hashmap
 pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) type {
     return struct {
         const Self = @This();
+
+        pub const options: RenderOptions = options;
 
         pub const TTemplate = switch (options) {
             .Template => Template,
@@ -29,7 +24,10 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
         };
 
         pub fn isEmpty() bool {
-            return isEmptyPartials(TPartials);
+            comptime {
+                return TPartials == void or
+                    (trait.isTuple(TPartials) and meta.fields(TPartials).len == 0);
+            }
         }
 
         allocator: if (options != .Template and !isEmpty()) Allocator else void,

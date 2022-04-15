@@ -385,56 +385,53 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 }
 
                 pub fn bufRender(self: *Self, buffer: *std.ArrayList(u8), elements: []const Element, partials: PartialsMap) Error!void {
-                    const by_value = comptime Fields.byValue(Data);
+                    const out_writer = self.out_writer;
+                    defer self.out_writer = out_writer;
 
-                    var stack = ContextStack{
-                        .parent = null,
-                        .ctx = context.getContext(
-                            Writer,
-                            if (by_value) self.data else @as(*const Data, &self.data),
-                            PartialsMap,
-                            options,
-                        ),
-                    };
-
-                    var indentation = IndentationQueue{};
-                    try Render.renderLevel(.{ .Buffer = buffer }, &stack, &indentation, elements, partials);
+                    self.out_writer = .{ .Buffer = buffer };
+                    try self.render(elements, partials);
                 }
 
                 pub fn collectText(self: *Self, allocator: Allocator, template_text: []const u8, partials: PartialsMap) (ParseError || Error)!void {
-                    _ = partials;
+                    switch (comptime PartialsMap.options) {
+                        .Text => |text_options| {
+                            const template_options = TemplateOptions{
+                                .source = .{ .String = .{ .copy_strings = false } },
+                                .output = .Render,
+                                .features = text_options.features,
+                            };
 
-                    const render_text_options = TemplateOptions{
-                        .source = .{ .String = .{ .copy_strings = false } },
-                        .output = .Render,
-                    };
+                            var template = TemplateLoader(template_options){
+                                .allocator = allocator,
+                            };
+                            errdefer template.deinit();
+                            try template.collectElements(template_text, partials, self);
+                        },
+                        .File => |file_options| {
+                            const render_file_options = TemplateOptions{
+                                .source = .{ .Stream = .{ .read_buffer_size = file_options.read_buffer_size } },
+                                .output = .Render,
+                                .features = file_options.features,
+                            };
 
-                    var template = TemplateLoader(render_text_options){
-                        .allocator = allocator,
-                    };
-                    errdefer template.deinit();
+                            var template = TemplateLoader(render_file_options){
+                                .allocator = allocator,
+                            };
+                            errdefer template.deinit();
 
-                    try template.collectElements(template_text, partials, self);
+                            try template.collectElementsFromFile(template_text, partials, self);
+                        },
+
+                        .Template => unreachable,
+                    }
                 }
 
                 pub fn bufCollectText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8, partials: anytype) (ParseError || Error)!void {
-                    _ = partials;
-
-                    const render_text_options = TemplateOptions{
-                        .source = .{ .String = .{ .copy_strings = false } },
-                        .output = .Render,
-                    };
-
-                    var template = TemplateLoader(render_text_options){
-                        .allocator = allocator,
-                    };
-                    errdefer template.deinit();
-
-                    const current_writer = self.out_writer;
-                    defer self.out_writer = current_writer;
+                    const out_writer = self.out_writer;
+                    defer self.out_writer = out_writer;
 
                     self.out_writer = .{ .Buffer = buffer };
-                    try template.collectElements(template_text, partials, self);
+                    try self.collectText(allocator, template_text, partials);
                 }
 
                 pub fn collectFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8, partials: anytype) !void {
@@ -452,24 +449,71 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 }
 
                 pub fn bufCollectFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8, partials: anytype) !void {
-                    const render_file_options = TemplateOptions{
-                        .source = .{ .Stream = .{} },
-                        .output = .Render,
-                    };
-
-                    var template = TemplateLoader(render_file_options){
-                        .allocator = allocator,
-                    };
-                    errdefer template.deinit();
-
-                    const current_writer = self.out_writer;
-                    defer self.out_writer = current_writer;
+                    const out_writer = self.out_writer;
+                    defer self.out_writer = out_writer;
 
                     self.out_writer = .{ .Buffer = buffer };
-                    try template.collectElementsFromFile(template_absolute_path, partials, self);
+                    try self.collectFile(allocator, template_absolute_path, partials);
                 }
             };
         }
+
+        const PartialRender = struct {
+            const Self = @This();
+            pub const Error = Allocator.Error || Writer.Error;
+
+            out_writer: OutWriter,
+            stack: *const ContextStack,
+            indentation_queue: *IndentationQueue,
+
+            pub fn render(self: *Self, elements: []const Element, partials: PartialsMap) Error!void {
+                try Render.renderLevel(self.out_writer, self.stack, self.indentation_queue, elements, partials);
+            }
+
+            pub fn bufRender(self: *Self, buffer: *std.ArrayList(u8), elements: []const Element, partials: PartialsMap) Error!void {
+                const out_writer = self.out_writer;
+                defer self.out_writer = out_writer;
+
+                self.out_writer = .{ .Buffer = buffer };
+                try self.render(elements, partials);
+            }
+
+            pub fn collectText(self: *Self, allocator: Allocator, template_text: []const u8, partials: PartialsMap) (ParseError || Error)!void {
+                const template_options = TemplateOptions{
+                    .source = .{ .String = .{ .copy_strings = false } },
+                    .output = .Render,
+                };
+
+                var template = TemplateLoader(template_options){
+                    .allocator = allocator,
+                };
+                errdefer template.deinit();
+                try template.collectElements(template_text, partials, self);
+            }
+
+            pub fn bufCollectText(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_text: []const u8, partials: anytype) (ParseError || Error)!void {
+                const out_writer = self.out_writer;
+                defer self.out_writer = out_writer;
+
+                self.out_writer = .{ .Buffer = buffer };
+                try self.collectText(allocator, template_text, partials);
+            }
+
+            pub fn collectFile(self: *Self, allocator: Allocator, template_absolute_path: []const u8, partials: anytype) !void {
+                _ = self;
+                _ = allocator;
+                _ = template_absolute_path;
+                _ = partials;
+            }
+
+            pub fn bufCollectFile(self: *Self, allocator: Allocator, buffer: *std.ArrayList(u8), template_absolute_path: []const u8, partials: anytype) !void {
+                const out_writer = self.out_writer;
+                defer self.out_writer = out_writer;
+
+                self.out_writer = .{ .Buffer = buffer };
+                try self.collectFile(allocator, template_absolute_path, partials);
+            }
+        };
 
         pub const Render = struct {
             pub fn renderLevel(
@@ -520,8 +564,12 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             },
 
                             .Partial => |partial| {
+
+                                //Empty partials
+                                if (comptime PartialsMap.isEmpty()) continue;
+
                                 if (partials_map.get(partial.key)) |partial_template| {
-                                    switch (options) {
+                                    switch (comptime options) {
                                         .Template => {
                                             if (if (comptime has_indentation) partial.indentation else null) |value| {
                                                 var next_indentation = indentation.indent(&IndentationQueue.Node{ .indentation = value, .last_indented_element = partial_template.last() });
@@ -533,7 +581,29 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                                 try renderLevel(out_writer, stack, indentation, partial_template.elements, partials_map);
                                             }
                                         },
-                                        .Text => {},
+                                        .Text => {
+                                            if (if (comptime has_indentation) partial.indentation else null) |value| {
+                                                var next_indentation = indentation.indent(&IndentationQueue.Node{ .indentation = value, .last_indented_element = undefined });
+                                                defer indentation.unindent();
+
+                                                var partial_render = PartialRender{
+                                                    .out_writer = out_writer,
+                                                    .stack = stack,
+                                                    .indentation_queue = &next_indentation,
+                                                };
+
+                                                try writeAll(out_writer, value, .{});
+                                                partial_render.collectText(partials_map.allocator, partial_template, partials_map) catch unreachable;
+                                            } else {
+                                                var partial_render = PartialRender{
+                                                    .out_writer = out_writer,
+                                                    .stack = stack,
+                                                    .indentation_queue = indentation,
+                                                };
+
+                                                partial_render.collectText(partials_map.allocator, partial_template, partials_map) catch unreachable;
+                                            }
+                                        },
                                         .File => {},
                                     }
                                 }
@@ -3311,7 +3381,7 @@ const tests = struct {
 
     fn expectRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {
         try expectCachedRenderPartials(template_text, partials, data, expected);
-        //try expectStreamedRender(template_text, data, expected);
+        try expectStreamedRenderPartials(template_text, partials, data, expected);
     }
 
     fn expectParseTemplate(template_text: []const u8) !Template {
@@ -3363,6 +3433,15 @@ const tests = struct {
         }
 
         var result = try allocRenderPartials(allocator, cached_template, hashMap, data);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    fn expectStreamedRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {
+        const allocator = testing.allocator;
+
+        var result = try allocRenderTextPartials(allocator, template_text, partials, data);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
