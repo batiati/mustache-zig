@@ -8,7 +8,6 @@ const assert = std.debug.assert;
 
 const mustache = @import("../mustache.zig");
 const RenderOptions = mustache.options.RenderOptions;
-const Template = mustache.Template;
 
 /// Partials map from a comptime known type
 /// It works like a HashMap, but can be initialized from a tuple, slice or Hashmap
@@ -18,8 +17,8 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
 
         pub const options: RenderOptions = options;
 
-        pub const TTemplate = switch (options) {
-            .Template => Template,
+        pub const Template = switch (options) {
+            .Template => mustache.Template,
             .Text, .File => []const u8,
         };
 
@@ -52,7 +51,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
             },
         };
 
-        pub fn get(self: Self, key: []const u8) ?TTemplate {
+        pub fn get(self: Self, key: []const u8) ?Self.Template {
             comptime validatePartials();
 
             if (comptime isValidTuple()) {
@@ -68,7 +67,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
             }
         }
 
-        fn getFromTuple(self: Self, key: []const u8) ?TTemplate {
+        fn getFromTuple(self: Self, key: []const u8) ?Self.Template {
             comptime assert(isValidTuple());
 
             if (comptime isPartialsTupleElement(TPartials)) {
@@ -83,7 +82,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
             }
         }
 
-        fn getFromIndexable(self: Self, key: []const u8) ?TTemplate {
+        fn getFromIndexable(self: Self, key: []const u8) ?Self.Template {
             comptime assert(isValidIndexable());
 
             for (self.partials) |item| {
@@ -93,7 +92,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
             return null;
         }
 
-        inline fn getFromMap(self: Self, key: []const u8) ?TTemplate {
+        inline fn getFromMap(self: Self, key: []const u8) ?Self.Template {
             comptime assert(isValidMap());
             return self.partials.get(key);
         }
@@ -106,7 +105,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
                         \\Expected a HashMap or a tuple containing Key/Value pairs
                         \\Key="[]const u8" and Value="{s}"
                         \\Found: "{s}"
-                    , .{ @typeName(TTemplate), @typeName(TPartials) }),
+                    , .{ @typeName(Self.Template), @typeName(TPartials) }),
                 );
             }
         }
@@ -151,10 +150,10 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
                 if (trait.isTuple(TElement)) {
                     const fields = meta.fields(TElement);
                     if (fields.len == 2 and trait.isZigString(fields[0].field_type)) {
-                        if (fields[1].field_type == TTemplate) {
+                        if (fields[1].field_type == Self.Template) {
                             return true;
                         } else {
-                            return trait.isZigString(fields[1].field_type) and trait.isZigString(TTemplate);
+                            return trait.isZigString(fields[1].field_type) and trait.isZigString(Self.Template);
                         }
                     }
                 }
@@ -169,8 +168,8 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
                     if (trait.is(.Struct)(KV) and trait.hasFields(KV, .{ "key", "value" })) {
                         const kv: KV = undefined;
                         return trait.isZigString(@TypeOf(kv.key)) and
-                            (@TypeOf(kv.value) == TTemplate or
-                            (trait.isZigString(@TypeOf(kv.value)) and trait.isZigString(TTemplate)));
+                            (@TypeOf(kv.value) == Self.Template or
+                            (trait.isZigString(@TypeOf(kv.value)) and trait.isZigString(Self.Template)));
                     }
                 }
 
