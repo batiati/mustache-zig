@@ -445,7 +445,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             indentation_queue: *IndentationQueue,
 
             pub fn render(self: *Self, elements: []const Element, partials: PartialsMap) !void {
-                try Render.renderLevel(self.out_writer, self.stack, self.indentation_queue, elements, partials);
+                try renderLevel(self.out_writer, self.stack, self.indentation_queue, elements, partials);
             }
 
             pub fn collect(self: *Self, allocator: Allocator, template: []const u8, partials: PartialsMap) !void {
@@ -483,173 +483,171 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             }
         };
 
-        pub const Render = struct {
-            pub fn renderLevel(
-                out_writer: OutWriter,
-                stack: *const ContextStack,
-                indentation_queue: *IndentationQueue,
-                children: ?[]const Element,
-                partials_map: PartialsMap,
-            ) (Allocator.Error || Writer.Error)!void {
-                if (children) |elements| {
-                    for (elements) |*element| {
-                        switch (element.*) {
-                            .StaticText => |content| try writeAll(out_writer, content, indentation_queue.get(element)),
-                            .Interpolation => |path| try interpolate(out_writer, stack, partials_map, path, .Escaped, indentation_queue.get(element)),
-                            .UnescapedInterpolation => |path| try interpolate(out_writer, stack, partials_map, path, .Unescaped, indentation_queue.get(element)),
-                            .Section => |section| {
-                                if (getIterator(stack, section.key)) |*iterator| {
-                                    if (iterator.lambda()) |lambda_ctx| {
+        pub fn renderLevel(
+            out_writer: OutWriter,
+            stack: *const ContextStack,
+            indentation_queue: *IndentationQueue,
+            children: ?[]const Element,
+            partials_map: PartialsMap,
+        ) (Allocator.Error || Writer.Error)!void {
+            if (children) |elements| {
+                for (elements) |*element| {
+                    switch (element.*) {
+                        .StaticText => |content| try writeAll(out_writer, content, indentation_queue.get(element)),
+                        .Interpolation => |path| try interpolate(out_writer, stack, partials_map, path, .Escaped, indentation_queue.get(element)),
+                        .UnescapedInterpolation => |path| try interpolate(out_writer, stack, partials_map, path, .Unescaped, indentation_queue.get(element)),
+                        .Section => |section| {
+                            if (getIterator(stack, section.key)) |*iterator| {
+                                if (iterator.lambda()) |lambda_ctx| {
 
-                                        //TODO: Add template options
-                                        assert(section.inner_text != null);
-                                        assert(section.delimiters != null);
+                                    //TODO: Add template options
+                                    assert(section.inner_text != null);
+                                    assert(section.delimiters != null);
 
-                                        const expand_result = try lambda_ctx.expandLambda(out_writer, stack, partials_map, "", section.inner_text.?, .Unescaped, indentation_queue.get(element), section.delimiters.?);
-                                        assert(expand_result == .Lambda);
-                                    } else while (iterator.next()) |item_ctx| {
-                                        var next_level = ContextStack{
-                                            .parent = stack,
-                                            .ctx = item_ctx,
-                                        };
+                                    const expand_result = try lambda_ctx.expandLambda(out_writer, stack, partials_map, "", section.inner_text.?, .Unescaped, indentation_queue.get(element), section.delimiters.?);
+                                    assert(expand_result == .Lambda);
+                                } else while (iterator.next()) |item_ctx| {
+                                    var next_level = ContextStack{
+                                        .parent = stack,
+                                        .ctx = item_ctx,
+                                    };
 
-                                        indentation_queue.indentSection(iterator.hasNext());
-                                        defer indentation_queue.unindentSection();
+                                    indentation_queue.indentSection(iterator.hasNext());
+                                    defer indentation_queue.unindentSection();
 
-                                        try renderLevel(out_writer, &next_level, indentation_queue, section.content, partials_map);
-                                    }
+                                    try renderLevel(out_writer, &next_level, indentation_queue, section.content, partials_map);
                                 }
-                            },
-                            .InvertedSection => |section| {
+                            }
+                        },
+                        .InvertedSection => |section| {
 
-                                // Lambdas aways evaluate as "true" for inverted section
-                                // Broken paths, empty lists, null and false evaluates as "false"
+                            // Lambdas aways evaluate as "true" for inverted section
+                            // Broken paths, empty lists, null and false evaluates as "false"
 
-                                const truthy = if (getIterator(stack, section.key)) |*iterator| iterator.truthy() else false;
-                                if (!truthy) {
-                                    try renderLevel(out_writer, stack, indentation_queue, section.content, partials_map);
+                            const truthy = if (getIterator(stack, section.key)) |*iterator| iterator.truthy() else false;
+                            if (!truthy) {
+                                try renderLevel(out_writer, stack, indentation_queue, section.content, partials_map);
+                            }
+                        },
+
+                        .Partial => |partial| {
+                            if (comptime PartialsMap.isEmpty()) {
+                                continue;
+                            } else if (partials_map.get(partial.key)) |partial_template| {
+                                if (if (comptime has_indentation) partial.indentation else null) |value| {
+                                    var next_indentation_queue = indentation_queue.indent(&IndentationQueue.Node{ .indentation = value, .last_indented_element = undefined });
+                                    defer next_indentation_queue.unindent();
+
+                                    try writeAll(out_writer, value, .{});
+                                    try renderLevelPartials(partial_template, out_writer, stack, &next_indentation_queue, partials_map);
+                                } else {
+                                    try renderLevelPartials(partial_template, out_writer, stack, indentation_queue, partials_map);
                                 }
-                            },
+                            }
+                        },
 
-                            .Partial => |partial| {
-                                if (comptime PartialsMap.isEmpty()) {
-                                    continue;
-                                } else if (partials_map.get(partial.key)) |partial_template| {
-                                    if (if (comptime has_indentation) partial.indentation else null) |value| {
-                                        var next_indentation_queue = indentation_queue.indent(&IndentationQueue.Node{ .indentation = value, .last_indented_element = undefined });
-                                        defer next_indentation_queue.unindent();
-
-                                        try writeAll(out_writer, value, .{});
-                                        try renderLevelPartials(partial_template, out_writer, stack, &next_indentation_queue, partials_map);
-                                    } else {
-                                        try renderLevelPartials(partial_template, out_writer, stack, indentation_queue, partials_map);
-                                    }
-                                }
-                            },
-
-                            //TODO Parent, Block
-                            else => {},
-                        }
+                        //TODO Parent, Block
+                        else => {},
                     }
                 }
             }
+        }
 
-            fn renderLevelPartials(partial_template: PartialsMap.Template, out_writer: OutWriter, stack: *const ContextStack, indentation_queue: *IndentationQueue, partials_map: PartialsMap) !void {
-                comptime assert(!PartialsMap.isEmpty());
-                var data_render = DataRender{
-                    .out_writer = out_writer,
-                    .stack = stack,
-                    .indentation_queue = indentation_queue,
-                };
+        fn renderLevelPartials(partial_template: PartialsMap.Template, out_writer: OutWriter, stack: *const ContextStack, indentation_queue: *IndentationQueue, partials_map: PartialsMap) !void {
+            comptime assert(!PartialsMap.isEmpty());
+            var data_render = DataRender{
+                .out_writer = out_writer,
+                .stack = stack,
+                .indentation_queue = indentation_queue,
+            };
 
-                switch (options) {
-                    .Template => {
-                        try data_render.render(partial_template.elements, partials_map);
+            switch (options) {
+                .Template => {
+                    try data_render.render(partial_template.elements, partials_map);
+                },
+                .Text, .File => {
+                    data_render.collect(partials_map.allocator, partial_template, partials_map) catch unreachable;
+                },
+            }
+        }
+
+        fn interpolate(
+            out_writer: OutWriter,
+            stack: *const ContextStack,
+            partials_map: PartialsMap,
+            path: []const u8,
+            escape: Escape,
+            identation: Indentation,
+        ) (Allocator.Error || Writer.Error)!void {
+            var level: ?*const ContextStack = stack;
+
+            while (level) |current| : (level = current.parent) {
+                const path_resolution = try current.ctx.interpolate(out_writer, path, escape, identation);
+
+                switch (path_resolution) {
+                    .Field => {
+                        // Success, break the loop
+                        break;
                     },
-                    .Text, .File => {
-                        data_render.collect(partials_map.allocator, partial_template, partials_map) catch unreachable;
+
+                    .Lambda => {
+
+                        // Expand the lambda against the current context and break the loop
+                        const expand_result = try current.ctx.expandLambda(out_writer, stack, partials_map, path, "", escape, identation, .{});
+                        assert(expand_result == .Lambda);
+                        break;
+                    },
+
+                    .IteratorConsumed, .ChainBroken => {
+                        // Not rendered, but should NOT try against the parent context
+                        break;
+                    },
+
+                    .NotFoundInContext => {
+                        // Not rendered, should try against the parent context
+                        continue;
+                    },
+                }
+            }
+        }
+
+        fn writeAll(out_writer: OutWriter, content: []const u8, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
+            switch (out_writer) {
+                .Writer => |writer| _ = try unescapedWrite(writer, content, indentation),
+                .Buffer => |list| _ = try unescapedWrite(list.writer(), content, indentation),
+            }
+        }
+
+        fn writeIndentation(out_writer: OutWriter, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
+            switch (out_writer) {
+                .Writer => |writer| _ = try indentation.write(writer),
+                .Buffer => |list| _ = try indentation.write(list.writer()),
+            }
+        }
+
+        fn getIterator(stack: *const ContextStack, path: []const u8) ?Context.Iterator {
+            var level: ?*const ContextStack = stack;
+
+            while (level) |current| : (level = current.parent) {
+                switch (current.ctx.iterator(path)) {
+                    .Field => |found| return found,
+
+                    .Lambda => |found| return found,
+
+                    .IteratorConsumed, .ChainBroken => {
+                        // Not found, but should NOT try against the parent context
+                        break;
+                    },
+
+                    .NotFoundInContext => {
+                        // Should try against the parent context
+                        continue;
                     },
                 }
             }
 
-            fn interpolate(
-                out_writer: OutWriter,
-                stack: *const ContextStack,
-                partials_map: PartialsMap,
-                path: []const u8,
-                escape: Escape,
-                identation: Indentation,
-            ) (Allocator.Error || Writer.Error)!void {
-                var level: ?*const ContextStack = stack;
-
-                while (level) |current| : (level = current.parent) {
-                    const path_resolution = try current.ctx.interpolate(out_writer, path, escape, identation);
-
-                    switch (path_resolution) {
-                        .Field => {
-                            // Success, break the loop
-                            break;
-                        },
-
-                        .Lambda => {
-
-                            // Expand the lambda against the current context and break the loop
-                            const expand_result = try current.ctx.expandLambda(out_writer, stack, partials_map, path, "", escape, identation, .{});
-                            assert(expand_result == .Lambda);
-                            break;
-                        },
-
-                        .IteratorConsumed, .ChainBroken => {
-                            // Not rendered, but should NOT try against the parent context
-                            break;
-                        },
-
-                        .NotFoundInContext => {
-                            // Not rendered, should try against the parent context
-                            continue;
-                        },
-                    }
-                }
-            }
-
-            fn writeAll(out_writer: OutWriter, content: []const u8, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
-                switch (out_writer) {
-                    .Writer => |writer| _ = try unescapedWrite(writer, content, indentation),
-                    .Buffer => |list| _ = try unescapedWrite(list.writer(), content, indentation),
-                }
-            }
-
-            fn writeIndentation(out_writer: OutWriter, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
-                switch (out_writer) {
-                    .Writer => |writer| _ = try indentation.write(writer),
-                    .Buffer => |list| _ = try indentation.write(list.writer()),
-                }
-            }
-
-            fn getIterator(stack: *const ContextStack, path: []const u8) ?Context.Iterator {
-                var level: ?*const ContextStack = stack;
-
-                while (level) |current| : (level = current.parent) {
-                    switch (current.ctx.iterator(path)) {
-                        .Field => |found| return found,
-
-                        .Lambda => |found| return found,
-
-                        .IteratorConsumed, .ChainBroken => {
-                            // Not found, but should NOT try against the parent context
-                            break;
-                        },
-
-                        .NotFoundInContext => {
-                            // Should try against the parent context
-                            continue;
-                        },
-                    }
-                }
-
-                return null;
-            }
-        };
+            return null;
+        }
 
         pub fn escapedWrite(
             writer: anytype,
