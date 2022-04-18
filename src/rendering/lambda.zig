@@ -92,23 +92,14 @@ pub const LambdaContext = struct {
 
 pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
-    const Context = RenderEngine.Context;
-    const ContextStack = Context.ContextStack;
-    const OutWriter = Context.OutWriter;
-    const IndentationQueue = RenderEngine.IndentationQueue;
-    const Indentation = RenderEngine.Indentation;
-
-    const escapedWrite = RenderEngine.escapedWrite;
+    const DataRender = RenderEngine.DataRender;
 
     return struct {
         const Self = @This();
 
-        out_writer: OutWriter,
-        stack: *const ContextStack,
-        partials_map: PartialsMap,
-        indentation: Indentation,
-        delimiters: Delimiters,
+        data_render: *DataRender,
         escape: Escape,
+        delimiters: Delimiters,
 
         const vtable = LambdaContext.VTable{
             .renderAlloc = renderAlloc,
@@ -133,13 +124,17 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
             };
             defer template.deinit(allocator);
 
-            var buffer = std.ArrayList(u8).init(allocator);
-            defer buffer.deinit();
+            var out_writer = self.data_render.out_writer;
+            var list = std.ArrayList(u8).init(allocator);
+            self.data_render.out_writer = .{ .Buffer = &list };
 
-            var indentation = IndentationQueue{};
-            try RenderEngine.renderLevel(.{ .Buffer = &buffer }, self.stack, &indentation, template.elements, self.partials_map);
+            defer {
+                self.data_render.out_writer = out_writer;
+                list.deinit();
+            }
 
-            return buffer.toOwnedSlice();
+            try self.data_render.render(template.elements);
+            return list.toOwnedSlice();
         }
 
         fn render(ctx: *const anyopaque, allocator: Allocator, template_text: []const u8) anyerror!void {
@@ -151,20 +146,12 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
             };
             defer template.deinit(allocator);
 
-            var indentation = IndentationQueue{};
-            try RenderEngine.renderLevel(self.out_writer, self.stack, &indentation, template.elements, self.partials_map);
+            try self.data_render.render(template.elements);
         }
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {
             var self = getSelf(ctx);
-
-            switch (self.out_writer) {
-                .Writer => |writer| return try escapedWrite(writer, rendered_text, self.escape, self.indentation),
-                .Buffer => |list| {
-                    try list.ensureUnusedCapacity(rendered_text.len);
-                    return try escapedWrite(list.writer(), rendered_text, self.escape, self.indentation);
-                },
-            }
+            return try self.data_render.write(rendered_text, self.escape);
         }
 
         inline fn getSelf(ctx: *const anyopaque) *const Self {

@@ -23,10 +23,7 @@ const assert = std.debug.assert;
 pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     const Context = RenderEngine.Context;
-    const OutWriter = RenderEngine.OutWriter;
-    const Indentation = RenderEngine.Indentation;
-
-    const escapedWrite = RenderEngine.escapedWrite;
+    const DataRender = RenderEngine.DataRender;
 
     return struct {
         fn PathInvoker(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
@@ -40,18 +37,18 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                 pub fn call(
                     action_param: anytype,
-                    out_writer: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     path_iterator: *std.mem.TokenIterator(u8),
                     index: ?usize,
                 ) TError!Result {
-                    return try find(.Root, action_param, out_writer, data, path_iterator, index);
+                    return try find(.Root, action_param, data_render, data, path_iterator, index);
                 }
 
                 fn find(
                     depth: Depth,
                     action_param: anytype,
-                    out_writer: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     path_iterator: *std.mem.TokenIterator(u8),
                     index: ?usize,
@@ -62,14 +59,14 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     const ctx = Fields.getRuntimeValue(data);
 
                     if (comptime lambda.isLambdaInvoker(Data)) {
-                        return Result{ .Lambda = try action_fn(action_param, out_writer, ctx) };
+                        return Result{ .Lambda = try action_fn(action_param, data_render, ctx) };
                     } else {
                         if (path_iterator.next()) |current_path| {
-                            return try recursiveFind(depth, Data, action_param, out_writer, ctx, current_path, path_iterator, index);
+                            return try recursiveFind(depth, Data, action_param, data_render, ctx, current_path, path_iterator, index);
                         } else if (index) |current_index| {
-                            return try iterateAt(Data, action_param, out_writer, ctx, current_index);
+                            return try iterateAt(Data, action_param, data_render, ctx, current_index);
                         } else {
-                            return Result{ .Field = try action_fn(action_param, out_writer, ctx) };
+                            return Result{ .Field = try action_fn(action_param, data_render, ctx) };
                         }
                     }
                 }
@@ -78,7 +75,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
-                    out_writer: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     path: []const u8,
                     path_iterator: *std.mem.TokenIterator(u8),
@@ -88,15 +85,15 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                     switch (typeInfo) {
                         .Struct => {
-                            return try findFieldPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
+                            return try findFieldPath(depth, TValue, action_param, data_render, data, path, path_iterator, index);
                         },
                         .Pointer => |info| switch (info.size) {
-                            .One => return try recursiveFind(depth, info.child, action_param, out_writer, data, path, path_iterator, index),
+                            .One => return try recursiveFind(depth, info.child, action_param, data_render, data, path, path_iterator, index),
                             .Slice => {
 
                                 //Slice supports the "len" field,
                                 if (std.mem.eql(u8, "len", path)) {
-                                    return try find(.Leaf, action_param, out_writer, Fields.lenOf(data), path_iterator, index);
+                                    return try find(.Leaf, action_param, data_render, Fields.lenOf(data), path_iterator, index);
                                 }
                             },
 
@@ -105,14 +102,14 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         },
                         .Optional => |info| {
                             if (!Fields.isNull(data)) {
-                                return try recursiveFind(depth, info.child, action_param, out_writer, data, path, path_iterator, index);
+                                return try recursiveFind(depth, info.child, action_param, data_render, data, path, path_iterator, index);
                             }
                         },
                         .Array, .Vector => {
 
                             //Slice supports the "len" field,
                             if (std.mem.eql(u8, "len", path)) {
-                                return try find(.Leaf, action_param, out_writer, Fields.lenOf(data), path_iterator, index);
+                                return try find(.Leaf, action_param, data_render, Fields.lenOf(data), path_iterator, index);
                             }
                         },
                         else => {},
@@ -125,7 +122,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
-                    out_writer: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     path: []const u8,
                     path_iterator: *std.mem.TokenIterator(u8),
@@ -134,10 +131,10 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     const fields = std.meta.fields(TValue);
                     inline for (fields) |field| {
                         if (std.mem.eql(u8, field.name, path)) {
-                            return try find(.Leaf, action_param, out_writer, Fields.getField(data, field.name), path_iterator, index);
+                            return try find(.Leaf, action_param, data_render, Fields.getField(data, field.name), path_iterator, index);
                         }
                     } else {
-                        return try findLambdaPath(depth, TValue, action_param, out_writer, data, path, path_iterator, index);
+                        return try findLambdaPath(depth, TValue, action_param, data_render, data, path, path_iterator, index);
                     }
                 }
 
@@ -145,7 +142,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
-                    out_writer: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     path: []const u8,
                     path_iterator: *std.mem.TokenIterator(u8),
@@ -159,7 +156,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, path, decl.name)) {
                                 if (is_valid_lambda) {
-                                    return try getLambda(action_param, out_writer, Fields.lhs(data), bound_fn, path_iterator, index);
+                                    return try getLambda(action_param, data_render, Fields.lhs(data), bound_fn, path_iterator, index);
                                 } else {
                                     return .ChainBroken;
                                 }
@@ -172,7 +169,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                 fn getLambda(
                     action_param: anytype,
-                    out_writer: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     bound_fn: anytype,
                     path_iterator: *std.mem.TokenIterator(u8),
@@ -193,7 +190,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             .data = if (args_len == 1) {} else data,
                         };
 
-                        return try find(.Leaf, action_param, out_writer, &impl, path_iterator, index);
+                        return try find(.Leaf, action_param, data_render, &impl, path_iterator, index);
                     } else {
                         return .ChainBroken;
                     }
@@ -202,7 +199,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 fn iterateAt(
                     comptime TValue: type,
                     action_param: anytype,
-                    out_writer: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     index: usize,
                 ) TError!Result {
@@ -215,7 +212,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                                         return Result{
                                             .Field = try action_fn(
                                                 action_param,
-                                                out_writer,
+                                                data_render,
                                                 Fields.getTupleElement(if (derref) data.* else data, i),
                                             ),
                                         };
@@ -229,21 +226,21 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         // Booleans are evaluated on the iterator
                         .Bool => {
                             return if (data == true and index == 0)
-                                Result{ .Field = try action_fn(action_param, out_writer, data) }
+                                Result{ .Field = try action_fn(action_param, data_render, data) }
                             else
                                 .IteratorConsumed;
                         },
 
                         .Pointer => |info| switch (info.size) {
                             .One => {
-                                return try iterateAt(info.child, action_param, out_writer, Fields.lhs(data), index);
+                                return try iterateAt(info.child, action_param, data_render, Fields.lhs(data), index);
                             },
                             .Slice => {
 
                                 //Slice of u8 is always string
                                 if (info.child != u8) {
                                     return if (index < data.len)
-                                        Result{ .Field = try action_fn(action_param, out_writer, Fields.getElement(Fields.lhs(data), index)) }
+                                        Result{ .Field = try action_fn(action_param, data_render, Fields.getElement(Fields.lhs(data), index)) }
                                     else
                                         .IteratorConsumed;
                                 }
@@ -256,7 +253,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             //Array of u8 is always string
                             if (info.child != u8) {
                                 return if (index < data.len)
-                                    Result{ .Field = try action_fn(action_param, out_writer, Fields.getElement(Fields.lhs(data), index)) }
+                                    Result{ .Field = try action_fn(action_param, data_render, Fields.getElement(Fields.lhs(data), index)) }
                                 else
                                     .IteratorConsumed;
                             }
@@ -264,14 +261,14 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                         .Vector => {
                             return if (index < data.len)
-                                Result{ .Field = try action_fn(action_param, out_writer, Fields.getElement(Fields.lhs(data), index)) }
+                                Result{ .Field = try action_fn(action_param, data_render, Fields.getElement(Fields.lhs(data), index)) }
                             else
                                 .IteratorConsumed;
                         },
 
                         .Optional => |info| {
                             return if (!Fields.isNull(data))
-                                try iterateAt(info.child, action_param, out_writer, Fields.lhs(data), index)
+                                try iterateAt(info.child, action_param, data_render, Fields.lhs(data), index)
                             else
                                 .IteratorConsumed;
                         },
@@ -279,7 +276,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     }
 
                     return if (index == 0)
-                        Result{ .Field = try action_fn(action_param, out_writer, data) }
+                        Result{ .Field = try action_fn(action_param, data_render, data) }
                     else
                         .IteratorConsumed;
                 }
@@ -294,7 +291,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             const Get = PathInvoker(error{}, Context, getAction);
             return try Get.call(
                 {},
-                {},
+                undefined,
                 data,
                 path_iterator,
                 index,
@@ -302,16 +299,15 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
         }
 
         pub fn interpolate(
-            out_writer: OutWriter,
+            data_render: *DataRender,
             data: anytype,
             path_iterator: *std.mem.TokenIterator(u8),
             escape: Escape,
-            indentation: Indentation,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const Interpolate = PathInvoker(Allocator.Error || Writer.Error, void, interpolateAction);
             return try Interpolate.call(
-                .{ escape, indentation },
-                out_writer,
+                .{escape},
+                data_render,
                 data,
                 path_iterator,
                 null,
@@ -319,49 +315,41 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
         }
 
         pub fn expandLambda(
-            out_writer: OutWriter,
+            data_render: *DataRender,
             data: anytype,
-            stack: anytype,
-            partials_map: PartialsMap,
-            tag_contents: []const u8,
+            inner_text: []const u8,
             escape: Escape,
-            indentation: Indentation,
             delimiters: Delimiters,
             path_iterator: *std.mem.TokenIterator(u8),
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const ExpandLambdaAction = PathInvoker(Allocator.Error || Writer.Error, void, expandLambdaAction);
             return try ExpandLambdaAction.call(
-                .{ stack, tag_contents, escape, indentation, delimiters, partials_map },
-                out_writer,
+                .{ inner_text, escape, delimiters },
+                data_render,
                 data,
                 path_iterator,
                 null,
             );
         }
 
-        fn getAction(param: void, out_writer: void, value: anytype) error{}!Context {
+        fn getAction(param: void, data_render: *DataRender, value: anytype) error{}!Context {
             _ = param;
-            _ = out_writer;
+            _ = data_render;
             return context.getContext(Writer, value, PartialsMap, options);
         }
 
         fn interpolateAction(
             params: anytype,
-            out_writer: OutWriter,
+            data_render: *DataRender,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
             const escape: Escape = params.@"0";
-            const indentation: Indentation = params.@"1";
-
-            switch (out_writer) {
-                .Writer => |writer| try write(writer, value, escape, indentation),
-                .Buffer => |list| try write(list.writer(), value, escape, indentation),
-            }
+            _ = try data_render.write(value, escape);
         }
 
         fn expandLambdaAction(
             params: anytype,
-            out_writer: OutWriter,
+            data_render: *DataRender,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
             comptime {
@@ -370,20 +358,15 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             }
 
             const Error = Allocator.Error || Writer.Error;
-            const stack = params.@"0";
-            const inner_text: []const u8 = params.@"1";
-            const escape: Escape = params.@"2";
-            const indentation: Indentation = params.@"3";
-            const delimiters: Delimiters = params.@"4";
-            const partials_map: PartialsMap = params.@"5";
+
+            const inner_text: []const u8 = params.@"0";
+            const escape: Escape = params.@"1";
+            const delimiters: Delimiters = params.@"2";
 
             const Impl = lambda.LambdaContextImpl(Writer, PartialsMap, options);
             var impl = Impl{
-                .out_writer = out_writer,
-                .stack = stack,
-                .partials_map = partials_map,
+                .data_render = data_render,
                 .escape = escape,
-                .indentation = indentation,
                 .delimiters = delimiters,
             };
 
@@ -395,51 +378,6 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     return @errSetCast(Error, e);
                 }
             };
-        }
-
-        fn write(
-            writer: anytype,
-            value: anytype,
-            escape: Escape,
-            indentation: Indentation,
-        ) (Allocator.Error || Writer.Error)!void {
-            const TValue = @TypeOf(value);
-
-            switch (@typeInfo(TValue)) {
-                .Void, .Null => {},
-
-                // what should we print for a struct?
-                // maybe call fmt or stringify
-
-                .Struct, .Opaque => {},
-
-                .Bool => _ = try escapedWrite(writer, if (value) "true" else "false", escape, indentation),
-                .Int, .ComptimeInt => try std.fmt.formatInt(value, 10, .lower, .{}, writer),
-                .Float, .ComptimeFloat => try std.fmt.formatFloatDecimal(value, .{}, writer),
-                .Enum => _ = try escapedWrite(writer, @tagName(value), escape, indentation),
-
-                .Pointer => |info| switch (info.size) {
-                    .One => try write(writer, value.*, escape, indentation),
-                    .Slice => {
-                        if (info.child == u8) {
-                            _ = try escapedWrite(writer, value, escape, indentation);
-                        }
-                    },
-                    .Many => @compileError("[*] pointers not supported"),
-                    .C => @compileError("[*c] pointers not supported"),
-                },
-                .Array => |info| {
-                    if (info.child == u8) {
-                        _ = try escapedWrite(writer, &value, escape, indentation);
-                    }
-                },
-                .Optional => {
-                    if (value) |not_null| {
-                        try write(writer, not_null, escape, indentation);
-                    }
-                },
-                else => {},
-            }
         }
 
         // Check if an error is part of a error set
@@ -541,7 +479,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
             fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !FooCaller.Result {
                 var path_iterator = std.mem.tokenize(u8, path, ".");
-                return try FooCaller.call(TExpected, std.io.null_writer, &data, &path_iterator, index);
+                return try FooCaller.call(TExpected, undefined, &data, &path_iterator, index);
             }
 
             fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {

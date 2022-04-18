@@ -80,7 +80,7 @@ const FlattenedType = [4]usize;
 
 pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
-    const Indentation = RenderEngine.Indentation;
+    const DataRender = RenderEngine.DataRender;
 
     return struct {
         const Self = @This();
@@ -90,25 +90,10 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             ctx: Self,
         };
 
-        ///
-        /// Provides the ability to choose between two writers
-        /// while keeping the static dispatch interface. 
-        pub const OutWriter = union(enum) {
-
-            ///
-            /// Render directly to the underlying stream
-            Writer: Writer,
-
-            ///
-            /// Render to a intermediate buffer
-            /// for processing lambda expansions
-            Buffer: *std.ArrayList(u8),
-        };
-
         const VTable = struct {
             get: fn (*const anyopaque, []const u8, ?usize) PathResolution(Self),
-            interpolate: fn (*const anyopaque, OutWriter, []const u8, Escape, Indentation) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: fn (*const anyopaque, OutWriter, *const ContextStack, PartialsMap, []const u8, []const u8, Escape, Indentation, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            interpolate: fn (*const anyopaque, *DataRender, []const u8, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
+            expandLambda: fn (*const anyopaque, *DataRender, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = struct {
@@ -256,26 +241,22 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
         pub inline fn interpolate(
             self: Self,
-            out_writer: OutWriter,
+            data_render: *DataRender,
             path: []const u8,
             escape: Escape,
-            indentation: Indentation,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try self.vtable.interpolate(&self.ctx, out_writer, path, escape, indentation);
+            return try self.vtable.interpolate(&self.ctx, data_render, path, escape);
         }
 
         pub inline fn expandLambda(
             self: Self,
-            out_writer: OutWriter,
-            stack: *const ContextStack,
-            partials_map: PartialsMap,
+            data_render: *DataRender,
             path: []const u8,
             inner_text: []const u8,
             escape: Escape,
-            indentation: Indentation,
             delimiters: Delimiters,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try self.vtable.expandLambda(&self.ctx, out_writer, stack, partials_map, path, inner_text, escape, indentation, delimiters);
+            return try self.vtable.expandLambda(&self.ctx, data_render, path, inner_text, escape, delimiters);
         }
     };
 }
@@ -283,10 +264,8 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     const ContextInterface = RenderEngine.Context;
-    const ContextStack = RenderEngine.ContextStack;
-    const OutWriter = RenderEngine.OutWriter;
+    const DataRender = RenderEngine.DataRender;
     const Invoker = RenderEngine.Invoker;
-    const Indentation = RenderEngine.Indentation;
 
     return struct {
         const vtable = ContextInterface.VTable{
@@ -324,41 +303,33 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
 
         fn interpolate(
             ctx: *const anyopaque,
-            out_writer: OutWriter,
+            data_render: *DataRender,
             path: []const u8,
             escape: Escape,
-            indentation: Indentation,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.interpolate(
-                out_writer,
+                data_render,
                 getData(ctx),
                 &path_iterator,
                 escape,
-                indentation,
             );
         }
 
         fn expandLambda(
             ctx: *const anyopaque,
-            out_writer: OutWriter,
-            stack: *const ContextStack,
-            partials_map: PartialsMap,
+            data_render: *DataRender,
             path: []const u8,
             inner_text: []const u8,
             escape: Escape,
-            indentation: Indentation,
             delimiters: Delimiters,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.expandLambda(
-                out_writer,
+                data_render,
                 getData(ctx),
-                stack,
-                partials_map,
                 inner_text,
                 escape,
-                indentation,
                 delimiters,
                 &path_iterator,
             );
@@ -520,17 +491,23 @@ const struct_tests = struct {
     }
 
     fn interpolateCtx(writer: anytype, ctx: Context(@TypeOf(writer), DummyPartialsMap, dummy_options), path: []const u8, escape: Escape) anyerror!void {
-        const ContextInterface = Context(@TypeOf(writer), DummyPartialsMap, dummy_options);
-        var out_writer: ContextInterface.OutWriter = .{ .Writer = writer };
+        const RenderEngine = rendering.RenderEngine(@TypeOf(writer), DummyPartialsMap, dummy_options);
 
-        switch (try ctx.interpolate(out_writer, path, escape, .{})) {
+        var stack = RenderEngine.ContextStack{
+            .parent = null,
+            .ctx = ctx,
+        };
+
+        var data_render = RenderEngine.DataRender{
+            .stack = &stack,
+            .out_writer = .{ .Writer = writer },
+            .partials_map = undefined,
+            .indentation_queue = undefined,
+        };
+
+        switch (try ctx.interpolate(&data_render, path, escape)) {
             .Lambda => {
-                var stack = ContextInterface.ContextStack{
-                    .parent = null,
-                    .ctx = ctx,
-                };
-
-                _ = try ctx.expandLambda(out_writer, &stack, dummy_map, path, "", escape, .{}, .{});
+                _ = try ctx.expandLambda(&data_render, path, "", escape, .{});
             },
             else => {},
         }
