@@ -76,7 +76,7 @@ pub const Element = union(Element.Type) {
         ///    against a context stack containing only the result from the former
         ///    resolution.  If any part fails resolution, the result should be considered
         ///    falsey, and should interpolate as the empty string.
-        ///    
+        ///
         ///  Data should be coerced into a string (and escaped, if appropriate) before
         ///  interpolation.
         ///
@@ -97,7 +97,7 @@ pub const Element = union(Element.Type) {
         ///
         ///    1) Split the name on periods; the first part is the name to resolve, any
         ///    remaining parts should be retained.
-        ///    
+        ///
         ///    2) Walk the context stack from top to bottom, finding the first context
         ///    that is a) a hash containing the name as a key OR b) an object responding
         ///    to a method with the given name.
@@ -120,11 +120,11 @@ pub const Element = union(Element.Type) {
         ///  If the data is not of a list type, it is coerced into a list as follows: if
         ///  the data is truthy (e.g. `!!data == true`), use a single-element list
         ///  containing the data, otherwise use an empty list.
-        ///  
+        ///
         ///  For each element in the data list, the element MUST be pushed onto the
         ///  context stack, the section MUST be rendered, and the element MUST be popped
         ///  off the context stack.
-        ///  
+        ///
         ///  Section and End Section tags SHOULD be treated as standalone when appropriate.
         Section,
         InvertedSection,
@@ -159,9 +159,9 @@ pub const Element = union(Element.Type) {
         ///  This tag's content names the Parent template to inject.
         ///  Set Delimiter tags Preceding a Parent tag MUST NOT affect the parsing of the injected external
         ///  template. The Parent MUST be rendered against the context stack local to the tag.
-        ///  
+        ///
         ///  If the named Parent cannot be found, the empty string SHOULD be used instead, as in interpolations.
-        ///  
+        ///
         ///  Parent tags SHOULD be treated as standalone when appropriate.
         ///  If this tag is used standalone, any whitespace preceding the tag should be treated as
         ///  indentation, and prepended to each line of the Parent before rendering.
@@ -170,21 +170,21 @@ pub const Element = union(Element.Type) {
         ///
         /// The Block tags' content MUST be a non-whitespace character sequence NOT
         /// containing the current closing delimiter.
-        /// 
+        ///
         /// Each Block tag MUST be followed by an End Section tag with the same content within the matching Block tag.
         /// This tag's content determines the parameter or argument name.
-        /// 
+        ///
         /// Block tags may appear both inside and outside of Parent tags. In both cases,
         /// they specify a position within the template that can be overridden; it is a
         /// parameter of the containing template.
-        /// 
-        /// The template text between the Block tag and its matching End Section tag 
+        ///
+        /// The template text between the Block tag and its matching End Section tag
         /// defines the default content to render when the parameter is not overridden from outside.
-        /// 
+        ///
         /// In addition, when used inside of a Parent tag,
-        /// the template text between a Block tag and its matching End Section tag defines 
+        /// the template text between a Block tag and its matching End Section tag defines
         /// content that replaces the default defined in the Parent template.
-        /// 
+        ///
         /// This content is the argument passed to the Parent template.
         Block,
     };

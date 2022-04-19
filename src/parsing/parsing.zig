@@ -71,7 +71,7 @@ pub const DelimiterType = enum {
     /// Delimiter is '{{', '}}', or any configured delimiter
     Regular,
 
-    /// Delimiter is a non-scaped (aka triple mustache) delimiter such '{{{' or '}}}' 
+    /// Delimiter is a non-scaped (aka triple mustache) delimiter such '{{{' or '}}}'
     NoScapeDelimiter,
 };
 

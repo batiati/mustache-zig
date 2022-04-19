@@ -48,8 +48,8 @@ pub fn PathResolution(comptime Payload: type) type {
         IteratorConsumed,
 
         ///
-        /// The lambda could be resolved against the current context, 
-        /// The payload is the result returned by "action_fn"        
+        /// The lambda could be resolved against the current context,
+        /// The payload is the result returned by "action_fn"
         Lambda: Payload,
 
         ///

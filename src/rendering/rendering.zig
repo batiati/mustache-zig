@@ -427,7 +427,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
         ///
         /// Provides the ability to choose between two writers
-        /// while keeping the static dispatch interface. 
+        /// while keeping the static dispatch interface.
         pub const OutWriter = union(enum) {
 
             ///
@@ -831,7 +831,7 @@ const tests = struct {
         }
 
         /// Those tests are a verbatim copy from
-        /// https://github.com/mustache/spec/blob/master/specs/interpolation.yml  
+        /// https://github.com/mustache/spec/blob/master/specs/interpolation.yml
         const interpolation = struct {
 
             // Mustache-free templates should render as-is.

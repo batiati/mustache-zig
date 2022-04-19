@@ -1,6 +1,6 @@
 ///
 /// TextBlock is some slice of string containing information about how it appears on the template source.
-/// Each TextBlock is produced by the TextScanner, it is the first stage of the parsing process, 
+/// Each TextBlock is produced by the TextScanner, it is the first stage of the parsing process,
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
@@ -26,7 +26,7 @@ pub fn TextBlock(comptime options: TemplateOptions) type {
         const Self = @This();
 
         ///
-        /// The event that generated this TextBlock, 
+        /// The event that generated this TextBlock,
         /// It can be a text mark such {{ or }}, or a EOF
         event: Event,
 
@@ -67,7 +67,7 @@ pub fn TextBlock(comptime options: TemplateOptions) type {
 
         ///
         /// Matches the BlockType
-        /// Can move 1 position ahead on the slice if this block contains a staring symbol as such ! # ^ & $ > < = / 
+        /// Can move 1 position ahead on the slice if this block contains a staring symbol as such ! # ^ & $ > < = /
         pub fn readBlockType(self: *Self) ?BlockType {
             if (self.tail) |tail| {
                 const match: ?BlockType = switch (tail[0]) {
