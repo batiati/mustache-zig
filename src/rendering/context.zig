@@ -162,14 +162,14 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 };
             }
 
-            pub inline fn lambda(self: *Iterator) ?Self {
+            pub inline fn lambda(self: Iterator) ?Self {
                 return switch (self.data) {
                     .Lambda => |item| item,
                     else => null,
                 };
             }
 
-            pub inline fn truthy(self: *Iterator) bool {
+            pub inline fn truthy(self: Iterator) bool {
                 switch (self.data) {
                     .Empty => return false,
                     .Lambda => return true,

@@ -321,13 +321,13 @@ const RenderHelpers = struct {
 ///
 /// Group functions and structs that are denpendent of Writer and RenderOptions
 pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const has_indentation = !PartialsMap.isEmpty() and options.preseveLineBreaksAndIndentation();
+    const indentation_supported = !PartialsMap.isEmpty() and options.preseveLineBreaksAndIndentation();
 
     return struct {
         pub const Context = context.Context(Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
         pub const PartialsMap = PartialsMap;
-        pub const IndentationQueue = if (has_indentation) indent.IndentationQueue else void;
+        pub const IndentationQueue = if (indentation_supported) indent.IndentationQueue else void;
 
         pub const Invoker = invoker.Invoker(Writer, PartialsMap, options);
 
@@ -398,8 +398,8 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 children: ?[]const Element,
             ) (Allocator.Error || Writer.Error)!void {
                 if (children) |elements| {
-                    for (elements) |*element| {
-                        switch (element.*) {
+                    for (elements) |element| {
+                        switch (element) {
                             .StaticText => |content| _ = try self.write(content, .Unescaped),
                             .Interpolation => |path| try self.interpolate(path, .Escaped),
                             .UnescapedInterpolation => |path| try self.interpolate(path, .Unescaped),
@@ -410,10 +410,12 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                         //TODO: Add template options
                                         assert(section.inner_text != null);
                                         assert(section.delimiters != null);
+                                        
 
                                         const expand_result = try lambda_ctx.expandLambda(self, "", section.inner_text.?, .Unescaped, section.delimiters.?);
                                         assert(expand_result == .Lambda);
                                     } else while (iterator.next()) |item_ctx| {
+
                                         var current_level = self.stack;
                                         self.stack = &ContextStack{
                                             .parent = current_level,
@@ -430,30 +432,35 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                 // Lambdas aways evaluate as "true" for inverted section
                                 // Broken paths, empty lists, null and false evaluates as "false"
 
-                                const truthy = if (self.getIterator(section.key)) |*iterator| iterator.truthy() else false;
+                                const truthy = if (self.getIterator(section.key)) |iterator| iterator.truthy() else false;
                                 if (!truthy) {
                                     try self.renderLevel(section.content);
                                 }
                             },
 
                             .Partial => |partial| {
-                                if (comptime PartialsMap.isEmpty()) {
-                                    continue;
-                                } else if (self.partials_map.get(partial.key)) |partial_template| {
-                                    if (if (comptime has_indentation) partial.indentation else null) |value| {
-                                        const prev_has_pending = self.indentation_queue.has_pending;
-                                        self.indentation_queue.indent(&IndentationQueue.Node{ .indentation = value });
-                                        self.indentation_queue.has_pending = true;
+                                if (comptime PartialsMap.isEmpty()) continue;
 
-                                        defer {
-                                            self.indentation_queue.unindent();
-                                            self.indentation_queue.has_pending = prev_has_pending;
+                                if (self.partials_map.get(partial.key)) |partial_template| {
+
+                                    if (comptime indentation_supported) {
+
+                                        if (partial.indentation) |value| {
+                                            const prev_has_pending = self.indentation_queue.has_pending;
+                                            self.indentation_queue.indent(&IndentationQueue.Node{ .indentation = value });
+                                            self.indentation_queue.has_pending = true;
+
+                                            defer {
+                                                self.indentation_queue.unindent();
+                                                self.indentation_queue.has_pending = prev_has_pending;
+                                            }
+
+                                            try self.renderLevelPartials(partial_template);
+                                            continue;
                                         }
-
-                                        try self.renderLevelPartials(partial_template);
-                                    } else {
-                                        try self.renderLevelPartials(partial_template);
                                     }
+
+                                    try self.renderLevelPartials(partial_template);                                    
                                 }
                             },
 
@@ -617,8 +624,9 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 comptime escape: Escape,
             ) @TypeOf(writer).Error!usize {
                 const escaped = escape == .Escaped;
+                const indentation_empty: if(indentation_supported) bool else void = if(indentation_supported) self.indentation_queue.list == null else {};
 
-                if (comptime escaped or has_indentation) {
+                if (comptime escaped or indentation_supported) {
                     const @"null" = '\x00';
                     const html_null: []const u8 = "\u{fffd}";
 
@@ -629,7 +637,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     while (char_index < value.len) : (char_index += 1) {
                         const char = value[char_index];
 
-                        if (comptime has_indentation) {
+                        if (comptime indentation_supported and !indentation_empty) {
 
                             // The indentation must be inserted after the line break
                             // Supports both \n and \r\n
