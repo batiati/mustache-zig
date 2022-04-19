@@ -275,7 +275,7 @@ const RenderHelpers = struct {
         const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
         const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
 
-        try Engine.render(elements, data, writer, &PartialsMap.init(partials));
+        try Engine.render(elements, data, writer, PartialsMap.init(partials));
     }
 
     pub inline fn allocRender(allocator: Allocator, elements: []const Element, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
@@ -286,7 +286,7 @@ const RenderHelpers = struct {
         const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
         const Engine = RenderEngine(Writer, PartialsMap, options);
 
-        try Engine.bufRender(&list, elements, data, &PartialsMap.init(partials));
+        try Engine.bufRender(&list, elements, data, PartialsMap.init(partials));
 
         return if (comptime sentinel) |z|
             list.toOwnedSliceSentinel(z)
@@ -298,7 +298,7 @@ const RenderHelpers = struct {
         const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
         const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
 
-        try Engine.collect(allocator, template, data, writer, &PartialsMap.init(allocator, partials));
+        try Engine.collect(allocator, template, data, writer, PartialsMap.init(allocator, partials));
     }
 
     pub inline fn allocCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
@@ -309,7 +309,7 @@ const RenderHelpers = struct {
         const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
         const Engine = RenderEngine(Writer, PartialsMap, options);
 
-        try Engine.bufCollect(allocator, &list, template, data, &PartialsMap.init(allocator, partials));
+        try Engine.bufCollect(allocator, &list, template, data, PartialsMap.init(allocator, partials));
 
         return if (comptime sentinel) |z|
             list.toOwnedSliceSentinel(z)
@@ -352,7 +352,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             out_writer: OutWriter,
             stack: *const ContextStack,
-            partials_map: *const PartialsMap,
+            partials_map: PartialsMap,
             indentation_queue: *IndentationQueue,
 
             pub fn render(self: *Self, elements: []const Element) !void {
@@ -698,7 +698,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             }
         };
 
-        pub fn render(elements: []const Element, data: anytype, writer: Writer, partials_map: *const PartialsMap) !void {
+        pub fn render(elements: []const Element, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
             const Data = @TypeOf(data);
             const by_value = comptime Fields.byValue(Data);
 
@@ -721,7 +721,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             try data_render.render(elements);
         }
 
-        pub fn bufRender(list: *std.ArrayList(u8), elements: []const Element, data: anytype, partials_map: *const PartialsMap) !void {
+        pub fn bufRender(list: *std.ArrayList(u8), elements: []const Element, data: anytype, partials_map: PartialsMap) !void {
             const Data = @TypeOf(data);
             const by_value = comptime Fields.byValue(Data);
 
@@ -744,7 +744,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             try data_render.render(elements);
         }
 
-        pub fn collect(allocator: Allocator, template: []const u8, data: anytype, writer: Writer, partials_map: *const PartialsMap) !void {
+        pub fn collect(allocator: Allocator, template: []const u8, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
             const Data = @TypeOf(data);
             const by_value = comptime Fields.byValue(Data);
 
@@ -767,7 +767,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             try data_render.collect(allocator, template);
         }
 
-        pub fn bufCollect(allocator: Allocator, list: *std.ArrayList(u8), template: []const u8, data: anytype, partials_map: *const PartialsMap) !void {
+        pub fn bufCollect(allocator: Allocator, list: *std.ArrayList(u8), template: []const u8, data: anytype, partials_map: PartialsMap) !void {
             const Data = @TypeOf(data);
             const by_value = comptime Fields.byValue(Data);
 

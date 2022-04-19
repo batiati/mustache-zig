@@ -70,8 +70,6 @@ pub const ParserOutput = enum {
     Render,
 };
 
-// ----------------------------------
-
 pub const ParseTextOptions = struct {
 
     ///
