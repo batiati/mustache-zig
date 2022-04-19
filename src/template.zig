@@ -279,15 +279,6 @@ pub const Template = struct {
     pub fn deinit(self: Template, allocator: Allocator) void {
         Element.deinitMany(allocator, self.options.copyStrings(), self.elements);
     }
-
-    pub fn last(self: Template) *const Element {
-        var last_element = &self.elements[self.elements.len - 1];
-        while (last_element.children()) |children| {
-            last_element = &children[children.len - 1];
-        }
-
-        return last_element;
-    }
 };
 
 /// Parses a string and returns an union containing either a `ParseError` or a `Template`

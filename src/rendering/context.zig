@@ -203,16 +203,6 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     },
                 }
             }
-
-            pub inline fn hasNext(self: *Iterator) bool {
-                return switch (self.data) {
-                    .Lambda, .Empty => false,
-                    .Sequence => |sequence| switch (sequence.state) {
-                        .Fetching => true,
-                        .Finished => false,
-                    },
-                };
-            }
         };
 
         ctx: FlattenedType = undefined,
