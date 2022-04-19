@@ -327,103 +327,9 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
         pub const Context = context.Context(Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
         pub const PartialsMap = PartialsMap;
-
-        pub const Indentation = if (has_indentation) indent.Indentation else indent.Indentation.Null;
-        pub const IndentationQueue = if (has_indentation) indent.IndentationQueue else indent.IndentationQueue.Null;
+        pub const IndentationQueue = if (has_indentation) indent.IndentationQueue else void;
 
         pub const Invoker = invoker.Invoker(Writer, PartialsMap, options);
-
-        pub fn render(elements: []const Element, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
-            const Data = @TypeOf(data);
-            const by_value = comptime Fields.byValue(Data);
-
-            var indentation_queue = IndentationQueue{};
-            var data_render = DataRender{
-                .out_writer = .{ .Writer = writer },
-                .partials_map = partials_map,
-                .stack = &ContextStack{
-                    .parent = null,
-                    .ctx = context.getContext(
-                        Writer,
-                        if (by_value) data else @as(*const Data, &data),
-                        PartialsMap,
-                        options,
-                    ),
-                },
-                .indentation_queue = &indentation_queue,
-            };
-
-            try data_render.render(elements);
-        }
-
-        pub fn bufRender(list: *std.ArrayList(u8), elements: []const Element, data: anytype, partials_map: PartialsMap) !void {
-            const Data = @TypeOf(data);
-            const by_value = comptime Fields.byValue(Data);
-
-            var indentation_queue = IndentationQueue{};
-            var data_render = DataRender{
-                .out_writer = .{ .Buffer = list },
-                .partials_map = partials_map,
-                .stack = &ContextStack{
-                    .parent = null,
-                    .ctx = context.getContext(
-                        Writer,
-                        if (by_value) data else @as(*const Data, &data),
-                        PartialsMap,
-                        options,
-                    ),
-                },
-                .indentation_queue = &indentation_queue,
-            };
-
-            try data_render.render(elements);
-        }
-
-        pub fn collect(allocator: Allocator, template: []const u8, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
-            const Data = @TypeOf(data);
-            const by_value = comptime Fields.byValue(Data);
-
-            var indentation_queue = IndentationQueue{};
-            var data_render = DataRender{
-                .out_writer = .{ .Writer = writer },
-                .partials_map = partials_map,
-                .stack = &ContextStack{
-                    .parent = null,
-                    .ctx = context.getContext(
-                        Writer,
-                        if (by_value) data else @as(*const Data, &data),
-                        PartialsMap,
-                        options,
-                    ),
-                },
-                .indentation_queue = &indentation_queue,
-            };
-
-            try data_render.collect(allocator, template);
-        }
-
-        pub fn bufCollect(allocator: Allocator, list: *std.ArrayList(u8), template: []const u8, data: anytype, partials_map: PartialsMap) !void {
-            const Data = @TypeOf(data);
-            const by_value = comptime Fields.byValue(Data);
-
-            var indentation_queue = IndentationQueue{};
-            var data_render = DataRender{
-                .out_writer = .{ .Buffer = list },
-                .partials_map = partials_map,
-                .stack = &ContextStack{
-                    .parent = null,
-                    .ctx = context.getContext(
-                        Writer,
-                        if (by_value) data else @as(*const Data, &data),
-                        PartialsMap,
-                        options,
-                    ),
-                },
-                .indentation_queue = &indentation_queue,
-            };
-
-            try data_render.collect(allocator, template);
-        }
 
         ///
         /// Provides the ability to choose between two writers
@@ -514,12 +420,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                             .ctx = item_ctx,
                                         };
 
-                                        self.indentation_queue.indentSection(iterator.hasNext());
-                                        defer {
-                                            self.stack = current_level;
-                                            self.indentation_queue.unindentSection();
-                                        }
-
+                                        defer self.stack = current_level;
                                         try self.renderLevel(section.content);
                                     }
                                 }
@@ -540,16 +441,15 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                     continue;
                                 } else if (self.partials_map.get(partial.key)) |partial_template| {
                                     if (if (comptime has_indentation) partial.indentation else null) |value| {
-                                        var current_indentation_queue = self.indentation_queue;
-                                        var next_indentation_queue = current_indentation_queue.indent(&IndentationQueue.Node{ .indentation = value, .last_indented_element = undefined });
+                                        const prev_has_pending = self.indentation_queue.has_pending;
+                                        self.indentation_queue.indent(&IndentationQueue.Node{ .indentation = value });
+                                        self.indentation_queue.has_pending = true;
 
-                                        self.indentation_queue = &next_indentation_queue;
                                         defer {
-                                            current_indentation_queue.unindent();
-                                            self.indentation_queue = current_indentation_queue;
+                                            self.indentation_queue.unindent();
+                                            self.indentation_queue.has_pending = prev_has_pending;
                                         }
 
-                                        _ = try self.write(value, .Unescaped);
                                         try self.renderLevelPartials(partial_template);
                                     } else {
                                         try self.renderLevelPartials(partial_template);
@@ -710,13 +610,6 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 return 0;
             }
 
-            fn writeIndentation(self: *Self, indentation: Indentation) (Allocator.Error || Writer.Error)!void {
-                switch (self.out_writer) {
-                    .Writer => |writer| _ = try indentation.write(writer),
-                    .Buffer => |list| _ = try indentation.write(list.writer()),
-                }
-            }
-
             fn flushToWriter(
                 self: *Self,
                 writer: anytype,
@@ -724,29 +617,25 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 comptime escape: Escape,
             ) @TypeOf(writer).Error!usize {
                 const escaped = escape == .Escaped;
-                const indented = @sizeOf(Indentation) > 0;
 
-                _ = self;
-
-                if (comptime escaped or indented) {
+                if (comptime escaped or has_indentation) {
                     const @"null" = '\x00';
                     const html_null: []const u8 = "\u{fffd}";
 
                     var index: usize = 0;
                     var written_bytes: usize = 0;
-                    var new_line: if (indented) bool else void = if (indented) false else {};
 
                     var char_index: usize = 0;
                     while (char_index < value.len) : (char_index += 1) {
                         const char = value[char_index];
 
-                        if (comptime indented) {
+                        if (comptime has_indentation) {
 
                             // The indentation must be inserted after the line break
                             // Supports both \n and \r\n
 
-                            if (new_line) {
-                                defer new_line = false;
+                            if (self.indentation_queue.has_pending) {
+                                defer self.indentation_queue.has_pending = false;
 
                                 if (char_index > index) {
                                     const slice = value[index..char_index];
@@ -754,11 +643,11 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                     written_bytes += slice.len;
                                 }
 
-                                //written_bytes += try indentation.write(.Middle, writer);
+                                written_bytes += try self.indentation_queue.write(writer);
 
                                 index = char_index;
                             } else if (char == '\n') {
-                                new_line = true;
+                                self.indentation_queue.has_pending = true;
                                 continue;
                             }
                         }
@@ -793,10 +682,6 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                         written_bytes += slice.len;
                     }
 
-                    if (comptime indented) {
-                        //if (new_line) written_bytes += try indentation.write(.Last, writer);
-                    }
-
                     return written_bytes;
                 } else {
                     try writer.writeAll(value);
@@ -804,19 +689,109 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 }
             }
         };
+
+        pub fn render(elements: []const Element, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
+            const Data = @TypeOf(data);
+            const by_value = comptime Fields.byValue(Data);
+
+            var indentation_queue = IndentationQueue{};
+            var data_render = DataRender{
+                .out_writer = .{ .Writer = writer },
+                .partials_map = partials_map,
+                .stack = &ContextStack{
+                    .parent = null,
+                    .ctx = context.getContext(
+                        Writer,
+                        if (by_value) data else @as(*const Data, &data),
+                        PartialsMap,
+                        options,
+                    ),
+                },
+                .indentation_queue = &indentation_queue,
+            };
+
+            try data_render.render(elements);
+        }
+
+        pub fn bufRender(list: *std.ArrayList(u8), elements: []const Element, data: anytype, partials_map: PartialsMap) !void {
+            const Data = @TypeOf(data);
+            const by_value = comptime Fields.byValue(Data);
+
+            var indentation_queue = IndentationQueue{};
+            var data_render = DataRender{
+                .out_writer = .{ .Buffer = list },
+                .partials_map = partials_map,
+                .stack = &ContextStack{
+                    .parent = null,
+                    .ctx = context.getContext(
+                        Writer,
+                        if (by_value) data else @as(*const Data, &data),
+                        PartialsMap,
+                        options,
+                    ),
+                },
+                .indentation_queue = &indentation_queue,
+            };
+
+            try data_render.render(elements);
+        }
+
+        pub fn collect(allocator: Allocator, template: []const u8, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
+            const Data = @TypeOf(data);
+            const by_value = comptime Fields.byValue(Data);
+
+            var indentation_queue = IndentationQueue{};
+            var data_render = DataRender{
+                .out_writer = .{ .Writer = writer },
+                .partials_map = partials_map,
+                .stack = &ContextStack{
+                    .parent = null,
+                    .ctx = context.getContext(
+                        Writer,
+                        if (by_value) data else @as(*const Data, &data),
+                        PartialsMap,
+                        options,
+                    ),
+                },
+                .indentation_queue = &indentation_queue,
+            };
+
+            try data_render.collect(allocator, template);
+        }
+
+        pub fn bufCollect(allocator: Allocator, list: *std.ArrayList(u8), template: []const u8, data: anytype, partials_map: PartialsMap) !void {
+            const Data = @TypeOf(data);
+            const by_value = comptime Fields.byValue(Data);
+
+            var indentation_queue = IndentationQueue{};
+            var data_render = DataRender{
+                .out_writer = .{ .Buffer = list },
+                .partials_map = partials_map,
+                .stack = &ContextStack{
+                    .parent = null,
+                    .ctx = context.getContext(
+                        Writer,
+                        if (by_value) data else @as(*const Data, &data),
+                        PartialsMap,
+                        options,
+                    ),
+                },
+                .indentation_queue = &indentation_queue,
+            };
+
+            try data_render.collect(allocator, template);
+        }
     };
 }
 
 test {
     _ = context;
     _ = map;
+    _ = indent;
 
     _ = tests.spec;
     _ = tests.extra;
     _ = tests.api;
-
-    //TODO
-    //_ = tests.escape_tests;
 }
 
 const tests = struct {

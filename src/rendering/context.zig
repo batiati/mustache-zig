@@ -4,6 +4,7 @@ const meta = std.meta;
 const trait = std.meta.trait;
 
 const assert = std.debug.assert;
+const testing = std.testing;
 
 const mustache = @import("../mustache.zig");
 const RenderOptions = mustache.options.RenderOptions;
@@ -346,7 +347,6 @@ test {
     _ = lambda;
     _ = struct_tests;
 }
-const testing = std.testing;
 
 const struct_tests = struct {
 

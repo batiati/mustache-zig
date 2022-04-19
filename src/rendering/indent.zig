@@ -1,137 +1,74 @@
 const std = @import("std");
 
 const assert = std.debug.assert;
-
-const mustache = @import("../mustache.zig");
-const Element = mustache.Element;
+const testing = std.testing;
 
 pub const IndentationQueue = struct {
     const Self = @This();
 
-    pub const Null = struct {
-        pub inline fn get(self: @This(), element: *const Element) Indentation.Null {
-            _ = self;
-            _ = element;
-
-            return .{};
-        }
-
-        pub inline fn indentSection(self: @This(), has_next: bool) void {
-            _ = self;
-            _ = has_next;
-        }
-
-        pub inline fn unindentSection(self: @This()) void {
-            _ = self;
-        }
-    };
-
-    pub const IteratorState = enum {
-        None,
-        Fetching,
-        Consumed,
-    };
-
     pub const Node = struct {
-        next: ?*const @This() = null,
+        next: ?*@This() = null,
         indentation: []const u8,
-        last_indented_element: *const Element,
-        iterator_state: IteratorState = .None,
     };
 
     list: ?struct {
         head: *Node,
         tail: *Node,
-        last_iterator_state: ?IteratorState = null,
     } = null,
+    has_pending: bool = false,
 
-    pub fn indent(self: Self, node: *Node) Self {
+    pub fn indent(self: *Self, node: *Node) void {
         if (self.list) |list| {
             list.tail.next = node;
-            return .{
-                .list = .{
-                    .head = list.head,
-                    .tail = node,
-                },
+            self.list = .{
+                .head = list.head,
+                .tail = node,
             };
         } else {
-            return .{ .list = .{
+            self.list = .{
                 .head = node,
                 .tail = node,
-            } };
-        }
-    }
-
-    pub fn unindent(self: Self) void {
-        if (self.list) |list| {
-            list.tail.next = null;
-        }
-    }
-
-    pub inline fn get(self: *const Self, element: *const Element) Indentation {
-        if (self.list) |list| {
-            const tail = list.tail;
-            const trim_last_line = tail.last_indented_element == element and tail.iterator_state != .Fetching;
-
-            return .{
-                .value = .{
-                    .first = list.head,
-                    .trim_last_line = trim_last_line,
-                },
-            };
-        } else {
-            return .{
-                .value = null,
             };
         }
     }
 
-    pub inline fn indentSection(self: *Self, has_next: bool) void {
-        if (self.list) |*list| {
-            assert(list.last_iterator_state == null);
+    pub fn unindent(self: *Self) void {
+        if (self.list) |list| {
+            if (list.head == list.tail) {
+                self.list = null;
+            } else {
+                var current_level: *Node = list.head;
+                while (true) {
+                    var next_level = current_level.next orelse break;
+                    defer current_level = next_level;
 
-            const tail = list.tail;
-            list.last_iterator_state = tail.iterator_state;
-            tail.iterator_state = if (has_next) .Fetching else .Consumed;
+                    if (next_level == list.tail) {
+                        current_level.next = null;
+                        self.list = .{
+                            .head = list.head,
+                            .tail = current_level,
+                        };
+
+                        return;
+                    }
+                }
+
+                unreachable;
+            }
+
+            if (list.tail.next == null) {
+                self.list = null;
+            } else {
+                list.tail.next = null;
+            }
         }
     }
 
-    pub inline fn unindentSection(self: *Self) void {
-        if (self.list) |*list| {
-            assert(list.last_iterator_state != null);
-
-            const tail = list.tail;
-            tail.iterator_state = list.last_iterator_state.?;
-            list.last_iterator_state = null;
-        }
-    }
-};
-
-pub const Indentation = struct {
-    pub const Null = struct {
-        pub inline fn hasValue(self: @This()) bool {
-            _ = self;
-            return false;
-        }
-    };
-
-    pub const LinePos = enum { Middle, Last };
-
-    value: ?struct {
-        first: *const IndentationQueue.Node,
-        trim_last_line: bool = false,
-    } = null,
-
-    pub fn write(self: @This(), comptime line: LinePos, writer: anytype) !usize {
+    pub fn write(self: Self, writer: anytype) !usize {
         var written_bytes: usize = 0;
-        if (self.value) |value| {
-            var node: ?*const IndentationQueue.Node = value.first;
-            while (node) |level| {
-                if (line == .Last)
-                    if (value.trim_last_line and level.next == null) break;
-
-                defer node = level.next;
-
+        if (self.list) |list| {
+            var node: ?*const Node = list.head;
+            while (node) |level| : (node = level.next) {
                 try writer.writeAll(level.indentation);
                 written_bytes += level.indentation.len;
             }
@@ -139,8 +76,60 @@ pub const Indentation = struct {
 
         return written_bytes;
     }
-
-    pub inline fn hasValue(self: @This()) bool {
-        return self.value != null;
-    }
 };
+
+test "Indent/Unindent" {
+    var queue = IndentationQueue{};
+    try testing.expect(queue.list == null);
+
+    var node_1 = IndentationQueue.Node{
+        .indentation = "",
+    };
+    queue.indent(&node_1);
+
+    try testing.expect(queue.list != null);
+    try testing.expect(queue.list.?.head == queue.list.?.tail);
+    try testing.expect(queue.list.?.head == &node_1);
+    try testing.expect(queue.list.?.tail == &node_1);
+
+    var node_2 = IndentationQueue.Node{
+        .indentation = "",
+    };
+    queue.indent(&node_2);
+
+    try testing.expect(queue.list != null);
+    try testing.expect(queue.list.?.head != queue.list.?.tail);
+    try testing.expect(queue.list.?.head == &node_1);
+    try testing.expect(queue.list.?.tail == &node_2);
+    try testing.expect(node_1.next == &node_2);
+
+    var node_3 = IndentationQueue.Node{
+        .indentation = "",
+    };
+    queue.indent(&node_3);
+
+    try testing.expect(queue.list != null);
+    try testing.expect(queue.list.?.head != queue.list.?.tail);
+    try testing.expect(queue.list.?.head == &node_1);
+    try testing.expect(queue.list.?.tail == &node_3);
+    try testing.expect(node_1.next == &node_2);
+    try testing.expect(node_2.next == &node_3);
+
+    queue.unindent();
+    try testing.expect(queue.list != null);
+    try testing.expect(queue.list.?.head != queue.list.?.tail);
+    try testing.expect(queue.list.?.head == &node_1);
+    try testing.expect(queue.list.?.tail == &node_2);
+    try testing.expect(node_2.next == null);
+    try testing.expect(node_1.next == &node_2);
+
+    queue.unindent();
+    try testing.expect(queue.list != null);
+    try testing.expect(queue.list.?.head == queue.list.?.tail);
+    try testing.expect(queue.list.?.head == &node_1);
+    try testing.expect(queue.list.?.tail == &node_1);
+    try testing.expect(node_1.next == null);
+
+    queue.unindent();
+    try testing.expect(queue.list == null);
+}

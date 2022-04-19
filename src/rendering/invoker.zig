@@ -12,6 +12,7 @@ const PathResolution = context.PathResolution;
 const Escape = context.Escape;
 
 const rendering = @import("rendering.zig");
+const map = @import("partials_map.zig");
 
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
@@ -367,366 +368,6 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 }
             };
         }
-
-        // Check if an error is part of a error set
-        // https://github.com/ziglang/zig/issues/2473
-        fn isOnErrorSet(comptime Error: type, value: anytype) bool {
-            switch (@typeInfo(Error)) {
-                .ErrorSet => |info| if (info) |errors| {
-                    if (@typeInfo(@TypeOf(value)) == .ErrorSet) {
-                        inline for (errors) |item| {
-                            const int_value = @errorToInt(@field(Error, item.name));
-                            if (int_value == @errorToInt(value)) return true;
-                        }
-                    }
-                },
-                else => {},
-            }
-
-            return false;
-        }
-
-        test "isOnErrorSet" {
-            const A = error{ a1, a2 };
-            const B = error{ b1, b2 };
-            const AB = A || B;
-            const Mixed = error{ a1, b2 };
-            const Empty = error{};
-
-            try testing.expect(isOnErrorSet(A, error.a1));
-            try testing.expect(isOnErrorSet(A, error.a2));
-            try testing.expect(!isOnErrorSet(A, error.b1));
-            try testing.expect(!isOnErrorSet(A, error.b2));
-
-            try testing.expect(isOnErrorSet(AB, error.a1));
-            try testing.expect(isOnErrorSet(AB, error.a2));
-            try testing.expect(isOnErrorSet(AB, error.b1));
-            try testing.expect(isOnErrorSet(AB, error.b2));
-
-            try testing.expect(isOnErrorSet(Mixed, error.a1));
-            try testing.expect(!isOnErrorSet(Mixed, error.a2));
-            try testing.expect(!isOnErrorSet(Mixed, error.b1));
-            try testing.expect(isOnErrorSet(Mixed, error.b2));
-
-            try testing.expect(!isOnErrorSet(Empty, error.a1));
-            try testing.expect(!isOnErrorSet(Empty, error.a2));
-            try testing.expect(!isOnErrorSet(Empty, error.b1));
-            try testing.expect(!isOnErrorSet(Empty, error.b2));
-        }
-
-        test {
-            _ = tests;
-        }
-
-        const tests = struct {
-            const Tuple = std.meta.Tuple(&.{ u8, u32, u64 });
-            const Data = struct {
-                a1: struct {
-                    b1: struct {
-                        c1: struct {
-                            d1: u0 = 0,
-                            d2: u0 = 0,
-                            d_null: ?u0 = null,
-                            d_slice: []const u0 = &.{ 0, 0, 0 },
-                            d_array: [3]u0 = .{ 0, 0, 0 },
-                            d_tuple: Tuple = Tuple{ 0, 0, 0 },
-                        } = .{},
-                        c_null: ?u0 = null,
-                        c_slice: []const u0 = &.{ 0, 0, 0 },
-                        c_array: [3]u0 = .{ 0, 0, 0 },
-                        c_tuple: Tuple = Tuple{ 0, 0, 0 },
-                    } = .{},
-                    b2: u0 = 0,
-                    b_null: ?u0 = null,
-                    b_slice: []const u0 = &.{ 0, 0, 0 },
-                    b_array: [3]u0 = .{ 0, 0, 0 },
-                    b_tuple: Tuple = Tuple{ 0, 0, 0 },
-                } = .{},
-                a2: u0 = 0,
-                a_null: ?u0 = null,
-                a_slice: []const u0 = &.{ 0, 0, 0 },
-                a_array: [3]u0 = .{ 0, 0, 0 },
-                a_tuple: Tuple = Tuple{ 0, 0, 0 },
-            };
-
-            const FooCaller = PathInvoker(error{}, bool, fooAction);
-
-            fn fooAction(comptime TExpected: type, value: anytype) error{}!bool {
-                const TValue = @TypeOf(value);
-                const expected = comptime (TExpected == TValue) or (trait.isSingleItemPtr(TValue) and meta.Child(TValue) == TExpected);
-                if (!expected) {
-                    std.log.err(
-                        \\ Invalid iterator type
-                        \\ Expected \"{s}\"
-                        \\ Found \"{s}\"
-                    , .{ @typeName(TExpected), @typeName(TValue) });
-                }
-                return expected;
-            }
-
-            fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !FooCaller.Result {
-                var path_iterator = std.mem.tokenize(u8, path, ".");
-                return try FooCaller.call(TExpected, &data, &path_iterator, index);
-            }
-
-            fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
-                const value = try fooSeek(TExpected, data, path, null);
-                try testing.expect(value == .Field);
-                try testing.expect(value.Field == true);
-            }
-
-            fn expectNotFound(data: anytype, path: []const u8) !void {
-                const value = try fooSeek(void, data, path, null);
-                try testing.expect(value != .Field);
-            }
-
-            fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
-                const value = try fooSeek(TExpected, data, path, index);
-                try testing.expect(value == .Field);
-                try testing.expect(value.Field == true);
-            }
-
-            fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
-                const value = try fooSeek(void, data, path, index);
-                try testing.expect(value != .Field);
-            }
-
-            test "Comptime seek - self" {
-                var data = Data{};
-                try expectFound(Data, data, "");
-            }
-
-            test "Comptime seek - dot" {
-                var data = Data{};
-                try expectFound(Data, data, ".");
-            }
-
-            test "Comptime seek - not found" {
-                var data = Data{};
-                try expectNotFound(data, "wrong");
-            }
-
-            test "Comptime seek - found" {
-                var data = Data{};
-                try expectFound(@TypeOf(data.a1), data, "a1");
-
-                try expectFound(@TypeOf(data.a2), data, "a2");
-            }
-
-            test "Comptime seek - self null" {
-                var data: ?Data = null;
-                try expectFound(?Data, data, "");
-            }
-
-            test "Comptime seek - self dot" {
-                var data: ?Data = null;
-                try expectFound(?Data, data, ".");
-            }
-
-            test "Comptime seek - found nested" {
-                var data = Data{};
-                try expectFound(@TypeOf(data.a1.b1), data, "a1.b1");
-                try expectFound(@TypeOf(data.a1.b2), data, "a1.b2");
-                try expectFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1");
-                try expectFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1");
-                try expectFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2");
-            }
-
-            test "Comptime seek - not found nested" {
-                var data = Data{};
-                try expectNotFound(data, "a1.wong");
-                try expectNotFound(data, "a1.b1.wong");
-                try expectNotFound(data, "a1.b2.wrong");
-                try expectNotFound(data, "a1.b1.c1.wrong");
-                try expectNotFound(data, "a1.b1.c1.d1.wrong");
-                try expectNotFound(data, "a1.b1.c1.d2.wrong");
-            }
-
-            test "Comptime seek - null nested" {
-                var data = Data{};
-                try expectFound(@TypeOf(data.a_null), data, "a_null");
-                try expectFound(@TypeOf(data.a1.b_null), data, "a1.b_null");
-                try expectFound(@TypeOf(data.a1.b1.c_null), data, "a1.b1.c_null");
-                try expectFound(@TypeOf(data.a1.b1.c1.d_null), data, "a1.b1.c1.d_null");
-            }
-
-            test "Comptime iter - self" {
-                var data = Data{};
-                try expectIterFound(Data, data, "", 0);
-            }
-
-            test "Comptime iter consumed - self" {
-                var data = Data{};
-                try expectIterNotFound(data, "", 1);
-            }
-
-            test "Comptime iter - dot" {
-                var data = Data{};
-                try expectIterFound(Data, data, ".", 0);
-            }
-
-            test "Comptime iter consumed - dot" {
-                var data = Data{};
-                try expectIterNotFound(data, ".", 1);
-            }
-
-            test "Comptime seek - not found" {
-                var data = Data{};
-                try expectIterNotFound(data, "wrong", 0);
-                try expectIterNotFound(data, "wrong", 1);
-            }
-
-            test "Comptime iter - found" {
-                var data = Data{};
-                try expectIterFound(@TypeOf(data.a1), data, "a1", 0);
-
-                try expectIterFound(@TypeOf(data.a2), data, "a2", 0);
-            }
-
-            test "Comptime iter consumed - found" {
-                var data = Data{};
-                try expectIterNotFound(data, "a1", 1);
-
-                try expectIterNotFound(data, "a2", 1);
-            }
-
-            test "Comptime iter - found nested" {
-                var data = Data{};
-                try expectIterFound(@TypeOf(data.a1.b1), data, "a1.b1", 0);
-                try expectIterFound(@TypeOf(data.a1.b2), data, "a1.b2", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2", 0);
-            }
-
-            test "Comptime iter consumed - found nested" {
-                var data = Data{};
-                try expectIterNotFound(data, "a1.b1", 1);
-                try expectIterNotFound(data, "a1.b2", 1);
-                try expectIterNotFound(data, "a1.b1.c1", 1);
-                try expectIterNotFound(data, "a1.b1.c1.d1", 1);
-                try expectIterNotFound(data, "a1.b1.c1.d2", 1);
-            }
-
-            test "Comptime iter - not found nested" {
-                var data = Data{};
-                try expectIterNotFound(data, "a1.wong", 0);
-                try expectIterNotFound(data, "a1.b1.wong", 0);
-                try expectIterNotFound(data, "a1.b2.wrong", 0);
-                try expectIterNotFound(data, "a1.b1.c1.wrong", 0);
-                try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 0);
-                try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 0);
-
-                try expectIterNotFound(data, "a1.wong", 1);
-                try expectIterNotFound(data, "a1.b1.wong", 1);
-                try expectIterNotFound(data, "a1.b2.wrong", 1);
-                try expectIterNotFound(data, "a1.b1.c1.wrong", 1);
-                try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 1);
-                try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 1);
-            }
-
-            test "Comptime iter - slice" {
-                var data = Data{};
-                try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
-
-                try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
-
-                try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
-
-                try expectIterNotFound(data, "a_slice", 3);
-            }
-
-            test "Comptime iter - array" {
-                var data = Data{};
-                try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
-
-                try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
-
-                try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
-
-                try expectIterNotFound(data, "a_array", 3);
-            }
-
-            test "Comptime iter - tuple" {
-                var data = Data{};
-                try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
-
-                try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
-
-                try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
-
-                try expectIterNotFound(data, "a_tuple", 3);
-            }
-
-            test "Comptime iter - nested slice" {
-                var data = Data{};
-                try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
-                try expectIterFound(@TypeOf(data.a1.b_slice[0]), data, "a1.b_slice", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c_slice[0]), data, "a1.b1.c_slice", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[0]), data, "a1.b1.c1.d_slice", 0);
-
-                try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
-                try expectIterFound(@TypeOf(data.a1.b_slice[1]), data, "a1.b_slice", 1);
-                try expectIterFound(@TypeOf(data.a1.b1.c_slice[1]), data, "a1.b1.c_slice", 1);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[1]), data, "a1.b1.c1.d_slice", 1);
-
-                try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
-                try expectIterFound(@TypeOf(data.a1.b_slice[2]), data, "a1.b_slice", 2);
-                try expectIterFound(@TypeOf(data.a1.b1.c_slice[2]), data, "a1.b1.c_slice", 2);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[2]), data, "a1.b1.c1.d_slice", 2);
-
-                try expectIterNotFound(data, "a_slice", 3);
-                try expectIterNotFound(data, "a1.b_slice", 3);
-                try expectIterNotFound(data, "a1.b1.c_slice", 3);
-                try expectIterNotFound(data, "a1.b1.c1.d_slice", 3);
-            }
-
-            test "Comptime iter - nested array" {
-                var data = Data{};
-                try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
-                try expectIterFound(@TypeOf(data.a1.b_tuple[0]), data, "a1.b_tuple", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c_tuple[0]), data, "a1.b1.c_tuple", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[0]), data, "a1.b1.c1.d_tuple", 0);
-
-                try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
-                try expectIterFound(@TypeOf(data.a1.b_tuple[1]), data, "a1.b_tuple", 1);
-                try expectIterFound(@TypeOf(data.a1.b1.c_tuple[1]), data, "a1.b1.c_tuple", 1);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[1]), data, "a1.b1.c1.d_tuple", 1);
-
-                try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
-                try expectIterFound(@TypeOf(data.a1.b_tuple[2]), data, "a1.b_tuple", 2);
-                try expectIterFound(@TypeOf(data.a1.b1.c_tuple[2]), data, "a1.b1.c_tuple", 2);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[2]), data, "a1.b1.c1.d_tuple", 2);
-
-                try expectIterNotFound(data, "a_tuple", 3);
-                try expectIterNotFound(data, "a1.b_tuple", 3);
-                try expectIterNotFound(data, "a1.b1.c_tuple", 3);
-                try expectIterNotFound(data, "a1.b1.c1.d_tuple", 3);
-            }
-
-            test "Comptime iter - nested tuple" {
-                var data = Data{};
-                try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
-                try expectIterFound(@TypeOf(data.a1.b_array[0]), data, "a1.b_array", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c_array[0]), data, "a1.b1.c_array", 0);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[0]), data, "a1.b1.c1.d_array", 0);
-
-                try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
-                try expectIterFound(@TypeOf(data.a1.b_array[1]), data, "a1.b_array", 1);
-                try expectIterFound(@TypeOf(data.a1.b1.c_array[1]), data, "a1.b1.c_array", 1);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[1]), data, "a1.b1.c1.d_array", 1);
-
-                try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
-                try expectIterFound(@TypeOf(data.a1.b_array[2]), data, "a1.b_array", 2);
-                try expectIterFound(@TypeOf(data.a1.b1.c_array[2]), data, "a1.b1.c_array", 2);
-                try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[2]), data, "a1.b1.c1.d_array", 2);
-
-                try expectIterNotFound(data, "a_array", 3);
-                try expectIterNotFound(data, "a1.b_array", 3);
-                try expectIterNotFound(data, "a1.b1.c_array", 3);
-                try expectIterNotFound(data, "a1.b1.c1.d_array", 3);
-            }
-        };
     };
 }
 
@@ -1455,3 +1096,368 @@ test {
     _ = Invoker;
     _ = Fields;
 }
+
+// Check if an error is part of a error set
+// https://github.com/ziglang/zig/issues/2473
+fn isOnErrorSet(comptime Error: type, value: anytype) bool {
+    switch (@typeInfo(Error)) {
+        .ErrorSet => |info| if (info) |errors| {
+            if (@typeInfo(@TypeOf(value)) == .ErrorSet) {
+                inline for (errors) |item| {
+                    const int_value = @errorToInt(@field(Error, item.name));
+                    if (int_value == @errorToInt(value)) return true;
+                }
+            }
+        },
+        else => {},
+    }
+
+    return false;
+}
+
+test "isOnErrorSet" {
+    const A = error{ a1, a2 };
+    const B = error{ b1, b2 };
+    const AB = A || B;
+    const Mixed = error{ a1, b2 };
+    const Empty = error{};
+
+    try testing.expect(isOnErrorSet(A, error.a1));
+    try testing.expect(isOnErrorSet(A, error.a2));
+    try testing.expect(!isOnErrorSet(A, error.b1));
+    try testing.expect(!isOnErrorSet(A, error.b2));
+
+    try testing.expect(isOnErrorSet(AB, error.a1));
+    try testing.expect(isOnErrorSet(AB, error.a2));
+    try testing.expect(isOnErrorSet(AB, error.b1));
+    try testing.expect(isOnErrorSet(AB, error.b2));
+
+    try testing.expect(isOnErrorSet(Mixed, error.a1));
+    try testing.expect(!isOnErrorSet(Mixed, error.a2));
+    try testing.expect(!isOnErrorSet(Mixed, error.b1));
+    try testing.expect(isOnErrorSet(Mixed, error.b2));
+
+    try testing.expect(!isOnErrorSet(Empty, error.a1));
+    try testing.expect(!isOnErrorSet(Empty, error.a2));
+    try testing.expect(!isOnErrorSet(Empty, error.b1));
+    try testing.expect(!isOnErrorSet(Empty, error.b2));
+}
+
+test {
+    _ = tests;
+}
+
+const tests = struct {
+    const Tuple = std.meta.Tuple(&.{ u8, u32, u64 });
+    const Data = struct {
+        a1: struct {
+            b1: struct {
+                c1: struct {
+                    d1: u0 = 0,
+                    d2: u0 = 0,
+                    d_null: ?u0 = null,
+                    d_slice: []const u0 = &.{ 0, 0, 0 },
+                    d_array: [3]u0 = .{ 0, 0, 0 },
+                    d_tuple: Tuple = Tuple{ 0, 0, 0 },
+                } = .{},
+                c_null: ?u0 = null,
+                c_slice: []const u0 = &.{ 0, 0, 0 },
+                c_array: [3]u0 = .{ 0, 0, 0 },
+                c_tuple: Tuple = Tuple{ 0, 0, 0 },
+            } = .{},
+            b2: u0 = 0,
+            b_null: ?u0 = null,
+            b_slice: []const u0 = &.{ 0, 0, 0 },
+            b_array: [3]u0 = .{ 0, 0, 0 },
+            b_tuple: Tuple = Tuple{ 0, 0, 0 },
+        } = .{},
+        a2: u0 = 0,
+        a_null: ?u0 = null,
+        a_slice: []const u0 = &.{ 0, 0, 0 },
+        a_array: [3]u0 = .{ 0, 0, 0 },
+        a_tuple: Tuple = Tuple{ 0, 0, 0 },
+    };
+
+    const dummy_options = RenderOptions{ .Template = .{} };
+    const Writer = @TypeOf(std.io.null_writer);
+    const DummyPartialsMap = map.PartialsMap(void, dummy_options);
+    const RenderEngine = rendering.RenderEngine(Writer, DummyPartialsMap, dummy_options);
+    const FooInvoker = RenderEngine.Invoker;
+    const FooCaller = FooInvoker.PathInvoker(error{}, bool, fooAction);
+
+    fn fooAction(comptime TExpected: type, value: anytype) error{}!bool {
+        const TValue = @TypeOf(value);
+        const expected = comptime (TExpected == TValue) or (trait.isSingleItemPtr(TValue) and meta.Child(TValue) == TExpected);
+        if (!expected) {
+            std.log.err(
+                \\ Invalid iterator type
+                \\ Expected \"{s}\"
+                \\ Found \"{s}\"
+            , .{ @typeName(TExpected), @typeName(TValue) });
+        }
+        return expected;
+    }
+
+    fn fooSeek(comptime TExpected: type, data: anytype, path: []const u8, index: ?usize) !FooCaller.Result {
+        var path_iterator = std.mem.tokenize(u8, path, ".");
+        return try FooCaller.call(TExpected, &data, &path_iterator, index);
+    }
+
+    fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
+        const value = try fooSeek(TExpected, data, path, null);
+        try testing.expect(value == .Field);
+        try testing.expect(value.Field == true);
+    }
+
+    fn expectNotFound(data: anytype, path: []const u8) !void {
+        const value = try fooSeek(void, data, path, null);
+        try testing.expect(value != .Field);
+    }
+
+    fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
+        const value = try fooSeek(TExpected, data, path, index);
+        try testing.expect(value == .Field);
+        try testing.expect(value.Field == true);
+    }
+
+    fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
+        const value = try fooSeek(void, data, path, index);
+        try testing.expect(value != .Field);
+    }
+
+    test "Comptime seek - self" {
+        var data = Data{};
+        try expectFound(Data, data, "");
+    }
+
+    test "Comptime seek - dot" {
+        var data = Data{};
+        try expectFound(Data, data, ".");
+    }
+
+    test "Comptime seek - not found" {
+        var data = Data{};
+        try expectNotFound(data, "wrong");
+    }
+
+    test "Comptime seek - found" {
+        var data = Data{};
+        try expectFound(@TypeOf(data.a1), data, "a1");
+
+        try expectFound(@TypeOf(data.a2), data, "a2");
+    }
+
+    test "Comptime seek - self null" {
+        var data: ?Data = null;
+        try expectFound(?Data, data, "");
+    }
+
+    test "Comptime seek - self dot" {
+        var data: ?Data = null;
+        try expectFound(?Data, data, ".");
+    }
+
+    test "Comptime seek - found nested" {
+        var data = Data{};
+        try expectFound(@TypeOf(data.a1.b1), data, "a1.b1");
+        try expectFound(@TypeOf(data.a1.b2), data, "a1.b2");
+        try expectFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1");
+        try expectFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1");
+        try expectFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2");
+    }
+
+    test "Comptime seek - not found nested" {
+        var data = Data{};
+        try expectNotFound(data, "a1.wong");
+        try expectNotFound(data, "a1.b1.wong");
+        try expectNotFound(data, "a1.b2.wrong");
+        try expectNotFound(data, "a1.b1.c1.wrong");
+        try expectNotFound(data, "a1.b1.c1.d1.wrong");
+        try expectNotFound(data, "a1.b1.c1.d2.wrong");
+    }
+
+    test "Comptime seek - null nested" {
+        var data = Data{};
+        try expectFound(@TypeOf(data.a_null), data, "a_null");
+        try expectFound(@TypeOf(data.a1.b_null), data, "a1.b_null");
+        try expectFound(@TypeOf(data.a1.b1.c_null), data, "a1.b1.c_null");
+        try expectFound(@TypeOf(data.a1.b1.c1.d_null), data, "a1.b1.c1.d_null");
+    }
+
+    test "Comptime iter - self" {
+        var data = Data{};
+        try expectIterFound(Data, data, "", 0);
+    }
+
+    test "Comptime iter consumed - self" {
+        var data = Data{};
+        try expectIterNotFound(data, "", 1);
+    }
+
+    test "Comptime iter - dot" {
+        var data = Data{};
+        try expectIterFound(Data, data, ".", 0);
+    }
+
+    test "Comptime iter consumed - dot" {
+        var data = Data{};
+        try expectIterNotFound(data, ".", 1);
+    }
+
+    test "Comptime seek - not found" {
+        var data = Data{};
+        try expectIterNotFound(data, "wrong", 0);
+        try expectIterNotFound(data, "wrong", 1);
+    }
+
+    test "Comptime iter - found" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a1), data, "a1", 0);
+
+        try expectIterFound(@TypeOf(data.a2), data, "a2", 0);
+    }
+
+    test "Comptime iter consumed - found" {
+        var data = Data{};
+        try expectIterNotFound(data, "a1", 1);
+
+        try expectIterNotFound(data, "a2", 1);
+    }
+
+    test "Comptime iter - found nested" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a1.b1), data, "a1.b1", 0);
+        try expectIterFound(@TypeOf(data.a1.b2), data, "a1.b2", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d1), data, "a1.b1.c1.d1", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d2), data, "a1.b1.c1.d2", 0);
+    }
+
+    test "Comptime iter consumed - found nested" {
+        var data = Data{};
+        try expectIterNotFound(data, "a1.b1", 1);
+        try expectIterNotFound(data, "a1.b2", 1);
+        try expectIterNotFound(data, "a1.b1.c1", 1);
+        try expectIterNotFound(data, "a1.b1.c1.d1", 1);
+        try expectIterNotFound(data, "a1.b1.c1.d2", 1);
+    }
+
+    test "Comptime iter - not found nested" {
+        var data = Data{};
+        try expectIterNotFound(data, "a1.wong", 0);
+        try expectIterNotFound(data, "a1.b1.wong", 0);
+        try expectIterNotFound(data, "a1.b2.wrong", 0);
+        try expectIterNotFound(data, "a1.b1.c1.wrong", 0);
+        try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 0);
+        try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 0);
+
+        try expectIterNotFound(data, "a1.wong", 1);
+        try expectIterNotFound(data, "a1.b1.wong", 1);
+        try expectIterNotFound(data, "a1.b2.wrong", 1);
+        try expectIterNotFound(data, "a1.b1.c1.wrong", 1);
+        try expectIterNotFound(data, "a1.b1.c1.d1.wrong", 1);
+        try expectIterNotFound(data, "a1.b1.c1.d2.wrong", 1);
+    }
+
+    test "Comptime iter - slice" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
+
+        try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
+
+        try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
+
+        try expectIterNotFound(data, "a_slice", 3);
+    }
+
+    test "Comptime iter - array" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
+
+        try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
+
+        try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
+
+        try expectIterNotFound(data, "a_array", 3);
+    }
+
+    test "Comptime iter - tuple" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
+
+        try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
+
+        try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
+
+        try expectIterNotFound(data, "a_tuple", 3);
+    }
+
+    test "Comptime iter - nested slice" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
+        try expectIterFound(@TypeOf(data.a1.b_slice[0]), data, "a1.b_slice", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c_slice[0]), data, "a1.b1.c_slice", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[0]), data, "a1.b1.c1.d_slice", 0);
+
+        try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
+        try expectIterFound(@TypeOf(data.a1.b_slice[1]), data, "a1.b_slice", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c_slice[1]), data, "a1.b1.c_slice", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[1]), data, "a1.b1.c1.d_slice", 1);
+
+        try expectIterFound(@TypeOf(data.a_slice[2]), data, "a_slice", 2);
+        try expectIterFound(@TypeOf(data.a1.b_slice[2]), data, "a1.b_slice", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c_slice[2]), data, "a1.b1.c_slice", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_slice[2]), data, "a1.b1.c1.d_slice", 2);
+
+        try expectIterNotFound(data, "a_slice", 3);
+        try expectIterNotFound(data, "a1.b_slice", 3);
+        try expectIterNotFound(data, "a1.b1.c_slice", 3);
+        try expectIterNotFound(data, "a1.b1.c1.d_slice", 3);
+    }
+
+    test "Comptime iter - nested array" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
+        try expectIterFound(@TypeOf(data.a1.b_tuple[0]), data, "a1.b_tuple", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c_tuple[0]), data, "a1.b1.c_tuple", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[0]), data, "a1.b1.c1.d_tuple", 0);
+
+        try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
+        try expectIterFound(@TypeOf(data.a1.b_tuple[1]), data, "a1.b_tuple", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c_tuple[1]), data, "a1.b1.c_tuple", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[1]), data, "a1.b1.c1.d_tuple", 1);
+
+        try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
+        try expectIterFound(@TypeOf(data.a1.b_tuple[2]), data, "a1.b_tuple", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c_tuple[2]), data, "a1.b1.c_tuple", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_tuple[2]), data, "a1.b1.c1.d_tuple", 2);
+
+        try expectIterNotFound(data, "a_tuple", 3);
+        try expectIterNotFound(data, "a1.b_tuple", 3);
+        try expectIterNotFound(data, "a1.b1.c_tuple", 3);
+        try expectIterNotFound(data, "a1.b1.c1.d_tuple", 3);
+    }
+
+    test "Comptime iter - nested tuple" {
+        var data = Data{};
+        try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
+        try expectIterFound(@TypeOf(data.a1.b_array[0]), data, "a1.b_array", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c_array[0]), data, "a1.b1.c_array", 0);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[0]), data, "a1.b1.c1.d_array", 0);
+
+        try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
+        try expectIterFound(@TypeOf(data.a1.b_array[1]), data, "a1.b_array", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c_array[1]), data, "a1.b1.c_array", 1);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[1]), data, "a1.b1.c1.d_array", 1);
+
+        try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
+        try expectIterFound(@TypeOf(data.a1.b_array[2]), data, "a1.b_array", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c_array[2]), data, "a1.b1.c_array", 2);
+        try expectIterFound(@TypeOf(data.a1.b1.c1.d_array[2]), data, "a1.b1.c1.d_array", 2);
+
+        try expectIterNotFound(data, "a_array", 3);
+        try expectIterNotFound(data, "a1.b_array", 3);
+        try expectIterNotFound(data, "a1.b1.c_array", 3);
+        try expectIterNotFound(data, "a1.b1.c1.d_array", 3);
+    }
+};
