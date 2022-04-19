@@ -20,24 +20,46 @@ pub const parseFile = template.parseFile;
 pub const render = rendering.render;
 pub const renderPartials = rendering.renderPartials;
 pub const renderPartialsWithOptions = rendering.renderPartialsWithOptions;
+
 pub const allocRender = rendering.allocRender;
 pub const allocRenderPartials = rendering.allocRenderPartials;
 pub const allocRenderPartialsWithOptions = rendering.allocRenderPartialsWithOptions;
+
 pub const allocRenderZ = rendering.allocRenderZ;
 pub const allocRenderPartialsZ = rendering.allocRenderPartialsZ;
 pub const allocRenderPartialsZWithOptions = rendering.allocRenderPartialsZWithOptions;
+
 pub const bufRender = rendering.bufRender;
 pub const bufRenderPartials = rendering.bufRenderPartials;
 pub const bufRenderPartialsWithOptions = rendering.bufRenderPartialsWithOptions;
+
 pub const bufRenderZ = rendering.bufRenderZ;
 pub const bufRenderPartialsZ = rendering.bufRenderPartialsZ;
 pub const bufRenderPartialsZWithOptions = rendering.bufRenderPartialsZWithOptions;
+
 pub const renderText = rendering.renderText;
+pub const renderTextPartials = rendering.renderTextPartials;
+pub const renderTextPartialsWithOptions = rendering.renderTextPartialsWithOptions;
+
 pub const allocRenderText = rendering.allocRenderText;
+pub const allocRenderTextPartials = rendering.allocRenderTextPartials;
+pub const allocRenderTextPartialsWithOptions = rendering.allocRenderTextPartialsWithOptions;
+
 pub const allocRenderTextZ = rendering.allocRenderTextZ;
+pub const allocRenderTextZPartials = rendering.allocRenderTextZPartials;
+pub const allocRenderTextZPartialsWithOptions = rendering.allocRenderTextZPartialsWithOptions;
+
 pub const renderFile = rendering.renderFile;
+pub const renderFilePartials = rendering.renderFilePartials;
+pub const renderFilePartialsWithOptions = rendering.renderFilePartialsWithOptions;
+
 pub const allocRenderFile = rendering.allocRenderFile;
+pub const allocRenderFilePartials = rendering.allocRenderFilePartials;
+pub const allocRenderFilePartialsWithOptions = rendering.allocRenderFilePartialsWithOptions;
+
 pub const allocRenderFileZ = rendering.allocRenderFileZ;
+pub const allocRenderFileZPartials = rendering.allocRenderFileZPartials;
+pub const allocRenderFileZPartialsWithOptions = rendering.allocRenderFileZPartialsWithOptions;
 
 pub const LambdaContext = rendering.LambdaContext;
 
