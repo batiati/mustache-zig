@@ -113,7 +113,7 @@ pub fn Node(comptime options: TemplateOptions) type {
         }
 
         pub fn trimStandAlone(self: *Self) void {
-            if (!options.features.preseve_line_breaks_and_indentation) return;
+            if (comptime !has_trimming) return;
 
             if (self.block_type == .StaticText) {
                 if (self.link.prev) |prev_node| {
@@ -135,7 +135,7 @@ pub fn Node(comptime options: TemplateOptions) type {
         }
 
         pub fn trimLast(self: *Self, last_node: *Self) void {
-            if (!options.features.preseve_line_breaks_and_indentation) return;
+            if (comptime !has_trimming) return;
 
             if (self.block_type == .StaticText) {
                 if (self == last_node) return;
@@ -157,7 +157,7 @@ pub fn Node(comptime options: TemplateOptions) type {
         }
 
         pub fn getIndentation(self: *const Self) ?[]const u8 {
-            return if (options.features.preseve_line_breaks_and_indentation)
+            return if (comptime has_trimming)
                 switch (self.block_type) {
                     .Partial, .Parent => getPreviousNodeIndentation(self.link.prev),
                     else => null,
@@ -167,7 +167,7 @@ pub fn Node(comptime options: TemplateOptions) type {
         }
 
         fn trimPreviousNodesRight(parent_node: ?*Self) bool {
-            if (!options.features.preseve_line_breaks_and_indentation) return false;
+            if (comptime !has_trimming) return false;
 
             if (parent_node) |node| {
                 if (node.block_type == .StaticText) {
@@ -204,7 +204,7 @@ pub fn Node(comptime options: TemplateOptions) type {
         }
 
         fn getPreviousNodeIndentation(parent_node: ?*const Self) ?[]const u8 {
-            if (!options.features.preseve_line_breaks_and_indentation) return null;
+            if (comptime !has_trimming) return null;
 
             if (parent_node) |node| {
                 return switch (node.block_type) {

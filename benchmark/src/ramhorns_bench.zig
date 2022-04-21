@@ -16,20 +16,27 @@ const Mode = enum {
 };
 
 pub fn main() anyerror!void {
+    var file = try std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only });
+    defer file.close();
+
     if (builtin.mode == .Debug) {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         defer _ = gpa.deinit();
-        try simpleTemplate(gpa.allocator(), .Counter);
-        try simpleTemplate(gpa.allocator(), .String);
-    } else {
-        var file = try std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only });
-        defer file.close();
 
-        try simpleTemplate(std.heap.raw_c_allocator, .Counter, std.io.null_writer);
-        try simpleTemplate(std.heap.raw_c_allocator, .String, std.io.null_writer);
-        try simpleTemplate(std.heap.raw_c_allocator, .Writer, file.writer());
-        try partialTemplates(std.heap.raw_c_allocator, .Counter, std.io.null_writer);
-        try partialTemplates(std.heap.raw_c_allocator, .String, std.io.null_writer);
+        const allocator = gpa.allocator();
+        try simpleTemplate(allocator, .Counter, std.io.null_writer);
+        try simpleTemplate(allocator, .String, std.io.null_writer);
+        try simpleTemplate(allocator, .Writer, file.writer());
+        try partialTemplates(allocator, .Counter, std.io.null_writer);
+        try partialTemplates(allocator, .String, std.io.null_writer);
+    } else {
+        const allocator = std.heap.raw_c_allocator;
+
+        try simpleTemplate(allocator, .Counter, std.io.null_writer);
+        try simpleTemplate(allocator, .String, std.io.null_writer);
+        try simpleTemplate(allocator, .Writer, file.writer());
+        try partialTemplates(allocator, .Counter, std.io.null_writer);
+        try partialTemplates(allocator, .String, std.io.null_writer);
     }
 }
 
