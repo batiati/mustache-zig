@@ -105,8 +105,8 @@ pub fn Parser(comptime options: TemplateOptions) type {
             }
         }
 
-        fn dupe(self: *Self, ref_counter: RefCounter, slice: []const u8) Allocator.Error![]const u8 {
-            if (copy_string) {
+        inline fn dupe(self: *Self, ref_counter: RefCounter, slice: []const u8) Allocator.Error![]const u8 {
+            if (comptime copy_string) {
                 return try self.gpa.dupe(u8, slice);
             } else {
                 try self.ref_counter_holder.add(self.gpa, ref_counter);

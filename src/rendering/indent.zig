@@ -6,6 +6,13 @@ const testing = std.testing;
 pub const IndentationQueue = struct {
     const Self = @This();
 
+    pub const Null = struct {
+        pub inline fn isEmpty(self: @This()) bool {
+            _ = self;
+            return true;
+        }
+    };
+
     pub const Node = struct {
         next: ?*@This() = null,
         indentation: []const u8,
@@ -75,6 +82,10 @@ pub const IndentationQueue = struct {
         }
 
         return written_bytes;
+    }
+
+    pub inline fn isEmpty(self: Self) bool {
+        return self.list == null;
     }
 };
 

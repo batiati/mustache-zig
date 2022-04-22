@@ -466,7 +466,7 @@ const struct_tests = struct {
         return person_2;
     }
 
-    const dummy_options = RenderOptions{ .Template = .{} };
+    const dummy_options = RenderOptions{ .Text = .{} };
     const DummyPartialsMap = map.PartialsMap(void, dummy_options);
     const dummy_map = DummyPartialsMap.init({});
 
@@ -493,6 +493,7 @@ const struct_tests = struct {
             .out_writer = .{ .Writer = writer },
             .partials_map = undefined,
             .indentation_queue = undefined,
+            .template_options = {},
         };
 
         switch (try ctx.interpolate(&data_render, path, escape)) {

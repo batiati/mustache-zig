@@ -135,13 +135,18 @@ pub const Lambdas = union(enum) {
     },
 };
 
+pub const ContextMisses = enum {
+    Empty,
+    Error,
+};
+
 pub const RenderTemplateOptions = struct {
 
     ///
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
-    context_misses: enum { Empty, Error } = if (builtin.mode == .Debug) .Error else .Empty,
+    context_misses: ContextMisses = if (builtin.mode == .Debug) .Error else .Empty,
 };
 
 pub const RenderTextOptions = struct {
@@ -150,7 +155,7 @@ pub const RenderTextOptions = struct {
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
-    context_misses: enum { Empty, Error } = if (builtin.mode == .Debug) .Error else .Empty,
+    context_misses: ContextMisses = if (builtin.mode == .Debug) .Error else .Empty,
 
     ///
     /// Those options affect both performance and supported Mustache features.
@@ -164,7 +169,7 @@ pub const RenderFileOptions = struct {
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
-    context_misses: enum { Empty, Error } = if (builtin.mode == .Debug) .Error else .Empty,
+    context_misses: ContextMisses = if (builtin.mode == .Debug) .Error else .Empty,
 
     ///
     /// Define the buffer size for reading the stream
@@ -180,12 +185,4 @@ pub const RenderOptions = union(enum) {
     Template: RenderTemplateOptions,
     Text: RenderTextOptions,
     File: RenderFileOptions,
-
-    pub fn preseveLineBreaksAndIndentation(comptime self: @This()) bool {
-        return switch (self) {
-            .Template => true,
-            .Text => |options| options.features.preseve_line_breaks_and_indentation,
-            .File => |options| options.features.preseve_line_breaks_and_indentation,
-        };
-    }
 };
