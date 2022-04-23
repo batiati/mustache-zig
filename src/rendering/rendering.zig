@@ -34,27 +34,29 @@ const BufError = std.io.FixedBufferStream([]u8).WriteError;
 
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
 
-/// Renders the `Template` with the given `data` to a writer.
+/// Renders the `Template` with the given `data` to a `writer`.
 pub fn render(template: Template, data: anytype, writer: anytype) !void {
     return try renderPartialsWithOptions(template, {}, data, writer, .{});
 }
 
-/// Renders the `Template` with the given `data` to a writer.
+/// Renders the `Template` with the given `data` to a `writer`.
+/// `options` defines the behavior of the render process
 pub fn renderWithOptions(template: Template, data: anytype, writer: anytype, comptime options: mustache.options.RenderTemplateOptions) !void {
     return try renderPartialsWithOptions(template, {}, data, writer, options);
 }
 
-/// Renders the `Template` with the given `data` to a writer.
+/// Renders the `Template` with the given `data` to a `writer`.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 pub fn renderPartials(template: Template, partials: anytype, data: anytype, writer: anytype) !void {
     return try renderPartialsWithOptions(template, partials, data, writer, .{});
 }
 
-/// Renders the `Template` with the given `data` to a writer.
+/// Renders the `Template` with the given `data` to a `writer`.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// `options` defines the behavior of the render process
 pub fn renderPartialsWithOptions(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderTemplateOptions) !void {
     const render_options = RenderOptions{ .Template = options };
-    try RenderHelpers.render(template, partials, data, writer, render_options);
+    try internalRender(template, partials, data, writer, render_options);
 }
 
 /// Renders the `Template` with the given `data` and returns an owned slice with the content.
@@ -64,6 +66,7 @@ pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allo
 }
 
 /// Renders the `Template` with the given `data` and returns an owned slice with the content.
+/// `options` defines the behavior of the render process
 /// Caller must free the memory
 pub fn allocRenderWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![]const u8 {
     return try allocRenderPartialsWithOptions(allocator, template, {}, data, options);
@@ -78,57 +81,66 @@ pub fn allocRenderPartials(allocator: Allocator, template: Template, partials: a
 
 /// Renders the `Template` with the given `data` to a writer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// `options` defines the behavior of the render process
 /// Caller must free the memory
 pub fn allocRenderPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![]const u8 {
     const render_options = RenderOptions{ .Template = options };
-    return try RenderHelpers.allocRender(allocator, template, partials, data, render_options, null);
+    return try internalAllocRender(allocator, template, partials, data, render_options, null);
 }
 
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// Caller must free the memory
 pub fn allocRenderZ(allocator: Allocator, template: Template, data: anytype) Allocator.Error![:0]const u8 {
-    return try allocRenderPartialsZWithOptions(allocator, template, {}, data, .{});
+    return try allocRenderZPartialsWithOptions(allocator, template, {}, data, .{});
 }
 
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
+/// `options` defines the behavior of the render process
 /// Caller must free the memory
 pub fn allocRenderZWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![:0]const u8 {
-    return try allocRenderPartialsZWithOptions(allocator, template, {}, data, options);
+    return try allocRenderZPartialsWithOptions(allocator, template, {}, data, options);
 }
 
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// Caller must free the memory
-pub fn allocRenderPartialsZ(allocator: Allocator, template: Template, partials: anytype, data: anytype) Allocator.Error![:0]const u8 {
-    return try allocRenderPartialsZWithOptions(allocator, template, partials, data, .{});
+pub fn allocRenderZPartials(allocator: Allocator, template: Template, partials: anytype, data: anytype) Allocator.Error![:0]const u8 {
+    return try allocRenderZPartialsWithOptions(allocator, template, partials, data, .{});
 }
 
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// `options` defines the behavior of the render process
 /// Caller must free the memory
-pub fn allocRenderPartialsZWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![:0]const u8 {
+pub fn allocRenderZPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![:0]const u8 {
     const render_options = RenderOptions{ .Template = options };
-    return try RenderHelpers.allocRender(allocator, template, partials, data, render_options, '\x00');
+    return try internalAllocRender(allocator, template, partials, data, render_options, '\x00');
 }
 
 /// Renders the `Template` with the given `data` to a buffer.
+/// Returns a slice pointing to the underlying buffer
 pub fn bufRender(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![]const u8 {
     return try bufRenderPartialsWithOptions(buf, template, {}, data, .{});
 }
 
 /// Renders the `Template` with the given `data` to a buffer.
+/// `options` defines the behavior of the render process
+/// Returns a slice pointing to the underlying buffer
 pub fn bufRenderWithOptions(buf: []u8, template: Template, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![]const u8 {
     return try bufRenderPartialsWithOptions(buf, template, {}, data, options);
 }
 
 /// Renders the `Template` with the given `data` to a buffer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// Returns a slice pointing to the underlying buffer
 pub fn bufRenderPartials(buf: []u8, template: Template, partials: anytype, data: anytype) (Allocator.Error || BufError)![]const u8 {
     return bufRenderPartialsWithOptions(buf, template, partials, data, .{});
 }
 
 /// Renders the `Template` with the given `data` to a buffer.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// `options` defines the behavior of the render process
+/// Returns a slice pointing to the underlying buffer
 pub fn bufRenderPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![]const u8 {
     var fbs = std.io.fixedBufferStream(buf);
     try renderPartialsWithOptions(template, partials, data, fbs.writer(), options);
@@ -136,22 +148,30 @@ pub fn bufRenderPartialsWithOptions(buf: []u8, template: Template, partials: any
 }
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
+/// Returns a slice pointing to the underlying buffer
 pub fn bufRenderZ(buf: []u8, template: Template, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
-    return try bufRenderPartialsZWithOptions(buf, template, {}, data, .{});
+    return try bufRenderZPartialsWithOptions(buf, template, {}, data, .{});
 }
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
+/// `options` defines the behavior of the render process
+/// Returns a slice pointing to the underlying buffer
 pub fn bufRenderZWithOptions(buf: []u8, template: Template, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
-    return try bufRenderPartialsZWithOptions(buf, template, {}, data, options);
+    return try bufRenderZPartialsWithOptions(buf, template, {}, data, options);
 }
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
-pub fn bufRenderPartialsZ(buf: []u8, template: Template, partials: anytype, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
-    return try bufRenderPartialsZWithOptions(buf, template, partials, data, .{});
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// Returns a slice pointing to the underlying buffer
+pub fn bufRenderZPartials(buf: []u8, template: Template, partials: anytype, data: anytype) (Allocator.Error || BufError)![:0]const u8 {
+    return try bufRenderZPartialsWithOptions(buf, template, partials, data, .{});
 }
 
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
-pub fn bufRenderPartialsZWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
+/// `options` defines the behavior of the render process
+/// Returns a slice pointing to the underlying buffer
+pub fn bufRenderZPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
     var ret = try bufRenderPartialsWithOptions(buf, template, partials, data, options);
 
     if (ret.len < buf.len) {
@@ -162,20 +182,29 @@ pub fn bufRenderPartialsZWithOptions(buf: []u8, template: Template, partials: an
     }
 }
 
-/// Parses the `template_text` and renders with the given `data` to a writer
+/// Parses the `template_text` and renders with the given `data` to a `writer`
 pub fn renderText(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
     try renderTextPartialsWithOptions(allocator, template_text, {}, data, writer, .{});
 }
 
-/// Parses the `template_text` and renders with the given `data` to a writer
+/// Parses the `template_text` and renders with the given `data` to a `writer`
+/// `options` defines the behavior of the parser and render process
+pub fn renderTextWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
+    try renderTextPartialsWithOptions(allocator, template_text, {}, data, writer, options);
+}
+
+/// Parses the `template_text` and renders with the given `data` to a `writer`
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
 pub fn renderTextPartials(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, writer: anytype) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
     try renderTextPartialsWithOptions(allocator, template_text, partials, data, writer, .{});
 }
 
-/// Parses the `template_text` and renders with the given `data` to a writer
+/// Parses the `template_text` and renders with the given `data` to a `writer`
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
+/// `options` defines the behavior of the parser and render process
 pub fn renderTextPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
     const render_options = RenderOptions{ .Text = options };
-    try RenderHelpers.collect(allocator, template_text, partials, data, writer, render_options);
+    try internalCollect(allocator, template_text, partials, data, writer, render_options);
 }
 
 /// Parses the `template_text` and renders with the given `data` and returns an owned slice with the content.
@@ -185,16 +214,26 @@ pub fn allocRenderText(allocator: Allocator, template_text: []const u8, data: an
 }
 
 /// Parses the `template_text` and renders with the given `data` and returns an owned slice with the content.
+/// `options` defines the behavior of the parser and render process
+/// Caller must free the memory
+pub fn allocRenderTextWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError)![]const u8 {
+    return try allocRenderTextPartialsWithOptions(allocator, template_text, {}, data, options);
+}
+
+/// Parses the `template_text` and renders with the given `data` and returns an owned slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
 /// Caller must free the memory
 pub fn allocRenderTextPartials(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype) (Allocator.Error || ParseError)![]const u8 {
     return try allocRenderTextPartialsWithOptions(allocator, template_text, partials, data, .{});
 }
 
 /// Parses the `template_text` and renders with the given `data` and returns an owned slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
+/// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
 pub fn allocRenderTextPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError)![]const u8 {
     const render_options = RenderOptions{ .Text = options };
-    return try RenderHelpers.allocCollect(allocator, template_text, partials, data, render_options, null);
+    return try internalAllocCollect(allocator, template_text, partials, data, render_options, null);
 }
 
 /// Parses the `template_text` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
@@ -204,32 +243,51 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
 }
 
 /// Parses the `template_text` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
+/// `options` defines the behavior of the parser and render process
+/// Caller must free the memory
+pub fn allocRenderTextZWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError)![:0]const u8 {
+    return try allocRenderTextZPartialsWithOptions(allocator, template_text, {}, data, options);
+}
+
+/// Parses the `template_text` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
 /// Caller must free the memory
 pub fn allocRenderTextZPartials(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype) (Allocator.Error || ParseError)![:0]const u8 {
     return try allocRenderTextZPartialsWithOptions(allocator, template_text, partials, data, .{});
 }
 
 /// Parses the `template_text` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
+/// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
 pub fn allocRenderTextZPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError)![:0]const u8 {
     const render_options = RenderOptions{ .Text = options };
-    return try RenderHelpers.allocCollect(allocator, template_text, partials, data, render_options, '\x00');
+    return try internalAllocCollect(allocator, template_text, partials, data, render_options, '\x00');
 }
 
-/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a `writer`
 pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
     try renderFilePartialsWithOptions(allocator, template_absolute_path, {}, data, writer, .{});
 }
 
-/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a `writer`
+/// `options` defines the behavior of the parser and render process
+pub fn renderFileWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
+    try renderFilePartialsWithOptions(allocator, template_absolute_path, {}, data, writer, options);
+}
+
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a `writer`
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
 pub fn renderFilePartials(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, writer: anytype) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
     try renderFilePartialsWithOptions(allocator, template_absolute_path, partials, data, writer, .{});
 }
 
-/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a writer
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a `writer`
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
+/// `options` defines the behavior of the parser and render process
 pub fn renderFilePartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
     const render_options = RenderOptions{ .File = options };
-    try RenderHelpers.collect(allocator, template_absolute_path, partials, data, writer, render_options);
+    try internalCollect(allocator, template_absolute_path, partials, data, writer, render_options);
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
@@ -239,16 +297,26 @@ pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8,
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// `options` defines the behavior of the parser and render process
+/// Caller must free the memory
+pub fn allocRenderFileWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
+    return try allocRenderFilePartialsWithOptions(allocator, template_absolute_path, {}, data, options);
+}
+
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
 /// Caller must free the memory
 pub fn allocRenderFilePartials(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
     return try allocRenderFilePartialsWithOptions(allocator, template_absolute_path, partials, data, .{});
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
+/// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
 pub fn allocRenderFilePartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
     const render_options = RenderOptions{ .File = options };
-    return try RenderHelpers.allocCollect(allocator, template_absolute_path, partials, data, render_options, null);
+    return try internalAllocCollect(allocator, template_absolute_path, partials, data, render_options, null);
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
@@ -258,75 +326,82 @@ pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// `options` defines the behavior of the parser and render process
+/// Caller must free the memory
+pub fn allocRenderFileZWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
+    return try allocRenderFileZPartialsWithOptions(allocator, template_absolute_path, {}, data, options);
+}
+
+/// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
 /// Caller must free the memory
 pub fn allocRenderFileZPartials(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
     return try allocRenderFileZPartialsWithOptions(allocator, template_absolute_path, partials, data, .{});
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
+/// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
+/// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
 pub fn allocRenderFileZPartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError)![:0]const u8 {
     const render_options = RenderOptions{ .File = options };
-    return try RenderHelpers.allocCollect(allocator, template_absolute_path, partials, data, render_options, '\x00');
+    return try internalAllocCollect(allocator, template_absolute_path, partials, data, render_options, '\x00');
 }
 
-const RenderHelpers = struct {
-    pub inline fn render(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
-        comptime assert(options == .Template);
+inline fn internalRender(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
+    comptime assert(options == .Template);
 
-        const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
-        const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
+    const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
+    const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
 
-        try Engine.render(template, data, writer, PartialsMap.init(partials));
-    }
+    try Engine.render(template, data, writer, PartialsMap.init(partials));
+}
 
-    pub inline fn allocRender(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
-        comptime assert(options == .Template);
+inline fn internalAllocRender(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
+    comptime assert(options == .Template);
 
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
 
-        const Writer = @TypeOf(std.io.null_writer);
-        const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
-        const Engine = RenderEngine(Writer, PartialsMap, options);
+    const Writer = @TypeOf(std.io.null_writer);
+    const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
+    const Engine = RenderEngine(Writer, PartialsMap, options);
 
-        try Engine.bufRender(&list, template, data, PartialsMap.init(partials));
+    try Engine.bufRender(&list, template, data, PartialsMap.init(partials));
 
-        return if (comptime sentinel) |z|
-            list.toOwnedSliceSentinel(z)
-        else
-            list.toOwnedSlice();
-    }
+    return if (comptime sentinel) |z|
+        list.toOwnedSliceSentinel(z)
+    else
+        list.toOwnedSlice();
+}
 
-    pub inline fn collect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
-        comptime assert(options != .Template);
+inline fn internalCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
+    comptime assert(options != .Template);
 
-        const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
-        const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
+    const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
+    const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
 
-        try Engine.collect(allocator, template, data, writer, PartialsMap.init(allocator, partials));
-    }
+    try Engine.collect(allocator, template, data, writer, PartialsMap.init(allocator, partials));
+}
 
-    pub inline fn allocCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
-        comptime assert(options != .Template);
+inline fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
+    comptime assert(options != .Template);
 
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+    var list = std.ArrayList(u8).init(allocator);
+    defer list.deinit();
 
-        const Writer = @TypeOf(std.io.null_writer);
-        const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
-        const Engine = RenderEngine(Writer, PartialsMap, options);
+    const Writer = @TypeOf(std.io.null_writer);
+    const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
+    const Engine = RenderEngine(Writer, PartialsMap, options);
 
-        try Engine.bufCollect(allocator, &list, template, data, PartialsMap.init(allocator, partials));
+    try Engine.bufCollect(allocator, &list, template, data, PartialsMap.init(allocator, partials));
 
-        return if (comptime sentinel) |z|
-            list.toOwnedSliceSentinel(z)
-        else
-            list.toOwnedSlice();
-    }
-};
+    return if (comptime sentinel) |z|
+        list.toOwnedSliceSentinel(z)
+    else
+        list.toOwnedSlice();
+}
 
-///
 /// Group functions and structs that are denpendent of Writer and RenderOptions
 pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     return struct {
@@ -336,16 +411,13 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
         pub const Invoker = invoker.Invoker(Writer, PartialsMap, options);
 
-        ///
         /// Provides the ability to choose between two writers
         /// while keeping the static dispatch interface.
         pub const OutWriter = union(enum) {
 
-            ///
             /// Render directly to the underlying stream
             Writer: Writer,
 
-            ///
             /// Render to a intermediate buffer
             /// for processing lambda expansions
             Buffer: *std.ArrayList(u8),
@@ -3152,30 +3224,110 @@ const tests = struct {
             var template = try expectParseTemplate("{{hello}}world");
             defer template.deinit(testing.allocator);
 
-            var couting_writer = std.io.countingWriter(std.io.null_writer);
-            try mustache.render(template, .{ .hello = "hello " }, couting_writer.writer());
+            const options = RenderTemplateOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
 
-            try testing.expect(couting_writer.bytes_written == "hello world".len);
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.render(template, data, couting_writer.writer());
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
+
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderPartials(template, partials, data, couting_writer.writer());
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
+
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderWithOptions(template, data, couting_writer.writer(), options);
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
+
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderPartialsWithOptions(template, partials, data, couting_writer.writer(), options);
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
         }
 
         test "allocRender API" {
             var template = try expectParseTemplate("{{hello}}world");
             defer template.deinit(testing.allocator);
 
-            var ret = try mustache.allocRender(testing.allocator, template, .{ .hello = "hello " });
-            defer testing.allocator.free(ret);
+            const options = RenderTemplateOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
 
-            try testing.expectEqualStrings(ret, "hello world");
+            {
+                var ret = try mustache.allocRender(testing.allocator, template, data);
+                defer testing.allocator.free(ret);
+
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderPartials(testing.allocator, template, partials, data);
+                defer testing.allocator.free(ret);
+
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderWithOptions(testing.allocator, template, data, options);
+                defer testing.allocator.free(ret);
+
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderPartialsWithOptions(testing.allocator, template, partials, data, options);
+                defer testing.allocator.free(ret);
+
+                try testing.expectEqualStrings(ret, expected);
+            }
         }
 
         test "allocRenderZ API" {
             var template = try expectParseTemplate("{{hello}}world");
             defer template.deinit(testing.allocator);
 
-            var ret = try mustache.allocRenderZ(testing.allocator, template, .{ .hello = "hello " });
-            defer testing.allocator.free(ret);
+            const options = RenderTemplateOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
 
-            try testing.expectEqualStrings(ret, "hello world");
+            {
+                var ret = try mustache.allocRenderZ(testing.allocator, template, data);
+                defer testing.allocator.free(ret);
+
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderZPartials(testing.allocator, template, partials, data);
+                defer testing.allocator.free(ret);
+
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderZWithOptions(testing.allocator, template, data, options);
+                defer testing.allocator.free(ret);
+
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderZPartialsWithOptions(testing.allocator, template, partials, data, options);
+                defer testing.allocator.free(ret);
+
+                try testing.expectEqualStrings(ret, expected);
+            }
         }
 
         test "bufRender API" {
@@ -3183,9 +3335,30 @@ const tests = struct {
             defer template.deinit(testing.allocator);
 
             var buf: [11]u8 = undefined;
-            var ret = try mustache.bufRender(&buf, template, .{ .hello = "hello " });
+            const options = RenderTemplateOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
 
-            try testing.expectEqualStrings(ret, "hello world");
+            {
+                var ret = try mustache.bufRender(&buf, template, data);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.bufRenderPartials(&buf, template, partials, data);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.bufRenderWithOptions(&buf, template, data, options);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.bufRenderPartialsWithOptions(&buf, template, partials, data, options);
+                try testing.expectEqualStrings(ret, expected);
+            }
         }
 
         test "bufRenderZ API" {
@@ -3193,9 +3366,30 @@ const tests = struct {
             defer template.deinit(testing.allocator);
 
             var buf: [12]u8 = undefined;
-            var ret = try mustache.bufRenderZ(&buf, template, .{ .hello = "hello " });
+            const options = RenderTemplateOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
 
-            try testing.expectEqualStrings(ret, "hello world");
+            {
+                var ret = try mustache.bufRenderZ(&buf, template, data);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.bufRenderZPartials(&buf, template, partials, data);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.bufRenderZWithOptions(&buf, template, data, options);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.bufRenderZPartialsWithOptions(&buf, template, partials, data, options);
+                try testing.expectEqualStrings(ret, expected);
+            }
         }
 
         test "bufRender error API" {
@@ -3203,85 +3397,301 @@ const tests = struct {
             defer template.deinit(testing.allocator);
 
             var buf: [5]u8 = undefined;
-            _ = mustache.bufRender(&buf, template, .{ .hello = "hello " }) catch |err| {
-                try testing.expect(err == error.NoSpaceLeft);
-                return;
-            };
+            const options = RenderTemplateOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
 
-            try testing.expect(false);
+            blk: {
+                _ = mustache.bufRender(&buf, template, data) catch |err| {
+                    try testing.expect(err == error.NoSpaceLeft);
+                    break :blk;
+                };
+
+                try testing.expect(false);
+            }
+
+            blk: {
+                _ = mustache.bufRenderPartials(&buf, template, partials, data) catch |err| {
+                    try testing.expect(err == error.NoSpaceLeft);
+                    break :blk;
+                };
+
+                try testing.expect(false);
+            }
+
+            blk: {
+                _ = mustache.bufRenderWithOptions(&buf, template, data, options) catch |err| {
+                    try testing.expect(err == error.NoSpaceLeft);
+                    break :blk;
+                };
+
+                try testing.expect(false);
+            }
+
+            blk: {
+                _ = mustache.bufRenderPartialsWithOptions(&buf, template, partials, data, options) catch |err| {
+                    try testing.expect(err == error.NoSpaceLeft);
+                    break :blk;
+                };
+
+                try testing.expect(false);
+            }
         }
 
         test "bufRenderZ error API" {
             var template = try expectParseTemplate("{{hello}}world");
             defer template.deinit(testing.allocator);
 
-            var buf: [11]u8 = undefined;
-            _ = mustache.bufRenderZ(&buf, template, .{ .hello = "hello " }) catch |err| {
-                try testing.expect(err == error.NoSpaceLeft);
-                return;
-            };
+            var buf: [5]u8 = undefined;
+            const options = RenderTemplateOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
 
-            try testing.expect(false);
+            blk: {
+                _ = mustache.bufRenderZ(&buf, template, data) catch |err| {
+                    try testing.expect(err == error.NoSpaceLeft);
+                    break :blk;
+                };
+
+                try testing.expect(false);
+            }
+
+            blk: {
+                _ = mustache.bufRenderZPartials(&buf, template, partials, data) catch |err| {
+                    try testing.expect(err == error.NoSpaceLeft);
+                    break :blk;
+                };
+
+                try testing.expect(false);
+            }
+
+            blk: {
+                _ = mustache.bufRenderZWithOptions(&buf, template, data, options) catch |err| {
+                    try testing.expect(err == error.NoSpaceLeft);
+                    break :blk;
+                };
+
+                try testing.expect(false);
+            }
+
+            blk: {
+                _ = mustache.bufRenderZPartialsWithOptions(&buf, template, partials, data, options) catch |err| {
+                    try testing.expect(err == error.NoSpaceLeft);
+                    break :blk;
+                };
+
+                try testing.expect(false);
+            }
         }
 
         test "renderText API" {
-            var couting_writer = std.io.countingWriter(std.io.null_writer);
-            try mustache.renderText(testing.allocator, "{{hello}}world", .{ .hello = "hello " }, couting_writer.writer());
+            const template_text = "{{hello}}world";
+            const options = RenderTextOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
 
-            try testing.expect(couting_writer.bytes_written == "hello world".len);
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderText(testing.allocator, template_text, data, couting_writer.writer());
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
+
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderTextPartials(testing.allocator, template_text, partials, data, couting_writer.writer());
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
+
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderTextWithOptions(testing.allocator, template_text, data, couting_writer.writer(), options);
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
+
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderTextPartialsWithOptions(testing.allocator, template_text, partials, data, couting_writer.writer(), options);
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
         }
 
         test "allocRenderText API" {
-            var ret = try mustache.allocRenderText(testing.allocator, "{{hello}}world", .{ .hello = "hello " });
-            defer testing.allocator.free(ret);
+            const template_text = "{{hello}}world";
+            const options = RenderTextOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
 
-            try testing.expectEqualStrings(ret, "hello world");
+            {
+                var ret = try mustache.allocRenderText(testing.allocator, template_text, data);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderTextPartials(testing.allocator, template_text, partials, data);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderTextWithOptions(testing.allocator, template_text, data, options);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderTextPartialsWithOptions(testing.allocator, template_text, partials, data, options);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
         }
 
         test "allocRenderTextZ API" {
-            var ret = try mustache.allocRenderTextZ(testing.allocator, "{{hello}}world", .{ .hello = "hello " });
-            defer testing.allocator.free(ret);
+            const template_text = "{{hello}}world";
+            const options = RenderTextOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
 
-            try testing.expectEqualStrings(ret, "hello world");
+            {
+                var ret = try mustache.allocRenderTextZ(testing.allocator, template_text, data);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderTextZPartials(testing.allocator, template_text, partials, data);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderTextZWithOptions(testing.allocator, template_text, data, options);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderTextZPartialsWithOptions(testing.allocator, template_text, partials, data, options);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
         }
 
         test "renderFile API" {
             var tmp = testing.tmpDir(.{});
             defer tmp.cleanup();
 
-            var absolute_path = try getTemplateFile(tmp.dir, "renderFile.mustache", "{{hello}}world");
+            const template_text = "{{hello}}world";
+            const options = RenderFileOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
+
+            var absolute_path = try getTemplateFile(tmp.dir, "renderFile.mustache", template_text);
             defer testing.allocator.free(absolute_path);
 
-            var couting_writer = std.io.countingWriter(std.io.null_writer);
-            try mustache.renderFile(testing.allocator, absolute_path, .{ .hello = "hello " }, couting_writer.writer());
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderFile(testing.allocator, absolute_path, data, couting_writer.writer());
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
 
-            try testing.expect(couting_writer.bytes_written == "hello world".len);
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderFilePartials(testing.allocator, absolute_path, partials, data, couting_writer.writer());
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
+
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderFileWithOptions(testing.allocator, absolute_path, data, couting_writer.writer(), options);
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
+
+            {
+                var couting_writer = std.io.countingWriter(std.io.null_writer);
+                try mustache.renderFilePartialsWithOptions(testing.allocator, absolute_path, partials, data, couting_writer.writer(), options);
+                try testing.expect(couting_writer.bytes_written == expected.len);
+            }
         }
 
         test "allocRenderFile API" {
             var tmp = testing.tmpDir(.{});
             defer tmp.cleanup();
 
-            var absolute_path = try getTemplateFile(tmp.dir, "allocRenderFile.mustache", "{{hello}}world");
+            const template_text = "{{hello}}world";
+            const options = RenderFileOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
+
+            var absolute_path = try getTemplateFile(tmp.dir, "allocRenderFile.mustache", template_text);
             defer testing.allocator.free(absolute_path);
 
-            var ret = try mustache.allocRenderFile(testing.allocator, absolute_path, .{ .hello = "hello " });
-            defer testing.allocator.free(ret);
+            {
+                var ret = try mustache.allocRenderFile(testing.allocator, absolute_path, data);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
 
-            try testing.expectEqualStrings(ret, "hello world");
+            {
+                var ret = try mustache.allocRenderFilePartials(testing.allocator, absolute_path, partials, data);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderFileWithOptions(testing.allocator, absolute_path, data, options);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderFilePartialsWithOptions(testing.allocator, absolute_path, partials, data, options);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
         }
 
         test "allocRenderFileZ API" {
             var tmp = testing.tmpDir(.{});
             defer tmp.cleanup();
 
-            var absolute_path = try getTemplateFile(tmp.dir, "allocRenderFileZ.mustache", "{{hello}}world");
+            const template_text = "{{hello}}world";
+            const options = RenderFileOptions{};
+            const data = .{ .hello = "hello " };
+            const partials = .{};
+            const expected = "hello world";
+
+            var absolute_path = try getTemplateFile(tmp.dir, "allocRenderFile.mustache", template_text);
             defer testing.allocator.free(absolute_path);
 
-            var ret = try mustache.allocRenderFileZ(testing.allocator, absolute_path, .{ .hello = "hello " });
-            defer testing.allocator.free(ret);
+            {
+                var ret = try mustache.allocRenderFileZ(testing.allocator, absolute_path, data);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
 
-            try testing.expectEqualStrings(ret, "hello world");
+            {
+                var ret = try mustache.allocRenderFileZPartials(testing.allocator, absolute_path, partials, data);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderFileZWithOptions(testing.allocator, absolute_path, data, options);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
+
+            {
+                var ret = try mustache.allocRenderFileZPartialsWithOptions(testing.allocator, absolute_path, partials, data, options);
+                defer testing.allocator.free(ret);
+                try testing.expectEqualStrings(ret, expected);
+            }
         }
     };
 

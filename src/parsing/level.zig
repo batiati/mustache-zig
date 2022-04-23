@@ -45,7 +45,6 @@ pub fn Level(comptime options: TemplateOptions) type {
                 }
             }
 
-            ///
             /// Return true if the last node could be removed (only when there are at least two nodes)
             pub fn removeLast(self: *@This()) bool {
                 const lastButOne = struct {
@@ -68,7 +67,6 @@ pub fn Level(comptime options: TemplateOptions) type {
                 return false;
             }
 
-            ///
             /// Clear the list returning the head node
             pub fn finish(self: *@This()) ?*Node {
                 if (self.items) |items| {
@@ -269,4 +267,8 @@ test {
     // Tests for both source modes
     _ = Level(.{ .source = .{ .String = .{} }, .output = .Parse });
     _ = Level(.{ .source = .{ .Stream = .{} }, .output = .Parse });
+
+    // Tests for both output modes
+    _ = Level(.{ .source = .{ .String = .{} }, .output = .Render });
+    _ = Level(.{ .source = .{ .Stream = .{} }, .output = .Render });
 }

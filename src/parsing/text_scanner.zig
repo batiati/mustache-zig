@@ -1,4 +1,3 @@
-///
 /// Seeks a string for a events such as '{{', '}}' or a EOF
 /// It is the first stage of the parsing process, the TextScanner produces TextBlocks to be parsed as mustache elements.
 const std = @import("std");
@@ -69,7 +68,6 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
         delimiters: Delimiters = undefined,
         delimiter_max_size: u32 = 0,
 
-        ///
         /// Should be the template content if source == .String
         /// or the absolute path if source == .File
         pub fn init(allocator: Allocator, template: []const u8) if (options.source == .String) Allocator.Error!Self else FileReader(options).Error!Self {
@@ -162,7 +160,6 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
             }
         }
 
-        ///
         /// Reads until the next delimiter mark or EOF
         pub fn next(self: *Self, allocator: Allocator) !?TextBlock {
             switch (self.state) {

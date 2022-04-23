@@ -138,7 +138,7 @@ const NoOpRefCounterHolder = struct {
     const Self = @This();
 
     pub const Iterator = struct {
-        pub fn next(self: *Iterator) ?NoOpRefCounter {
+        pub inline fn next(self: *Iterator) ?NoOpRefCounter {
             _ = self;
             return null;
         }

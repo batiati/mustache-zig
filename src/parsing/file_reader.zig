@@ -88,7 +88,7 @@ test "StreamReader.Slices" {
     const allocator = testing.allocator;
 
     // Test the StreamReader slicing mechanism
-    // In a real use case, the reade_buffer_len is much larger than the amount needed to produce a token
+    // In a real use case, the read_buffer_len is much larger than the amount needed to produce a token
     // So we can parse many tokens on a single read, and read a new slice containing only the lasts unparsed bytes
     //
     // Just 5 chars in our test

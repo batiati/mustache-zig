@@ -26,20 +26,16 @@ pub fn Node(comptime options: TemplateOptions) type {
         text_block: TextBlock,
         inner_text: if (allow_lambdas) ?RefCountedSlice else void = if (allow_lambdas) null else {},
 
-        ///
         /// Pointers used to navigate during the parse process
         link: struct {
 
-            ///
             /// Previous node in the same order they appear on the template text
             /// It's used for calculating trimming, indentation and stand alone tags
             prev: if (has_trimming) ?*Self else void = if (has_trimming) null else {},
 
-            ///
             /// Next node on the same hierarchy
             next_sibling: ?*Self = null,
 
-            ///
             /// First child node
             child: ?*Self = null,
         } = .{},
@@ -90,7 +86,6 @@ pub fn Node(comptime options: TemplateOptions) type {
             };
         }
 
-        ///
         /// A node holds a RefCounter to the underlying text buffer
         /// This function unref a list of nodes and free the buffer if no other Node references it
         pub fn unRefMany(allocator: Allocator, iterator: *Iterator) void {
@@ -100,7 +95,6 @@ pub fn Node(comptime options: TemplateOptions) type {
             }
         }
 
-        ///
         /// A node holds a RefCounter to the underlying text buffer
         /// This functions unref the counter and free the buffer if no other Node references it
         pub fn unRef(self: *Self, allocator: Allocator) void {

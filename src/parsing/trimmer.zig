@@ -1,4 +1,3 @@
-///
 /// Implements mustache's trim logic
 /// Line breaks and whitespace standing between "stand-alone" tags must be trimmed
 ///

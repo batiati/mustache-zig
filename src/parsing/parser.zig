@@ -375,7 +375,6 @@ pub fn Parser(comptime options: TemplateOptions) type {
             return node;
         }
 
-        ///
         /// Matches the BlockType produced so far
         fn matchBlockType(self: *Self, text_block: *TextBlock) !?BlockType {
             switch (text_block.event) {

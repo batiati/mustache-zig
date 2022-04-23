@@ -24,7 +24,6 @@ const map = @import("partials_map.zig");
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
 
-        ///
         /// The path could no be found on the current context
         /// This result indicates that the path should be resolved against the parent context
         /// For example:
@@ -32,7 +31,6 @@ pub fn PathResolution(comptime Payload: type) type {
         /// path = "address"
         NotFoundInContext,
 
-        ///
         /// Parts of the path could not be found on the current context.
         /// This result indicates that the path is broken and should NOT be resolved against the parent context
         /// For example:
@@ -40,7 +38,6 @@ pub fn PathResolution(comptime Payload: type) type {
         /// path = "address.country"
         ChainBroken,
 
-        ///
         /// The path could be resolved against the current context, but the iterator was fully consumed
         /// This result indicates that the path is valid, but not to be rendered and should NOT be resolved against the parent context
         /// For example:
@@ -48,12 +45,10 @@ pub fn PathResolution(comptime Payload: type) type {
         /// path = "visible"
         IteratorConsumed,
 
-        ///
         /// The lambda could be resolved against the current context,
         /// The payload is the result returned by "action_fn"
         Lambda: Payload,
 
-        ///
         /// The field could be resolved against the current context
         /// The payload is the result returned by "action_fn"
         Field: Payload,

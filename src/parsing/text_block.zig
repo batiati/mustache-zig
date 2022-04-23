@@ -1,4 +1,3 @@
-///
 /// TextBlock is some slice of string containing information about how it appears on the template source.
 /// Each TextBlock is produced by the TextScanner, it is the first stage of the parsing process,
 const std = @import("std");
@@ -25,38 +24,30 @@ pub fn TextBlock(comptime options: TemplateOptions) type {
     return struct {
         const Self = @This();
 
-        ///
         /// The event that generated this TextBlock,
         /// It can be a text mark such {{ or }}, or a EOF
         event: Event,
 
-        ///
         /// The tail slice from the last event until now
         tail: ?[]const u8,
 
-        ///
         /// A ref counter for the buffer that holds this strings
         ref_counter: RefCounter,
 
-        ///
         /// The line on the template source
         /// Used mostly for error messages
         lin: u32,
 
-        ///
         /// The column on the template source
         /// Used mostly for error messages
         col: u32,
 
-        ///
         /// Trimming rules for the left side of the slice
         left_trimming: TrimmingIndex = .PreserveWhitespaces,
 
-        ///
         /// Trimming rules for the right side of the slice
         right_trimming: TrimmingIndex = .PreserveWhitespaces,
 
-        ///
         /// Indentation presented on this text block
         /// All indentation must be propagated to the child elements
         indentation: ?[]const u8 = null,
@@ -65,7 +56,6 @@ pub fn TextBlock(comptime options: TemplateOptions) type {
             self.ref_counter.free(allocator);
         }
 
-        ///
         /// Matches the BlockType
         /// Can move 1 position ahead on the slice if this block contains a staring symbol as such ! # ^ & $ > < = /
         pub fn readBlockType(self: *Self) ?BlockType {
@@ -92,7 +82,6 @@ pub fn TextBlock(comptime options: TemplateOptions) type {
             return null;
         }
 
-        ///
         /// Processes the trimming rules for the right side of the slice
         pub fn trimRight(self: *Self) void {
             switch (self.right_trimming) {
@@ -117,7 +106,6 @@ pub fn TextBlock(comptime options: TemplateOptions) type {
             }
         }
 
-        ///
         /// Processes the trimming rules for the left side of the slice
         pub fn trimLeft(self: *Self) void {
             switch (self.left_trimming) {

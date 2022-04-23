@@ -49,7 +49,6 @@ pub const Element = union(Element.Type) {
         /// Static text
         StaticText,
 
-        ///
         ///  Interpolation tags are used to integrate dynamic content into the template.
         ///
         ///  The tag's content MUST be a non-whitespace character sequence NOT containing
@@ -84,7 +83,6 @@ pub const Element = union(Element.Type) {
         Interpolation,
         UnescapedInterpolation,
 
-        ///
         ///  Section tags and End Section tags are used in combination to wrap a section
         ///  of the template for iteration
         ///
@@ -129,7 +127,6 @@ pub const Element = union(Element.Type) {
         Section,
         InvertedSection,
 
-        ///
         /// Partial tags are used to expand an external template into the current
         /// template.
         ///
@@ -146,7 +143,6 @@ pub const Element = union(Element.Type) {
         /// indentation, and prepended to each line of the partial before rendering.
         Partial,
 
-        ///
         ///  Like partials, Parent tags are used to expand an external template into the
         ///  current template. Unlike partials, Parent tags may contain optional
         ///  arguments delimited by Block tags. For this reason, Parent tags may also be
@@ -167,7 +163,6 @@ pub const Element = union(Element.Type) {
         ///  indentation, and prepended to each line of the Parent before rendering.
         Parent,
 
-        ///
         /// The Block tags' content MUST be a non-whitespace character sequence NOT
         /// containing the current closing delimiter.
         ///

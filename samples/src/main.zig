@@ -41,7 +41,6 @@ pub fn main() anyerror!void {
     try renderFromFile();
 }
 
-///
 /// Cache a template to render many times
 pub fn renderFromCachedTemplate() anyerror!void {
     var gpa = GeneralPurposeAllocator(.{}){};
@@ -66,7 +65,6 @@ pub fn renderFromCachedTemplate() anyerror!void {
     }
 }
 
-///
 /// Render a template from a string
 pub fn renderFromString() anyerror!void {
     var gpa = GeneralPurposeAllocator(.{}){};
@@ -79,7 +77,6 @@ pub fn renderFromString() anyerror!void {
     try mustache.renderText(allocator, template_text, ctx, out.writer());
 }
 
-///
 /// Render a template from a file path
 pub fn renderFromFile() anyerror!void {
 
