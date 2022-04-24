@@ -423,7 +423,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
     };
 }
 
-const StreamedParser = Parser(.{ .source = .{ .String = .{} }, .output = .Parse });
+const StreamedParser = Parser(.{ .source = .{ .String = .{} }, .output = .Render });
 
 test "Basic parse" {
     const template_text =

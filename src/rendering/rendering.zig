@@ -434,7 +434,21 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             template_options: if (options == .Template) *const TemplateOptions else void,
 
             pub fn render(self: *Self, elements: []const Element) !void {
+                switch (self.out_writer) {
+                    .Buffer => |list| {
+
+                        // Add extra 25% extra capacity for HTML escapes, indentation, etc
+                        const capacity_hint = self.levelCapacityHint(elements);
+                        try list.ensureUnusedCapacity(capacity_hint + (capacity_hint / 4));
+                    },
+                    else => {},
+                }
+
                 try self.renderLevel(elements);
+            }
+
+            pub fn count(self: *Self, elements: []const Element) usize {
+                return self.countLevel(elements);
             }
 
             pub fn collect(self: *Self, allocator: Allocator, template: []const u8) !void {
@@ -791,6 +805,113 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     try writer.writeAll(value);
                     return value.len;
                 }
+            }
+
+            fn levelCapacityHint(
+                self: *Self,
+                children: ?[]const Element,
+            ) usize {
+                var size: usize = 0;
+
+                if (children) |elements| {
+                    for (elements) |element| {
+                        switch (element) {
+                            .StaticText => |content| size += content.len,
+                            .Interpolation, .UnescapedInterpolation => |path| size += self.pathCapacityHint(path),
+                            .Section => |section| {
+                                if (self.getIterator(section.key)) |*iterator| {
+                                    while (iterator.next()) |item_ctx| {
+                                        var current_level = self.stack;
+                                        self.stack = &ContextStack{
+                                            .parent = current_level,
+                                            .ctx = item_ctx,
+                                        };
+
+                                        defer self.stack = current_level;
+                                        size += self.levelCapacityHint(section.content);
+                                    }
+                                }
+                            },
+                            .InvertedSection => |section| {
+                                const truthy = if (self.getIterator(section.key)) |iterator| iterator.truthy() else false;
+                                if (!truthy) {
+                                    size += self.levelCapacityHint(section.content);
+                                }
+                            },
+
+                            else => {},
+                        }
+                    }
+                }
+
+                return size;
+            }
+
+            fn pathCapacityHint(
+                self: *Self,
+                path: []const u8,
+            ) usize {
+                var level: ?*const ContextStack = self.stack;
+
+                while (level) |current| : (level = current.parent) {
+                    const path_resolution = current.ctx.capacityHint(self, path);
+
+                    switch (path_resolution) {
+                        .Field => |size| return size,
+
+                        .Lambda, .IteratorConsumed, .ChainBroken => {
+                            // No size can be counted
+                            break;
+                        },
+
+                        .NotFoundInContext => {
+                            // Not rendered, should try against the parent context
+                            continue;
+                        },
+                    }
+                }
+
+                return 0;
+            }
+
+            pub fn valueCapacityHint(
+                self: *DataRender,
+                value: anytype,
+            ) usize {
+                const TValue = @TypeOf(value);
+
+                switch (@typeInfo(TValue)) {
+                    .Bool => return 5,
+                    .Int,
+                    .ComptimeInt,
+                    .Float,
+                    .ComptimeFloat,
+                    => return std.fmt.count("{d}", .{value}),
+                    .Enum => return @tagName(value).len,
+                    .Pointer => |info| switch (info.size) {
+                        .One => return self.valueCapacityHint(value.*),
+                        .Slice => {
+                            if (info.child == u8) {
+                                return value.len;
+                            }
+                        },
+                        .Many => @compileError("[*] pointers not supported"),
+                        .C => @compileError("[*c] pointers not supported"),
+                    },
+                    .Array => |info| {
+                        if (info.child == u8) {
+                            return value.len;
+                        }
+                    },
+                    .Optional => {
+                        if (value) |not_null| {
+                            return self.valueCapacityHint(not_null);
+                        }
+                    },
+                    else => {},
+                }
+
+                return 0;
             }
         };
 

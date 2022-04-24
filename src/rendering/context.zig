@@ -88,6 +88,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
         const VTable = struct {
             get: fn (*const anyopaque, []const u8, ?usize) PathResolution(Self),
+            capacityHint: fn (*const anyopaque, *DataRender, []const u8) PathResolution(usize),
             interpolate: fn (*const anyopaque, *DataRender, []const u8, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
             expandLambda: fn (*const anyopaque, *DataRender, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
@@ -207,6 +208,14 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             return self.vtable.get(&self.ctx, path, null);
         }
 
+        pub inline fn capacityHint(
+            self: Self,
+            data_render: *DataRender,
+            path: []const u8,
+        ) PathResolution(usize) {
+            return self.vtable.capacityHint(&self.ctx, data_render, path);
+        }
+
         pub fn iterator(self: *const Self, path: []const u8) PathResolution(Iterator) {
             const result = self.vtable.get(&self.ctx, path, 0);
 
@@ -256,6 +265,7 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
     return struct {
         const vtable = ContextInterface.VTable{
             .get = get,
+            .capacityHint = capacityHint,
             .interpolate = interpolate,
             .expandLambda = expandLambda,
         };
@@ -284,6 +294,19 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
                 getData(ctx),
                 &path_iterator,
                 index,
+            );
+        }
+
+        fn capacityHint(
+            ctx: *const anyopaque,
+            data_render: *DataRender,
+            path: []const u8,
+        ) PathResolution(usize) {
+            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
+            return Invoker.capacityHint(
+                data_render,
+                getData(ctx),
+                &path_iterator,
             );
         }
 

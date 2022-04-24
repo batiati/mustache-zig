@@ -305,6 +305,20 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             );
         }
 
+        pub fn capacityHint(
+            data_render: *DataRender,
+            data: anytype,
+            path_iterator: *std.mem.TokenIterator(u8),
+        ) PathResolution(usize) {
+            const CapacityHint = PathInvoker(error{}, usize, capacityHintAction);
+            return try CapacityHint.call(
+                data_render,
+                data,
+                path_iterator,
+                null,
+            );
+        }
+
         pub fn expandLambda(
             data_render: *DataRender,
             data: anytype,
@@ -336,6 +350,13 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             var data_render: *DataRender = params.@"0";
             const escape: Escape = params.@"1";
             _ = try data_render.write(value, escape);
+        }
+
+        fn capacityHintAction(
+            params: anytype,
+            value: anytype,
+        ) error{}!usize {
+            return params.valueCapacityHint(value);
         }
 
         fn expandLambdaAction(
