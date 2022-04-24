@@ -105,7 +105,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
             }
         }
 
-        inline fn dupe(self: *Self, ref_counter: RefCounter, slice: []const u8) Allocator.Error![]const u8 {
+        fn dupe(self: *Self, ref_counter: RefCounter, slice: []const u8) Allocator.Error![]const u8 {
             if (comptime copy_string) {
                 return try self.gpa.dupe(u8, slice);
             } else {
@@ -423,7 +423,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
     };
 }
 
-const StreamedParser = Parser(.{ .source = .{ .String = .{} }, .output = .Render });
+const StreamedParser = Parser(.{ .source = .{ .String = .{} }, .output = .Parse });
 
 test "Basic parse" {
     const template_text =

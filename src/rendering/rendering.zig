@@ -348,7 +348,7 @@ pub fn allocRenderFileZPartialsWithOptions(allocator: Allocator, template_absolu
     return try internalAllocCollect(allocator, template_absolute_path, partials, data, render_options, '\x00');
 }
 
-inline fn internalRender(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
+fn internalRender(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
     comptime assert(options == .Template);
 
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
@@ -357,7 +357,7 @@ inline fn internalRender(template: Template, partials: anytype, data: anytype, w
     try Engine.render(template, data, writer, PartialsMap.init(partials));
 }
 
-inline fn internalAllocRender(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
+fn internalAllocRender(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
     comptime assert(options == .Template);
 
     var list = std.ArrayList(u8).init(allocator);
@@ -375,7 +375,7 @@ inline fn internalAllocRender(allocator: Allocator, template: Template, partials
         list.toOwnedSlice();
 }
 
-inline fn internalCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
+fn internalCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
     comptime assert(options != .Template);
 
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
@@ -384,7 +384,7 @@ inline fn internalCollect(allocator: Allocator, template: []const u8, partials: 
     try Engine.collect(allocator, template, data, writer, PartialsMap.init(allocator, partials));
 }
 
-inline fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
+fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
     comptime assert(options != .Template);
 
     var list = std.ArrayList(u8).init(allocator);
@@ -662,7 +662,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 };
             }
 
-            inline fn recursiveWrite(
+            fn recursiveWrite(
                 self: *DataRender,
                 writer: anytype,
                 value: anytype,
