@@ -103,6 +103,11 @@ pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anyty
     try partial_templates.put("head.html", head_template);
     try partial_templates.put("footer.html", footer_template);
 
+    const partial_templates_text = .{
+        .{ "head.html", head_partial_text },
+        .{ "footer.html", footer_partial_text },
+    };
+
     var data = .{
         .title = "Hello, Mustache!",
         .body = "This is a really simple test of the rendering!",
@@ -111,6 +116,7 @@ pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anyty
     std.debug.print("Mode {s}\n", .{@tagName(mode)});
     std.debug.print("----------------------------------\n", .{});
     _ = try repeat("Mustache pre-parsed partials", preParsedPartials, .{ allocator, mode, template, partial_templates, data, writer }, null);
+    _ = try repeat("Mustache not parsed partials", notParsedPartials, .{ allocator, mode, template_text, partial_templates_text, data, writer }, null);
     std.debug.print("\n\n", .{});
 }
 
@@ -197,6 +203,21 @@ fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: 
         },
         .String => {
             const ret = try mustache.allocRenderTextPartialsWithOptions(allocator, template_text, {}, data, .{ .features = features });
+            defer allocator.free(ret);
+            return ret.len;
+        },
+    }
+}
+
+fn notParsedPartials(allocator: Allocator, mode: Mode, template_text: []const u8, partial_templates: anytype, data: anytype, writer: anytype) !usize {
+    switch (mode) {
+        .Counter, .Writer => {
+            var counter = std.io.countingWriter(writer);
+            try mustache.renderTextPartialsWithOptions(allocator, template_text, partial_templates, data, counter.writer(), .{ .features = features });
+            return counter.bytes_written;
+        },
+        .String => {
+            const ret = try mustache.allocRenderTextPartialsWithOptions(allocator, template_text, partial_templates, data, .{ .features = features });
             defer allocator.free(ret);
             return ret.len;
         },

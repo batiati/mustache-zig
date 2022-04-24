@@ -1113,11 +1113,6 @@ pub const Fields = struct {
     }
 };
 
-test {
-    _ = Invoker;
-    _ = Fields;
-}
-
 // Check if an error is part of a error set
 // https://github.com/ziglang/zig/issues/2473
 fn isOnErrorSet(comptime Error: type, value: anytype) bool {
@@ -1165,6 +1160,7 @@ test "isOnErrorSet" {
 }
 
 test {
+    _ = Fields;
     _ = tests;
 }
 
