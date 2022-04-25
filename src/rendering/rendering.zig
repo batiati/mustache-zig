@@ -439,16 +439,12 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
                         // Add extra 25% extra capacity for HTML escapes, indentation, etc
                         const capacity_hint = self.levelCapacityHint(elements);
-                        try list.ensureUnusedCapacity(capacity_hint + (capacity_hint / 4));
+                        try list.ensureUnusedCapacity(list.capacity + (capacity_hint + (capacity_hint / 4)));
                     },
                     else => {},
                 }
 
                 try self.renderLevel(elements);
-            }
-
-            pub fn count(self: *Self, elements: []const Element) usize {
-                return self.countLevel(elements);
             }
 
             pub fn collect(self: *Self, allocator: Allocator, template: []const u8) !void {
@@ -504,77 +500,84 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             fn renderLevel(
                 self: *Self,
-                children: ?[]const Element,
+                elements: []const Element,
             ) (Allocator.Error || Writer.Error)!void {
-                if (children) |elements| {
-                    for (elements) |element| {
-                        switch (element) {
-                            .StaticText => |content| _ = try self.write(content, .Unescaped),
-                            .Interpolation => |path| try self.interpolate(path, .Escaped),
-                            .UnescapedInterpolation => |path| try self.interpolate(path, .Unescaped),
-                            .Section => |section| {
-                                if (self.getIterator(section.key)) |*iterator| {
-                                    if (self.lambdasSupported()) {
-                                        if (iterator.lambda()) |lambda_ctx| {
-                                            assert(section.inner_text != null);
-                                            assert(section.delimiters != null);
+                var index: usize = 0;
+                while (index < elements.len) {
+                    const element = elements[index];
+                    index += 1;
 
-                                            const expand_result = try lambda_ctx.expandLambda(self, "", section.inner_text.?, .Unescaped, section.delimiters.?);
-                                            assert(expand_result == .Lambda);
-                                            continue;
+                    switch (element) {
+                        .StaticText => |content| _ = try self.write(content, .Unescaped),
+                        .Interpolation => |path| try self.interpolate(path, .Escaped),
+                        .UnescapedInterpolation => |path| try self.interpolate(path, .Unescaped),
+                        .Section => |section| {
+                            const section_children = elements[index .. index + section.children_count];
+                            index += section.children_count;
+
+                            if (self.getIterator(section.key)) |*iterator| {
+                                if (self.lambdasSupported()) {
+                                    if (iterator.lambda()) |lambda_ctx| {
+                                        assert(section.inner_text != null);
+                                        assert(section.delimiters != null);
+
+                                        const expand_result = try lambda_ctx.expandLambda(self, "", section.inner_text.?, .Unescaped, section.delimiters.?);
+                                        assert(expand_result == .Lambda);
+                                        continue;
+                                    }
+                                }
+
+                                while (iterator.next()) |item_ctx| {
+                                    var current_level = self.stack;
+                                    self.stack = &ContextStack{
+                                        .parent = current_level,
+                                        .ctx = item_ctx,
+                                    };
+
+                                    defer self.stack = current_level;
+                                    try self.renderLevel(section_children);
+                                }
+                            }
+                        },
+                        .InvertedSection => |section| {
+                            const section_children = elements[index .. index + section.children_count];
+                            index += section.children_count;
+
+                            // Lambdas aways evaluate as "true" for inverted section
+                            // Broken paths, empty lists, null and false evaluates as "false"
+
+                            const truthy = if (self.getIterator(section.key)) |iterator| iterator.truthy() else false;
+                            if (!truthy) {
+                                try self.renderLevel(section_children);
+                            }
+                        },
+
+                        .Partial => |partial| {
+                            if (comptime PartialsMap.isEmpty()) continue;
+
+                            if (self.partials_map.get(partial.key)) |partial_template| {
+                                if (self.preseveLineBreaksAndIndentation()) {
+                                    if (partial.indentation) |value| {
+                                        const prev_has_pending = self.indentation_queue.has_pending;
+                                        self.indentation_queue.indent(&IndentationQueue.Node{ .indentation = value });
+                                        self.indentation_queue.has_pending = true;
+
+                                        defer {
+                                            self.indentation_queue.unindent();
+                                            self.indentation_queue.has_pending = prev_has_pending;
                                         }
-                                    }
 
-                                    while (iterator.next()) |item_ctx| {
-                                        var current_level = self.stack;
-                                        self.stack = &ContextStack{
-                                            .parent = current_level,
-                                            .ctx = item_ctx,
-                                        };
-
-                                        defer self.stack = current_level;
-                                        try self.renderLevel(section.content);
+                                        try self.renderLevelPartials(partial_template);
+                                        continue;
                                     }
                                 }
-                            },
-                            .InvertedSection => |section| {
 
-                                // Lambdas aways evaluate as "true" for inverted section
-                                // Broken paths, empty lists, null and false evaluates as "false"
+                                try self.renderLevelPartials(partial_template);
+                            }
+                        },
 
-                                const truthy = if (self.getIterator(section.key)) |iterator| iterator.truthy() else false;
-                                if (!truthy) {
-                                    try self.renderLevel(section.content);
-                                }
-                            },
-
-                            .Partial => |partial| {
-                                if (comptime PartialsMap.isEmpty()) continue;
-
-                                if (self.partials_map.get(partial.key)) |partial_template| {
-                                    if (self.preseveLineBreaksAndIndentation()) {
-                                        if (partial.indentation) |value| {
-                                            const prev_has_pending = self.indentation_queue.has_pending;
-                                            self.indentation_queue.indent(&IndentationQueue.Node{ .indentation = value });
-                                            self.indentation_queue.has_pending = true;
-
-                                            defer {
-                                                self.indentation_queue.unindent();
-                                                self.indentation_queue.has_pending = prev_has_pending;
-                                            }
-
-                                            try self.renderLevelPartials(partial_template);
-                                            continue;
-                                        }
-                                    }
-
-                                    try self.renderLevelPartials(partial_template);
-                                }
-                            },
-
-                            //TODO Parent, Block
-                            else => {},
-                        }
+                        //TODO Parent, Block
+                        else => {},
                     }
                 }
             }
@@ -809,38 +812,47 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             fn levelCapacityHint(
                 self: *Self,
-                children: ?[]const Element,
+                elements: []const Element,
             ) usize {
                 var size: usize = 0;
 
-                if (children) |elements| {
-                    for (elements) |element| {
-                        switch (element) {
-                            .StaticText => |content| size += content.len,
-                            .Interpolation, .UnescapedInterpolation => |path| size += self.pathCapacityHint(path),
-                            .Section => |section| {
-                                if (self.getIterator(section.key)) |*iterator| {
-                                    while (iterator.next()) |item_ctx| {
-                                        var current_level = self.stack;
-                                        self.stack = &ContextStack{
-                                            .parent = current_level,
-                                            .ctx = item_ctx,
-                                        };
+                var index: usize = 0;
+                while (index < elements.len) {
+                    const element = elements[index];
+                    index += 1;
 
-                                        defer self.stack = current_level;
-                                        size += self.levelCapacityHint(section.content);
-                                    }
-                                }
-                            },
-                            .InvertedSection => |section| {
-                                const truthy = if (self.getIterator(section.key)) |iterator| iterator.truthy() else false;
-                                if (!truthy) {
-                                    size += self.levelCapacityHint(section.content);
-                                }
-                            },
+                    switch (element) {
+                        .StaticText => |content| size += content.len,
+                        .Interpolation, .UnescapedInterpolation => |path| size += self.pathCapacityHint(path),
+                        .Section => |section| {
+                            const section_children = elements[index .. index + section.children_count];
+                            index += section.children_count;
 
-                            else => {},
-                        }
+                            if (self.getIterator(section.key)) |*iterator| {
+                                while (iterator.next()) |item_ctx| {
+                                    var current_level = self.stack;
+                                    self.stack = &ContextStack{
+                                        .parent = current_level,
+                                        .ctx = item_ctx,
+                                    };
+
+                                    defer self.stack = current_level;
+
+                                    size += self.levelCapacityHint(section_children);
+                                }
+                            }
+                        },
+                        .InvertedSection => |section| {
+                            const section_children = elements[index .. index + section.children_count];
+                            index += section.children_count;
+
+                            const truthy = if (self.getIterator(section.key)) |iterator| iterator.truthy() else false;
+                            if (!truthy) {
+                                size += self.levelCapacityHint(section_children);
+                            }
+                        },
+
+                        else => {},
                     }
                 }
 

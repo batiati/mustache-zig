@@ -18,7 +18,15 @@
             "args": ["build", "--build-file", "benchmark/build.zig"],
             "problemMatcher": [],
             "group": "build",
-        },        
+        },   
+        {
+            "label": "build samples",
+            "type": "shell",
+            "command": "zig",
+            "args": ["build", "--build-file", "samples/build.zig"],
+            "problemMatcher": [],
+            "group": "build",
+        },               
         {
             "label": "run tests",
             "type": "shell",

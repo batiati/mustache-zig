@@ -114,94 +114,101 @@ pub fn Parser(comptime options: TemplateOptions) type {
             }
         }
 
-        pub fn createElements(self: *Self, parent_key: ?[]const u8, iterator: *Node.Iterator) (AbortError || LoadError)![]Element {
-            var list = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, iterator.len());
-            errdefer list.deinit(self.gpa);
+        pub fn createElements(self: *Self, list: *std.ArrayListUnmanaged(Element), parent_key: ?[]const u8, iterator: *Node.Iterator) (AbortError || LoadError)!u32 {
+            var count: u32 = 0;
+
+            try list.ensureTotalCapacityPrecise(self.gpa, list.capacity + iterator.len());
             defer Node.unRefMany(self.gpa, iterator);
 
             while (iterator.next()) |node| {
-                const element = blk: {
-                    switch (node.block_type) {
-                        .StaticText => {
-                            if (node.text_block.tail) |content| {
+                switch (node.block_type) {
+                    .StaticText => {
+                        if (node.text_block.tail) |content| {
 
-                                //Empty strings are represented as NULL slices
-                                assert(content.len > 0);
+                            //Empty strings are represented as NULL slices
+                            assert(content.len > 0);
 
-                                break :blk Element{
-                                    .StaticText = try self.dupe(node.text_block.ref_counter, content),
-                                };
-                            } else {
-                                // Empty tag
-                                break :blk null;
-                            }
-                        },
-
-                        .CloseSection => {
-                            const parent_key_value = parent_key orelse {
-                                return self.abort(ParseError.UnexpectedCloseSection, &node.text_block);
+                            const static_text = Element{
+                                .StaticText = try self.dupe(node.text_block.ref_counter, content),
                             };
 
-                            const key = try self.parseIdentificator(&node.text_block);
-                            if (!std.mem.eql(u8, parent_key_value, key)) {
-                                return self.abort(ParseError.ClosingTagMismatch, &node.text_block);
-                            }
+                            list.appendAssumeCapacity(static_text);
+                            count += 1;
+                        }
 
-                            break :blk null;
-                        },
+                        continue;
+                    },
 
-                        // No output
-                        .Comment,
-                        .Delimiters,
-                        => break :blk null,
+                    .CloseSection => {
+                        const parent_key_value = parent_key orelse {
+                            return self.abort(ParseError.UnexpectedCloseSection, &node.text_block);
+                        };
 
-                        else => |block_type| {
-                            const key = try self.dupe(node.text_block.ref_counter, try self.parseIdentificator(&node.text_block));
-                            errdefer if (copy_string) self.gpa.free(key);
+                        const key = try self.parseIdentificator(&node.text_block);
+                        if (!std.mem.eql(u8, parent_key_value, key)) {
+                            return self.abort(ParseError.ClosingTagMismatch, &node.text_block);
+                        }
 
-                            const content = if (node.link.child == null) null else content: {
-                                var children = node.children();
-                                break :content try self.createElements(key, &children);
-                            };
-                            errdefer if (content) |content_value| Element.deinitMany(self.gpa, copy_string, content_value);
+                        continue;
+                    },
 
-                            const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
-                            errdefer if (copy_string) if (indentation) |indentation_value| self.gpa.free(indentation_value);
+                    // No output
+                    .Comment,
+                    .Delimiters,
+                    => continue,
 
-                            const inner_text: ?[]const u8 = inner_text: {
-                                if (allow_lambdas) {
-                                    if (node.inner_text) |*node_inner_text| {
-                                        break :inner_text try self.dupe(node_inner_text.ref_counter, node_inner_text.content);
-                                    }
+                    else => |block_type| {
+                        const key = try self.dupe(node.text_block.ref_counter, try self.parseIdentificator(&node.text_block));
+                        errdefer if (copy_string) self.gpa.free(key);
+
+                        const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
+                        errdefer if (copy_string) if (indentation) |indentation_value| self.gpa.free(indentation_value);
+
+                        const inner_text: ?[]const u8 = inner_text: {
+                            if (allow_lambdas) {
+                                if (node.inner_text) |*node_inner_text| {
+                                    break :inner_text try self.dupe(node_inner_text.ref_counter, node_inner_text.content);
                                 }
-                                break :inner_text null;
-                            };
-                            errdefer if (copy_string) if (inner_text) |inner_text_value| self.gpa.free(inner_text_value);
+                            }
+                            break :inner_text null;
+                        };
+                        errdefer if (copy_string) if (inner_text) |inner_text_value| self.gpa.free(inner_text_value);
 
-                            break :blk switch (block_type) {
-                                .Interpolation => Element{ .Interpolation = key },
-                                .UnescapedInterpolation => Element{ .UnescapedInterpolation = key },
-                                .InvertedSection => Element{ .InvertedSection = .{ .key = key, .content = content } },
-                                .Section => Element{ .Section = .{ .key = key, .content = content, .inner_text = inner_text, .delimiters = self.current_level.delimiters } },
-                                .Partial => Element{ .Partial = .{ .key = key, .indentation = indentation } },
-                                .Parent => Element{ .Parent = .{ .key = key, .indentation = indentation, .content = content } },
-                                .Block => Element{ .Block = .{ .key = key, .content = content } },
-                                .StaticText,
-                                .Comment,
-                                .Delimiters,
-                                .CloseSection,
-                                => unreachable, // Already processed
-                            };
-                        },
-                    }
-                };
+                        // Just reserve the current position to append the children after this node
+                        const current_index = list.items.len;
+                        list.items.len += 1;
+                        count += 1;
 
-                if (element) |valid| {
-                    list.appendAssumeCapacity(valid);
+                        const children_count: u32 = if (node.link.child == null) 0 else children_count: {
+                            var children = node.children();
+                            const children_count = try self.createElements(list, key, &children);
+                            count += children_count;
+
+                            break :children_count children_count;
+                        };
+
+                        const element = switch (block_type) {
+                            .Interpolation => Element{ .Interpolation = key },
+                            .UnescapedInterpolation => Element{ .UnescapedInterpolation = key },
+                            .InvertedSection => Element{ .InvertedSection = .{ .key = key, .children_count = children_count } },
+                            .Section => Element{ .Section = .{ .key = key, .children_count = children_count, .inner_text = inner_text, .delimiters = self.current_level.delimiters } },
+                            .Partial => Element{ .Partial = .{ .key = key, .indentation = indentation } },
+                            .Parent => Element{ .Parent = .{ .key = key, .children_count = children_count, .indentation = indentation } },
+                            .Block => Element{ .Block = .{ .key = key, .children_count = children_count } },
+                            .StaticText,
+                            .Comment,
+                            .Delimiters,
+                            .CloseSection,
+                            => unreachable, // Already processed
+                        };
+
+                        list.items[current_index] = element;
+                        continue;
+                    },
                 }
             }
 
-            return list.toOwnedSlice(self.gpa);
+            return count;
         }
 
         fn parseDelimiters(self: *Self, text_block: *TextBlock) AbortError!Delimiters {
@@ -761,7 +768,11 @@ fn testParseError(parser: anytype) !ParseErrorDetail {
 
     try testing.expect(node != null);
     var siblings = node.?.siblings();
-    _ = parser.createElements(null, &siblings) catch |e| {
+
+    var list = std.ArrayListUnmanaged(Element){};
+    defer list.deinit(testing.allocator);
+
+    _ = parser.createElements(&list, null, &siblings) catch |e| {
         if (parser.last_error) |err| {
             return err;
         } else {

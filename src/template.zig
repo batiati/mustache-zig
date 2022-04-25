@@ -186,14 +186,14 @@ pub const Element = union(Element.Type) {
 
     pub const Section = struct {
         key: []const u8,
-        content: ?[]const Element,
+        children_count: u32,
         inner_text: ?[]const u8,
         delimiters: ?Delimiters,
     };
 
     pub const InvertedSection = struct {
         key: []const u8,
-        content: ?[]const Element,
+        children_count: u32,
     };
 
     pub const Partial = struct {
@@ -203,13 +203,13 @@ pub const Element = union(Element.Type) {
 
     pub const Parent = struct {
         key: []const u8,
+        children_count: u32,
         indentation: ?[]const u8,
-        content: ?[]const Element,
     };
 
     pub const Block = struct {
         key: []const u8,
-        content: ?[]const Element,
+        children_count: u32,
     };
 
     pub fn deinit(self: Element, allocator: Allocator, owns_string: bool) void {
@@ -222,11 +222,9 @@ pub const Element = union(Element.Type) {
                     allocator.free(section.key);
                     if (section.inner_text) |inner_text| allocator.free(inner_text);
                 }
-                deinitMany(allocator, owns_string, section.content);
             },
             .InvertedSection => |section| {
                 if (owns_string) allocator.free(section.key);
-                deinitMany(allocator, owns_string, section.content);
             },
             .Partial => |partial| {
                 if (owns_string) {
@@ -237,33 +235,19 @@ pub const Element = union(Element.Type) {
 
             .Parent => |inheritance| {
                 if (owns_string) allocator.free(inheritance.key);
-                deinitMany(allocator, owns_string, inheritance.content);
             },
 
             .Block => |block| {
                 if (owns_string) allocator.free(block.key);
-                deinitMany(allocator, owns_string, block.content);
             },
         }
     }
 
-    pub fn children(self: Element) ?[]const Element {
-        return switch (self) {
-            .Section => |section| section.content,
-            .InvertedSection => |section| section.content,
-            .Parent => |inheritance| inheritance.content,
-            .Block => |block| block.content,
-            else => null,
-        };
-    }
-
-    pub fn deinitMany(allocator: Allocator, owns_string: bool, many: ?[]const Element) void {
-        if (many) |items| {
-            for (items) |item| {
-                item.deinit(allocator, owns_string);
-            }
-            allocator.free(items);
+    pub fn deinitMany(allocator: Allocator, owns_string: bool, items: []const Element) void {
+        for (items) |item| {
+            item.deinit(allocator, owns_string);
         }
+        allocator.free(items);
     }
 };
 
@@ -420,6 +404,9 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             render: anytype,
         ) ErrorSet(Parser, @TypeOf(render))!void {
             while (true) {
+                var list = std.ArrayListUnmanaged(Element){};
+                defer list.deinit(self.allocator);
+
                 var parse_result = try parser.parse();
                 defer parser.ref_counter_holder.free(self.allocator);
 
@@ -432,11 +419,13 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
                     },
                     .Node => |node| {
                         var siblings = node.siblings();
-                        const elements = parser.createElements(null, &siblings) catch |err| switch (err) {
+                        _ = parser.createElements(&list, null, &siblings) catch |err| switch (err) {
                             // TODO: implement a renderError function to render the error message on the output writer
                             error.ParserAbortedError => return,
                             else => return @errSetCast(ErrorSet(@TypeOf(parser), @TypeOf(render)), err),
                         };
+
+                        const elements = list.toOwnedSlice(self.allocator);
                         defer if (options.output == .Render) Element.deinitMany(self.allocator, options.copyStrings(), elements);
                         try render.render(elements);
 
@@ -803,53 +792,41 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 4), elements.len);
+            try testing.expectEqual(@as(usize, 10), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("[\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("section", elements[1].Section.key);
+            try testing.expectEqual(@as(usize, 3), elements[1].Section.children_count);
 
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 3), section.len);
+            try testing.expectEqual(Element.Type.StaticText, elements[2]);
+            try testing.expectEqualStrings("  ", elements[2].StaticText);
 
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("  ", section[0].StaticText);
+            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
+            try testing.expectEqualStrings("data", elements[3].Interpolation);
 
-                try testing.expectEqual(Element.Type.Interpolation, section[1]);
-                try testing.expectEqualStrings("data", section[1].Interpolation);
-
-                try testing.expectEqual(Element.Type.StaticText, section[2]);
-                try testing.expectEqualStrings("\n  |data|\n", section[2].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(Element.Type.StaticText, elements[4]);
+            try testing.expectEqualStrings("\n  |data|\n", elements[4].StaticText);
 
             // Delimiters changed
 
-            try testing.expectEqual(Element.Type.Section, elements[2]);
-            try testing.expectEqualStrings("section", elements[2].Section.key);
+            try testing.expectEqual(Element.Type.Section, elements[5]);
+            try testing.expectEqualStrings("section", elements[5].Section.key);
+            try testing.expectEqual(@as(usize, 3), elements[5].Section.children_count);
 
-            if (elements[2].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 3), section.len);
+            try testing.expectEqual(Element.Type.StaticText, elements[6]);
+            try testing.expectEqualStrings("  {{data}}\n  ", elements[6].StaticText);
 
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("  {{data}}\n  ", section[0].StaticText);
+            try testing.expectEqual(Element.Type.Interpolation, elements[7]);
+            try testing.expectEqualStrings("data", elements[7].Interpolation);
 
-                try testing.expectEqual(Element.Type.Interpolation, section[1]);
-                try testing.expectEqualStrings("data", section[1].Interpolation);
+            try testing.expectEqual(Element.Type.StaticText, elements[8]);
+            try testing.expectEqualStrings("\n", elements[8].StaticText);
 
-                try testing.expectEqual(Element.Type.StaticText, section[2]);
-                try testing.expectEqualStrings("\n", section[2].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
-
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("]", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.StaticText, elements[9]);
+            try testing.expectEqualStrings("]", elements[9].StaticText);
         }
 
         //
@@ -874,53 +851,41 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 4), elements.len);
+            try testing.expectEqual(@as(usize, 10), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("[\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("section", elements[1].InvertedSection.key);
+            try testing.expectEqual(@as(usize, 3), elements[1].InvertedSection.children_count);
 
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 3), section.len);
+            try testing.expectEqual(Element.Type.StaticText, elements[2]);
+            try testing.expectEqualStrings("  ", elements[2].StaticText);
 
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("  ", section[0].StaticText);
+            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
+            try testing.expectEqualStrings("data", elements[3].Interpolation);
 
-                try testing.expectEqual(Element.Type.Interpolation, section[1]);
-                try testing.expectEqualStrings("data", section[1].Interpolation);
-
-                try testing.expectEqual(Element.Type.StaticText, section[2]);
-                try testing.expectEqualStrings("\n  |data|\n", section[2].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(Element.Type.StaticText, elements[4]);
+            try testing.expectEqualStrings("\n  |data|\n", elements[4].StaticText);
 
             // Delimiters changed
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[2]);
-            try testing.expectEqualStrings("section", elements[2].InvertedSection.key);
+            try testing.expectEqual(Element.Type.InvertedSection, elements[5]);
+            try testing.expectEqualStrings("section", elements[5].InvertedSection.key);
+            try testing.expectEqual(@as(usize, 3), elements[5].InvertedSection.children_count);
 
-            if (elements[2].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 3), section.len);
+            try testing.expectEqual(Element.Type.StaticText, elements[6]);
+            try testing.expectEqualStrings("  {{data}}\n  ", elements[6].StaticText);
 
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("  {{data}}\n  ", section[0].StaticText);
+            try testing.expectEqual(Element.Type.Interpolation, elements[7]);
+            try testing.expectEqualStrings("data", elements[7].Interpolation);
 
-                try testing.expectEqual(Element.Type.Interpolation, section[1]);
-                try testing.expectEqualStrings("data", section[1].Interpolation);
+            try testing.expectEqual(Element.Type.StaticText, elements[8]);
+            try testing.expectEqualStrings("\n", elements[8].StaticText);
 
-                try testing.expectEqual(Element.Type.StaticText, section[2]);
-                try testing.expectEqualStrings("\n", section[2].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
-
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("]", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.StaticText, elements[9]);
+            try testing.expectEqualStrings("]", elements[9].StaticText);
         }
 
         //
@@ -1023,7 +988,6 @@ const tests = struct {
             try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.StaticText, elements[1]);
-
             try testing.expectEqualStrings("|", elements[1].StaticText);
         }
 
@@ -1372,26 +1336,20 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("\t|\t", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" | \n", elements[2].StaticText);
+            try testing.expectEqualStrings("\t|\t", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings(" | \n", elements[3].StaticText);
         }
 
         // Sections should not alter internal whitespace.
@@ -1403,29 +1361,23 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 5), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 2), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings(" ", section[0].StaticText);
-
-                try testing.expectEqual(Element.Type.StaticText, section[1]);
-                try testing.expectEqualStrings("\n ", section[1].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 2), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" | \n", elements[2].StaticText);
+            try testing.expectEqualStrings(" ", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("\n ", elements[3].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[4]);
+            try testing.expectEqualStrings(" | \n", elements[4].StaticText);
         }
 
         // Single-line sections should not alter surrounding whitespace.
@@ -1437,42 +1389,30 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 5), elements.len);
+            try testing.expectEqual(@as(usize, 7), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings(" ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("YES", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n ", elements[2].StaticText);
+            try testing.expectEqualStrings("YES", elements[2].StaticText);
 
-            try testing.expectEqual(Element.Type.Section, elements[3]);
-            try testing.expectEqualStrings("boolean", elements[3].Section.key);
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("\n ", elements[3].StaticText);
 
-            if (elements[3].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
+            try testing.expectEqual(Element.Type.Section, elements[4]);
+            try testing.expectEqualStrings("boolean", elements[4].Section.key);
+            try testing.expectEqual(@as(usize, 1), elements[4].Section.children_count);
 
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("GOOD", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(Element.Type.StaticText, elements[5]);
+            try testing.expectEqualStrings("GOOD", elements[5].StaticText);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings("\n", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.StaticText, elements[6]);
+            try testing.expectEqualStrings("\n", elements[6].StaticText);
         }
 
         // Standalone lines should be removed from the template.
@@ -1490,26 +1430,20 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("|\n", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+            try testing.expectEqualStrings("|\n", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("| A Line", elements[3].StaticText);
         }
 
         // Indented standalone lines should be removed from the template.
@@ -1528,13 +1462,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 0), section.len);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 0), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
@@ -1549,23 +1477,17 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 2), elements.len);
+            try testing.expectEqual(@as(usize, 3), elements.len);
 
             try testing.expectEqual(Element.Type.Section, elements[0]);
             try testing.expectEqualStrings("boolean", elements[0].Section.key);
-
-            if (elements[0].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("#", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[0].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("\n/", elements[1].StaticText);
+            try testing.expectEqualStrings("#", elements[1].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n/", elements[2].StaticText);
         }
 
         // Standalone tags should not require a newline to follow them.
@@ -1577,23 +1499,17 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 2), elements.len);
+            try testing.expectEqual(@as(usize, 3), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("#", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("\n/\n", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(Element.Type.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n/\n", elements[2].StaticText);
         }
 
         // "\r\n" should be considered a newline for standalone tags.
@@ -1611,26 +1527,20 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("|\n", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+            try testing.expectEqualStrings("|\n", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("| A Line", elements[3].StaticText);
         }
 
         // Superfluous in-tag whitespace should be ignored.
@@ -1642,26 +1552,20 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].Section.key);
-
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("=", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqualStrings("=", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("|", elements[3].StaticText);
         }
 
         test "Deeply Nested Contexts" {
@@ -1694,72 +1598,64 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 1), elements.len);
+            try testing.expectEqual(@as(usize, 77), elements.len);
 
             try testing.expectEqual(Element.Type.Section, elements[0]);
             try testing.expectEqualStrings("a", elements[0].Section.key);
 
-            if (elements[0].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 5), section.len);
+            {
+                try testing.expectEqual(@as(usize, 76), elements[0].Section.children_count);
 
-                try testing.expectEqual(Element.Type.Interpolation, section[0]);
-                try testing.expectEqualStrings("one", section[0].Interpolation);
+                try testing.expectEqual(Element.Type.Interpolation, elements[1]);
+                try testing.expectEqualStrings("one", elements[1].Interpolation);
 
-                try testing.expectEqual(Element.Type.StaticText, section[1]);
-                try testing.expectEqualStrings("\n", section[1].StaticText);
+                try testing.expectEqual(Element.Type.StaticText, elements[2]);
+                try testing.expectEqualStrings("\n", elements[2].StaticText);
 
-                try testing.expectEqual(Element.Type.Section, section[2]);
-                try testing.expectEqualStrings("b", section[2].Section.key);
+                try testing.expectEqual(Element.Type.Section, elements[3]);
+                try testing.expectEqualStrings("b", elements[3].Section.key);
 
-                try testing.expectEqual(Element.Type.Interpolation, section[3]);
-                try testing.expectEqualStrings("one", section[3].Interpolation);
+                {
+                    try testing.expectEqual(@as(usize, 71), elements[3].Section.children_count);
 
-                try testing.expectEqual(Element.Type.StaticText, section[4]);
-                try testing.expectEqualStrings("\n", section[4].StaticText);
+                    try testing.expectEqual(Element.Type.Interpolation, elements[4]);
+                    try testing.expectEqualStrings("one", elements[4].Interpolation);
 
-                if (section[2].Section.content) |section_b| {
-                    try testing.expectEqual(@as(usize, 9), section_b.len);
+                    try testing.expectEqual(Element.Type.Interpolation, elements[5]);
+                    try testing.expectEqualStrings("two", elements[5].Interpolation);
 
-                    try testing.expectEqual(Element.Type.Interpolation, section_b[0]);
-                    try testing.expectEqualStrings("one", section_b[0].Interpolation);
+                    try testing.expectEqual(Element.Type.Interpolation, elements[6]);
+                    try testing.expectEqualStrings("one", elements[6].Interpolation);
 
-                    try testing.expectEqual(Element.Type.Interpolation, section_b[1]);
-                    try testing.expectEqualStrings("two", section_b[1].Interpolation);
+                    try testing.expectEqual(Element.Type.StaticText, elements[7]);
+                    try testing.expectEqualStrings("\n", elements[7].StaticText);
 
-                    try testing.expectEqual(Element.Type.Interpolation, section_b[2]);
-                    try testing.expectEqualStrings("one", section_b[2].Interpolation);
+                    try testing.expectEqual(Element.Type.Section, elements[8]);
+                    try testing.expectEqualStrings("c", elements[8].Section.key);
 
-                    try testing.expectEqual(Element.Type.StaticText, section_b[3]);
-                    try testing.expectEqualStrings("\n", section_b[3].StaticText);
-
-                    try testing.expectEqual(Element.Type.Section, section_b[4]);
-                    try testing.expectEqualStrings("c", section_b[4].Section.key);
-
-                    try testing.expectEqual(Element.Type.Interpolation, section_b[5]);
-                    try testing.expectEqualStrings("one", section_b[5].Interpolation);
-
-                    try testing.expectEqual(Element.Type.Interpolation, section_b[6]);
-                    try testing.expectEqualStrings("two", section_b[6].Interpolation);
-
-                    try testing.expectEqual(Element.Type.Interpolation, section_b[7]);
-                    try testing.expectEqualStrings("one", section_b[7].Interpolation);
-
-                    try testing.expectEqual(Element.Type.StaticText, section_b[8]);
-                    try testing.expectEqualStrings("\n", section_b[8].StaticText);
-
-                    if (section_b[4].Section.content) |section_c| {
-                        try testing.expectEqual(@as(usize, 13), section_c.len);
-                    } else {
-                        try testing.expect(false);
-                        unreachable;
+                    {
+                        try testing.expectEqual(@as(usize, 62), elements[8].Section.children_count);
+                        // Too lazy to do the rest ... 🙃
                     }
-                } else {
-                    try testing.expect(false);
-                    unreachable;
+
+                    try testing.expectEqual(Element.Type.Interpolation, elements[71]);
+                    try testing.expectEqualStrings("one", elements[71].Interpolation);
+
+                    try testing.expectEqual(Element.Type.Interpolation, elements[72]);
+                    try testing.expectEqualStrings("two", elements[72].Interpolation);
+
+                    try testing.expectEqual(Element.Type.Interpolation, elements[73]);
+                    try testing.expectEqualStrings("one", elements[73].Interpolation);
+
+                    try testing.expectEqual(Element.Type.StaticText, elements[74]);
+                    try testing.expectEqualStrings("\n", elements[74].StaticText);
                 }
-            } else {
-                try testing.expect(false);
-                unreachable;
+
+                try testing.expectEqual(Element.Type.Interpolation, elements[75]);
+                try testing.expectEqualStrings("one", elements[75].Interpolation);
+
+                try testing.expectEqual(Element.Type.StaticText, elements[76]);
+                try testing.expectEqualStrings("\n", elements[76].StaticText);
             }
         }
     };
@@ -1775,26 +1671,20 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
-
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("\t|\t", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" | \n", elements[2].StaticText);
+            try testing.expectEqualStrings("\t|\t", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings(" | \n", elements[3].StaticText);
         }
 
         // Sections should not alter internal whitespace.
@@ -1806,29 +1696,23 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 5), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
-
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 2), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings(" ", section[0].StaticText);
-
-                try testing.expectEqual(Element.Type.StaticText, section[1]);
-                try testing.expectEqualStrings("\n ", section[1].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 2), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" | \n", elements[2].StaticText);
+            try testing.expectEqualStrings(" ", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("\n ", elements[3].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[4]);
+            try testing.expectEqualStrings(" | \n", elements[4].StaticText);
         }
 
         // Single-line sections should not alter surrounding whitespace.
@@ -1840,42 +1724,30 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 5), elements.len);
+            try testing.expectEqual(@as(usize, 7), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings(" ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
-
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("NO", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n ", elements[2].StaticText);
+            try testing.expectEqualStrings("NO", elements[2].StaticText);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[3]);
-            try testing.expectEqualStrings("boolean", elements[3].InvertedSection.key);
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("\n ", elements[3].StaticText);
 
-            if (elements[3].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
+            try testing.expectEqual(Element.Type.InvertedSection, elements[4]);
+            try testing.expectEqualStrings("boolean", elements[4].InvertedSection.key);
+            try testing.expectEqual(@as(usize, 1), elements[4].InvertedSection.children_count);
 
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("WAY", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(Element.Type.StaticText, elements[5]);
+            try testing.expectEqualStrings("WAY", elements[5].StaticText);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings("\n", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.StaticText, elements[6]);
+            try testing.expectEqualStrings("\n", elements[6].StaticText);
         }
 
         // Standalone lines should be removed from the template.
@@ -1893,26 +1765,20 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
-
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("|\n", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+            try testing.expectEqualStrings("|\n", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("| A Line", elements[3].StaticText);
         }
 
         // Indented standalone lines should be removed from the template.
@@ -1931,13 +1797,7 @@ const tests = struct {
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
-
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 0), section.len);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 0), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
@@ -1952,23 +1812,17 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 2), elements.len);
+            try testing.expectEqual(@as(usize, 3), elements.len);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[0]);
             try testing.expectEqualStrings("boolean", elements[0].InvertedSection.key);
-
-            if (elements[0].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("^", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[0].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("\n/", elements[1].StaticText);
+            try testing.expectEqualStrings("^", elements[1].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n/", elements[2].StaticText);
         }
 
         // Standalone tags should not require a newline to follow them.
@@ -1980,23 +1834,17 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 2), elements.len);
+            try testing.expectEqual(@as(usize, 3), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("^", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("\n/\n", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(Element.Type.StaticText, elements[2]);
+            try testing.expectEqualStrings("\n/\n", elements[2].StaticText);
         }
 
         // Standalone indented lines should be removed from the template.
@@ -2014,26 +1862,20 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
-
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("|\n", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("| A Line", elements[2].StaticText);
+            try testing.expectEqualStrings("|\n", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("| A Line", elements[3].StaticText);
         }
 
         // Superfluous in-tag whitespace should be ignored.
@@ -2045,26 +1887,20 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
             try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
-
-            if (elements[1].InvertedSection.content) |section| {
-                try testing.expectEqual(@as(usize, 1), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("=", section[0].StaticText);
-            } else {
-                try testing.expect(false);
-                unreachable;
-            }
+            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqualStrings("=", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings("|", elements[3].StaticText);
         }
     };
 
@@ -2242,7 +2078,7 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 4), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("<", elements[0].StaticText);
@@ -2251,9 +2087,13 @@ const tests = struct {
             try testing.expectEqualStrings("lambda", elements[1].Section.key);
             try testing.expect(elements[1].Section.inner_text != null);
             try testing.expectEqualStrings("{{x}}", elements[1].Section.inner_text.?);
+            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(">", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.Interpolation, elements[2]);
+            try testing.expectEqualStrings("x", elements[2].Interpolation);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[3]);
+            try testing.expectEqualStrings(">", elements[3].StaticText);
         }
 
         // Lambdas used for sections should receive the raw section string.
@@ -2265,7 +2105,7 @@ const tests = struct {
 
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 5), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("<", elements[0].StaticText);
@@ -2276,19 +2116,21 @@ const tests = struct {
             try testing.expectEqualStrings("lambda", section.key);
             try testing.expect(section.inner_text != null);
             try testing.expectEqualStrings("{{#lambda2}}{{x}}{{/lambda2}}", section.inner_text.?);
+            try testing.expectEqual(@as(usize, 2), section.children_count);
 
-            try testing.expect(section.content != null);
-            try testing.expectEqual(@as(usize, 1), section.content.?.len);
-            try testing.expectEqual(Element.Type.Section, section.content.?[0]);
-
-            const sub_section = section.content.?[0].Section;
+            try testing.expectEqual(Element.Type.Section, elements[2]);
+            const sub_section = elements[2].Section;
 
             try testing.expectEqualStrings("lambda2", sub_section.key);
             try testing.expect(sub_section.inner_text != null);
             try testing.expectEqualStrings("{{x}}", sub_section.inner_text.?);
+            try testing.expectEqual(@as(usize, 1), sub_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(">", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
+            try testing.expectEqualStrings("x", elements[3].Interpolation);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[4]);
+            try testing.expectEqualStrings(">", elements[4].StaticText);
         }
     };
 
@@ -2311,51 +2153,42 @@ const tests = struct {
             try testing.expect(template.result == .Elements);
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 11), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("section", elements[1].Section.key);
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 7), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("Name: ", section[0].StaticText);
-
-                try testing.expectEqual(Element.Type.Interpolation, section[1]);
-                try testing.expectEqualStrings("name", section[1].Interpolation);
-
-                try testing.expectEqual(Element.Type.StaticText, section[2]);
-                try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
-
-                try testing.expectEqual(Element.Type.UnescapedInterpolation, section[3]);
-                try testing.expectEqualStrings("comments", section[3].UnescapedInterpolation);
-
-                try testing.expectEqual(Element.Type.StaticText, section[4]);
-                try testing.expectEqualStrings("\n", section[4].StaticText);
-
-                try testing.expectEqual(Element.Type.InvertedSection, section[5]);
-                try testing.expectEqualStrings("inverted", section[5].InvertedSection.key);
-
-                if (section[5].InvertedSection.content) |inverted_section| {
-                    try testing.expectEqual(@as(usize, 1), inverted_section.len);
-
-                    try testing.expectEqual(Element.Type.StaticText, inverted_section[0]);
-                    try testing.expectEqualStrings("Inverted text", inverted_section[0].StaticText);
-                } else {
-                    try testing.expect(false);
-                }
-
-                try testing.expectEqual(Element.Type.StaticText, section[6]);
-                try testing.expectEqualStrings("\n", section[6].StaticText);
-            } else {
-                try testing.expect(false);
-            }
+            try testing.expectEqual(@as(usize, 8), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("World", elements[2].StaticText);
+            try testing.expectEqualStrings("Name: ", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
+            try testing.expectEqualStrings("name", elements[3].Interpolation);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[4]);
+            try testing.expectEqualStrings("\nComments: ", elements[4].StaticText);
+
+            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[5]);
+            try testing.expectEqualStrings("comments", elements[5].UnescapedInterpolation);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[6]);
+            try testing.expectEqualStrings("\n", elements[6].StaticText);
+
+            try testing.expectEqual(Element.Type.InvertedSection, elements[7]);
+            try testing.expectEqualStrings("inverted", elements[7].InvertedSection.key);
+            try testing.expectEqual(@as(usize, 1), elements[7].InvertedSection.children_count);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[8]);
+            try testing.expectEqualStrings("Inverted text", elements[8].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[9]);
+            try testing.expectEqualStrings("\n", elements[9].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[10]);
+            try testing.expectEqualStrings("World", elements[10].StaticText);
         }
 
         test "Basic DOM File test" {
@@ -2402,51 +2235,42 @@ const tests = struct {
             try testing.expect(template.result == .Elements);
             const elements = template.result.Elements;
 
-            try testing.expectEqual(@as(usize, 3), elements.len);
+            try testing.expectEqual(@as(usize, 11), elements.len);
 
             try testing.expectEqual(Element.Type.StaticText, elements[0]);
             try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
             try testing.expectEqualStrings("section", elements[1].Section.key);
-            if (elements[1].Section.content) |section| {
-                try testing.expectEqual(@as(usize, 7), section.len);
-
-                try testing.expectEqual(Element.Type.StaticText, section[0]);
-                try testing.expectEqualStrings("Name: ", section[0].StaticText);
-
-                try testing.expectEqual(Element.Type.Interpolation, section[1]);
-                try testing.expectEqualStrings("name", section[1].Interpolation);
-
-                try testing.expectEqual(Element.Type.StaticText, section[2]);
-                try testing.expectEqualStrings("\nComments: ", section[2].StaticText);
-
-                try testing.expectEqual(Element.Type.UnescapedInterpolation, section[3]);
-                try testing.expectEqualStrings("comments", section[3].UnescapedInterpolation);
-
-                try testing.expectEqual(Element.Type.StaticText, section[4]);
-                try testing.expectEqualStrings("\n", section[4].StaticText);
-
-                try testing.expectEqual(Element.Type.InvertedSection, section[5]);
-                try testing.expectEqualStrings("inverted", section[5].InvertedSection.key);
-
-                if (section[5].InvertedSection.content) |inverted_section| {
-                    try testing.expectEqual(@as(usize, 1), inverted_section.len);
-
-                    try testing.expectEqual(Element.Type.StaticText, inverted_section[0]);
-                    try testing.expectEqualStrings("Inverted text", inverted_section[0].StaticText);
-                } else {
-                    try testing.expect(false);
-                }
-
-                try testing.expectEqual(Element.Type.StaticText, section[6]);
-                try testing.expectEqualStrings("\n", section[6].StaticText);
-            } else {
-                try testing.expect(false);
-            }
+            try testing.expectEqual(@as(usize, 8), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("World", elements[2].StaticText);
+            try testing.expectEqualStrings("Name: ", elements[2].StaticText);
+
+            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
+            try testing.expectEqualStrings("name", elements[3].Interpolation);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[4]);
+            try testing.expectEqualStrings("\nComments: ", elements[4].StaticText);
+
+            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[5]);
+            try testing.expectEqualStrings("comments", elements[5].UnescapedInterpolation);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[6]);
+            try testing.expectEqualStrings("\n", elements[6].StaticText);
+
+            try testing.expectEqual(Element.Type.InvertedSection, elements[7]);
+            try testing.expectEqualStrings("inverted", elements[7].InvertedSection.key);
+            try testing.expectEqual(@as(usize, 1), elements[7].InvertedSection.children_count);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[8]);
+            try testing.expectEqualStrings("Inverted text", elements[8].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[9]);
+            try testing.expectEqualStrings("\n", elements[9].StaticText);
+
+            try testing.expectEqual(Element.Type.StaticText, elements[10]);
+            try testing.expectEqualStrings("World", elements[10].StaticText);
         }
 
         test "Large DOM File test" {
@@ -2521,31 +2345,25 @@ const tests = struct {
                 // Check if all strings are valid
                 // As long we are running with own_string = false,
                 // Those strings must be valid during the render process
-                fn checkStrings(elements: ?[]const Element) void {
-                    if (elements) |any| {
-                        for (any) |element| {
-                            switch (element) {
-                                .StaticText => |item| scan(item),
-                                .Interpolation => |item| scan(item),
-                                .UnescapedInterpolation => |item| scan(item),
-                                .Partial => |item| scan(item.key),
-                                .Section => |item| {
-                                    scan(item.key);
-                                    checkStrings(item.content);
-                                },
-                                .InvertedSection => |item| {
-                                    scan(item.key);
-                                    checkStrings(item.content);
-                                },
-                                .Parent => |item| {
-                                    scan(item.key);
-                                    checkStrings(item.content);
-                                },
-                                .Block => |item| {
-                                    scan(item.key);
-                                    checkStrings(item.content);
-                                },
-                            }
+                fn checkStrings(elements: []const Element) void {
+                    for (elements) |element| {
+                        switch (element) {
+                            .StaticText => |item| scan(item),
+                            .Interpolation => |item| scan(item),
+                            .UnescapedInterpolation => |item| scan(item),
+                            .Partial => |item| scan(item.key),
+                            .Section => |item| {
+                                scan(item.key);
+                            },
+                            .InvertedSection => |item| {
+                                scan(item.key);
+                            },
+                            .Parent => |item| {
+                                scan(item.key);
+                            },
+                            .Block => |item| {
+                                scan(item.key);
+                            },
                         }
                     }
                 }
@@ -2563,7 +2381,7 @@ const tests = struct {
             var dummy_render = DummyRender{};
             try template.collectElementsFromFile(test_10MB_file, &dummy_render);
 
-            try testing.expectEqual(@as(usize, 3 * REPEAT), dummy_render.count);
+            try testing.expectEqual(@as(usize, 11 * REPEAT), dummy_render.count);
         }
     };
 
