@@ -119,7 +119,7 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
 
             var out_writer = self.data_render.out_writer;
             var list = std.ArrayList(u8).init(allocator);
-            self.data_render.out_writer = .{ .Buffer = &list };
+            self.data_render.out_writer = .{ .Buffer = list.writer() };
 
             defer {
                 self.data_render.out_writer = out_writer;
@@ -144,7 +144,7 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
 
         fn write(ctx: *const anyopaque, rendered_text: []const u8) anyerror!usize {
             var self = getSelf(ctx);
-            return try self.data_render.write(rendered_text, self.escape);
+            return try self.data_render.countWrite(rendered_text, self.escape);
         }
 
         inline fn getSelf(ctx: *const anyopaque) *const Self {

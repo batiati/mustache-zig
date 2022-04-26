@@ -367,7 +367,7 @@ fn internalAllocRender(allocator: Allocator, template: Template, partials: anyty
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(Writer, PartialsMap, options);
 
-    try Engine.bufRender(&list, template, data, PartialsMap.init(partials));
+    try Engine.bufRender(list.writer(), template, data, PartialsMap.init(partials));
 
     return if (comptime sentinel) |z|
         list.toOwnedSliceSentinel(z)
@@ -394,7 +394,7 @@ fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: an
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(Writer, PartialsMap, options);
 
-    try Engine.bufCollect(allocator, &list, template, data, PartialsMap.init(allocator, partials));
+    try Engine.bufCollect(allocator, list.writer(), template, data, PartialsMap.init(allocator, partials));
 
     return if (comptime sentinel) |z|
         list.toOwnedSliceSentinel(z)
@@ -420,7 +420,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             /// Render to a intermediate buffer
             /// for processing lambda expansions
-            Buffer: *std.ArrayList(u8),
+            Buffer: std.ArrayList(u8).Writer,
         };
 
         pub const DataRender = struct {
@@ -435,8 +435,10 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             pub fn render(self: *Self, elements: []const Element) !void {
                 switch (self.out_writer) {
-                    .Buffer => |list| {
+                    .Buffer => |writer| {
+
                         // Add extra 25% extra capacity for HTML escapes, indentation, etc
+                        var list = writer.context;
                         const capacity_hint = self.levelCapacityHint(elements);
                         try list.ensureUnusedCapacity(list.capacity + (capacity_hint + (capacity_hint / 4)));
                     },
@@ -665,17 +667,46 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 self: *Self,
                 value: anytype,
                 escape: Escape,
-            ) (Allocator.Error || Writer.Error)!usize {
-                return switch (self.out_writer) {
+            ) (Allocator.Error || Writer.Error)!void {
+                switch (self.out_writer) {
                     .Writer => |writer| switch (escape) {
                         .Escaped => try self.recursiveWrite(writer, value, .Escaped),
                         .Unescaped => try self.recursiveWrite(writer, value, .Unescaped),
                     },
-                    .Buffer => |list| switch (escape) {
-                        .Escaped => try self.recursiveWrite(list.writer(), value, .Escaped),
-                        .Unescaped => try self.recursiveWrite(list.writer(), value, .Unescaped),
+                    .Buffer => |writer| switch (escape) {
+                        .Escaped => try self.recursiveWrite(writer, value, .Escaped),
+                        .Unescaped => try self.recursiveWrite(writer, value, .Unescaped),
                     },
-                };
+                }
+            }
+
+            pub fn countWrite(
+                self: *Self,
+                value: anytype,
+                escape: Escape,
+            ) (Allocator.Error || Writer.Error)!usize {
+                switch (self.out_writer) {
+                    .Writer => |writer| {
+                        var counter = std.io.countingWriter(writer);
+
+                        switch (escape) {
+                            .Escaped => try self.recursiveWrite(counter.writer(), value, .Escaped),
+                            .Unescaped => try self.recursiveWrite(counter.writer(), value, .Unescaped),
+                        }
+
+                        return counter.bytes_written;
+                    },
+                    .Buffer => |writer| {
+                        var counter = std.io.countingWriter(writer);
+
+                        switch (escape) {
+                            .Escaped => try self.recursiveWrite(counter.writer(), value, .Escaped),
+                            .Unescaped => try self.recursiveWrite(counter.writer(), value, .Unescaped),
+                        }
+
+                        return counter.bytes_written;
+                    },
+                }
             }
 
             fn recursiveWrite(
@@ -683,29 +714,29 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 writer: anytype,
                 value: anytype,
                 comptime escape: Escape,
-            ) (Allocator.Error || Writer.Error)!usize {
+            ) (Allocator.Error || Writer.Error)!void {
                 const TValue = @TypeOf(value);
 
                 switch (@typeInfo(TValue)) {
-                    .Bool => return try self.flushToWriter(writer, if (value) "true" else "false", escape),
+                    .Bool => try self.flushToWriter(writer, if (value) "true" else "false", escape),
                     .Int, .ComptimeInt => {
                         var buf: [128]u8 = undefined;
                         const size = std.fmt.formatIntBuf(&buf, value, 10, .lower, .{});
-                        return try self.flushToWriter(writer, buf[0..size], escape);
+                        try self.flushToWriter(writer, buf[0..size], escape);
                     },
                     .Float, .ComptimeFloat => {
                         var buf: [128]u8 = undefined;
                         var fbs = std.io.fixedBufferStream(&buf);
                         std.fmt.formatFloatDecimal(value, .{}, fbs.writer()) catch unreachable;
-                        return try self.flushToWriter(writer, buf[0..fbs.pos], escape);
+                        try self.flushToWriter(writer, buf[0..fbs.pos], escape);
                     },
-                    .Enum => return try self.flushToWriter(writer, @tagName(value), escape),
+                    .Enum => try self.flushToWriter(writer, @tagName(value), escape),
 
                     .Pointer => |info| switch (info.size) {
                         .One => return try self.recursiveWrite(writer, value.*, escape),
                         .Slice => {
                             if (info.child == u8) {
-                                return try self.flushToWriter(writer, value, escape);
+                                try self.flushToWriter(writer, value, escape);
                             }
                         },
                         .Many => @compileError("[*] pointers not supported"),
@@ -713,18 +744,16 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     },
                     .Array => |info| {
                         if (info.child == u8) {
-                            return try self.flushToWriter(writer, &value, escape);
+                            try self.flushToWriter(writer, &value, escape);
                         }
                     },
                     .Optional => {
                         if (value) |not_null| {
-                            return try self.recursiveWrite(writer, not_null, escape);
+                            try self.recursiveWrite(writer, not_null, escape);
                         }
                     },
                     else => {},
                 }
-
-                return 0;
             }
 
             fn flushToWriter(
@@ -732,18 +761,14 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 writer: anytype,
                 value: []const u8,
                 comptime escape: Escape,
-            ) @TypeOf(writer).Error!usize {
+            ) @TypeOf(writer).Error!void {
                 const escaped = escape == .Escaped;
                 const indentation_supported = comptime !PartialsMap.isEmpty();
 
                 if (comptime escaped or indentation_supported) {
                     const indentation_empty: if (indentation_supported) bool else void = if (indentation_supported) self.indentation_queue.isEmpty() or !self.preseveLineBreaksAndIndentation() else {};
 
-                    const @"null" = '\x00';
-                    const html_null: []const u8 = "\u{fffd}";
-
                     var index: usize = 0;
-                    var written_bytes: usize = 0;
 
                     var char_index: usize = 0;
                     while (char_index < value.len) : (char_index += 1) {
@@ -760,11 +785,9 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                 if (char_index > index) {
                                     const slice = value[index..char_index];
                                     try writer.writeAll(slice);
-                                    written_bytes += slice.len;
                                 }
 
-                                written_bytes += try self.indentation_queue.write(writer);
-
+                                try self.indentation_queue.write(writer);
                                 index = char_index;
                             } else if (char == '\n') {
                                 self.indentation_queue.has_pending = true;
@@ -774,24 +797,19 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
                         if (comptime escaped) {
                             const replace = switch (char) {
-                                '"' => "&quot;",
-                                '\'' => "&#39;",
-                                '&' => "&amp;",
                                 '<' => "&lt;",
                                 '>' => "&gt;",
-                                @"null" => html_null,
+                                '&' => "&amp;",
+                                '"' => "&quot;",
                                 else => continue,
                             };
 
                             if (char_index > index) {
                                 const slice = value[index..char_index];
                                 try writer.writeAll(slice);
-                                written_bytes += slice.len;
                             }
 
                             try writer.writeAll(replace);
-                            written_bytes += replace.len;
-
                             index = char_index + 1;
                         }
                     }
@@ -799,13 +817,9 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     if (index < value.len) {
                         const slice = value[index..];
                         try writer.writeAll(slice);
-                        written_bytes += slice.len;
                     }
-
-                    return written_bytes;
                 } else {
                     try writer.writeAll(value);
-                    return value.len;
                 }
             }
 
@@ -952,7 +966,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             try data_render.render(template.elements);
         }
 
-        pub fn bufRender(list: *std.ArrayList(u8), template: Template, data: anytype, partials_map: PartialsMap) !void {
+        pub fn bufRender(writer: std.ArrayList(u8).Writer, template: Template, data: anytype, partials_map: PartialsMap) !void {
             comptime assert(options == .Template);
 
             const Data = @TypeOf(data);
@@ -960,7 +974,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             var indentation_queue = IndentationQueue{};
             var data_render = DataRender{
-                .out_writer = .{ .Buffer = list },
+                .out_writer = .{ .Buffer = writer },
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
@@ -1004,7 +1018,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             try data_render.collect(allocator, template);
         }
 
-        pub fn bufCollect(allocator: Allocator, list: *std.ArrayList(u8), template: []const u8, data: anytype, partials_map: PartialsMap) !void {
+        pub fn bufCollect(allocator: Allocator, writer: std.ArrayList(u8).Writer, template: []const u8, data: anytype, partials_map: PartialsMap) !void {
             comptime assert(options != .Template);
 
             const Data = @TypeOf(data);
@@ -1012,7 +1026,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             var indentation_queue = IndentationQueue{};
             var data_render = DataRender{
-                .out_writer = .{ .Buffer = list },
+                .out_writer = .{ .Buffer = writer },
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
@@ -3841,8 +3855,8 @@ const tests = struct {
             try expectEscape("&gt;ab&amp;cd", ">ab&cd", .Escaped);
             try expectEscape("ab&amp;cd&lt;", "ab&cd<", .Escaped);
             try expectEscape("&gt;ab&amp;cd&lt;", ">ab&cd<", .Escaped);
-            try expectEscape("&quot;ab&#39;&amp;&#39;cd&quot;",
-                \\"ab'&'cd"
+            try expectEscape("&quot;ab&amp;cd&quot;",
+                \\"ab&cd"
             , .Escaped);
 
             try expectEscape(">ab&cd<", ">ab&cd<", .Unescaped);
@@ -3915,16 +3929,15 @@ const tests = struct {
             defer list.deinit();
 
             var data_render = Engine.DataRender{
-                .out_writer = .{ .Buffer = &list },
+                .out_writer = .{ .Buffer = list.writer() },
                 .stack = undefined,
                 .partials_map = undefined,
                 .indentation_queue = indentation_queue,
                 .template_options = {},
             };
 
-            var written_bytes = try data_render.write(value, escape);
+            try data_render.write(value, escape);
             try testing.expectEqualStrings(expected, list.items);
-            try testing.expectEqual(expected.len, written_bytes);
         }
     };
 

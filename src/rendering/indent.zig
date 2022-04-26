@@ -71,17 +71,13 @@ pub const IndentationQueue = struct {
         }
     }
 
-    pub fn write(self: Self, writer: anytype) !usize {
-        var written_bytes: usize = 0;
+    pub fn write(self: Self, writer: anytype) !void {
         if (self.list) |list| {
             var node: ?*const Node = list.head;
             while (node) |level| : (node = level.next) {
                 try writer.writeAll(level.indentation);
-                written_bytes += level.indentation.len;
             }
         }
-
-        return written_bytes;
     }
 
     pub inline fn isEmpty(self: Self) bool {
