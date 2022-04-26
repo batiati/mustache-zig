@@ -70,7 +70,7 @@ const RefCounterImpl = struct {
 
 const RefCounterHolderImpl = struct {
     const Self = @This();
-    const HashMap = std.AutoHashMapUnmanaged(usize, void);
+    const HashMap = std.AutoHashMapUnmanaged(*RefCounterImpl.State, void);
     group: HashMap = .{},
 
     pub const Iterator = struct {
@@ -78,15 +78,14 @@ const RefCounterHolderImpl = struct {
 
         pub fn next(self: *Iterator) ?RefCounterImpl {
             return if (self.hash_map_iterator.next()) |item| blk: {
-                var state = @intToPtr(*RefCounterImpl.State, item.*);
-                break :blk RefCounterImpl{ .state = state };
+                break :blk RefCounterImpl{ .state = item.* };
             } else null;
         }
     };
 
     pub fn add(self: *Self, allocator: Allocator, ref_counter: RefCounterImpl) Allocator.Error!void {
         if (ref_counter.state) |state| {
-            var prev = try self.group.fetchPut(allocator, @ptrToInt(state), {});
+            var prev = try self.group.fetchPut(allocator, state, {});
             if (prev == null) {
                 _ = ref_counter.ref();
             }
