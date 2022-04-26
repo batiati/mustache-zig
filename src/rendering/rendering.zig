@@ -436,7 +436,6 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             pub fn render(self: *Self, elements: []const Element) !void {
                 switch (self.out_writer) {
                     .Buffer => |list| {
-
                         // Add extra 25% extra capacity for HTML escapes, indentation, etc
                         const capacity_hint = self.levelCapacityHint(elements);
                         try list.ensureUnusedCapacity(list.capacity + (capacity_hint + (capacity_hint / 4)));
@@ -515,13 +514,13 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
-                            if (self.getIterator(section.key)) |*iterator| {
+                            if (self.getIterator(section.path)) |*iterator| {
                                 if (self.lambdasSupported()) {
                                     if (iterator.lambda()) |lambda_ctx| {
                                         assert(section.inner_text != null);
                                         assert(section.delimiters != null);
 
-                                        const expand_result = try lambda_ctx.expandLambda(self, "", section.inner_text.?, .Unescaped, section.delimiters.?);
+                                        const expand_result = try lambda_ctx.expandLambda(self, &.{}, section.inner_text.?, .Unescaped, section.delimiters.?);
                                         assert(expand_result == .Lambda);
                                         continue;
                                     }
@@ -546,7 +545,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             // Lambdas aways evaluate as "true" for inverted section
                             // Broken paths, empty lists, null and false evaluates as "false"
 
-                            const truthy = if (self.getIterator(section.key)) |iterator| iterator.truthy() else false;
+                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else false;
                             if (!truthy) {
                                 try self.renderLevel(section_children);
                             }
@@ -600,7 +599,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             fn interpolate(
                 self: *Self,
-                path: []const u8,
+                path: Element.Path,
                 escape: Escape,
             ) (Allocator.Error || Writer.Error)!void {
                 var level: ?*const ContextStack = self.stack;
@@ -637,7 +636,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             fn getIterator(
                 self: *Self,
-                path: []const u8,
+                path: Element.Path,
             ) ?Context.Iterator {
                 var level: ?*const ContextStack = self.stack;
 
@@ -828,7 +827,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
-                            if (self.getIterator(section.key)) |*iterator| {
+                            if (self.getIterator(section.path)) |*iterator| {
                                 while (iterator.next()) |item_ctx| {
                                     var current_level = self.stack;
                                     self.stack = &ContextStack{
@@ -846,7 +845,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
-                            const truthy = if (self.getIterator(section.key)) |iterator| iterator.truthy() else false;
+                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else false;
                             if (!truthy) {
                                 size += self.levelCapacityHint(section_children);
                             }
@@ -861,7 +860,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             fn pathCapacityHint(
                 self: *Self,
-                path: []const u8,
+                path: Element.Path,
             ) usize {
                 var level: ?*const ContextStack = self.stack;
 

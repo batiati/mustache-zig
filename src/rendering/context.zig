@@ -87,10 +87,10 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         };
 
         const VTable = struct {
-            get: fn (*const anyopaque, []const u8, ?usize) PathResolution(Self),
-            capacityHint: fn (*const anyopaque, *DataRender, []const u8) PathResolution(usize),
-            interpolate: fn (*const anyopaque, *DataRender, []const u8, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: fn (*const anyopaque, *DataRender, []const u8, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            get: fn (*const anyopaque, Element.Path, ?usize) PathResolution(Self),
+            capacityHint: fn (*const anyopaque, *DataRender, Element.Path) PathResolution(usize),
+            interpolate: fn (*const anyopaque, *DataRender, Element.Path, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
+            expandLambda: fn (*const anyopaque, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = struct {
@@ -99,7 +99,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 Lambda: Self,
                 Sequence: struct {
                     context: *const Self,
-                    path: []const u8,
+                    path: Element.Path,
                     state: union(enum) {
                         Fetching: struct {
                             item: Self,
@@ -141,7 +141,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 };
             }
 
-            fn initSequence(parent_ctx: *const Self, path: []const u8, item: Self) Iterator {
+            fn initSequence(parent_ctx: *const Self, path: Element.Path, item: Self) Iterator {
                 return .{
                     .data = .{
                         .Sequence = .{
@@ -204,19 +204,19 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         ctx: FlattenedType = undefined,
         vtable: *const VTable,
 
-        pub inline fn get(self: Self, path: []const u8) PathResolution(Self) {
+        pub inline fn get(self: Self, path: Element.Path) PathResolution(Self) {
             return self.vtable.get(&self.ctx, path, null);
         }
 
         pub inline fn capacityHint(
             self: Self,
             data_render: *DataRender,
-            path: []const u8,
+            path: Element.Path,
         ) PathResolution(usize) {
             return self.vtable.capacityHint(&self.ctx, data_render, path);
         }
 
-        pub fn iterator(self: *const Self, path: []const u8) PathResolution(Iterator) {
+        pub fn iterator(self: *const Self, path: Element.Path) PathResolution(Iterator) {
             const result = self.vtable.get(&self.ctx, path, 0);
 
             return switch (result) {
@@ -237,7 +237,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         pub inline fn interpolate(
             self: Self,
             data_render: *DataRender,
-            path: []const u8,
+            path: Element.Path,
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             return try self.vtable.interpolate(&self.ctx, data_render, path, escape);
@@ -246,7 +246,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         pub inline fn expandLambda(
             self: Self,
             data_render: *DataRender,
-            path: []const u8,
+            path: Element.Path,
             inner_text: []const u8,
             escape: Escape,
             delimiters: Delimiters,
@@ -271,7 +271,6 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
         };
 
         const is_zero_size = @sizeOf(Data) == 0;
-        const PATH_SEPARATOR = ".";
         const Self = @This();
 
         pub fn context(data: Data) ContextInterface {
@@ -288,11 +287,10 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
             return interface;
         }
 
-        fn get(ctx: *const anyopaque, path: []const u8, index: ?usize) PathResolution(ContextInterface) {
-            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
+        fn get(ctx: *const anyopaque, path: Element.Path, index: ?usize) PathResolution(ContextInterface) {
             return Invoker.get(
                 getData(ctx),
-                &path_iterator,
+                path,
                 index,
             );
         }
@@ -300,27 +298,25 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
         fn capacityHint(
             ctx: *const anyopaque,
             data_render: *DataRender,
-            path: []const u8,
+            path: Element.Path,
         ) PathResolution(usize) {
-            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return Invoker.capacityHint(
                 data_render,
                 getData(ctx),
-                &path_iterator,
+                path,
             );
         }
 
         fn interpolate(
             ctx: *const anyopaque,
             data_render: *DataRender,
-            path: []const u8,
+            path: Element.Path,
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.interpolate(
                 data_render,
                 getData(ctx),
-                &path_iterator,
+                path,
                 escape,
             );
         }
@@ -328,19 +324,18 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
         fn expandLambda(
             ctx: *const anyopaque,
             data_render: *DataRender,
-            path: []const u8,
+            path: Element.Path,
             inner_text: []const u8,
             escape: Escape,
             delimiters: Delimiters,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            var path_iterator = std.mem.tokenize(u8, path, PATH_SEPARATOR);
             return try Invoker.expandLambda(
                 data_render,
                 getData(ctx),
                 inner_text,
                 escape,
                 delimiters,
-                &path_iterator,
+                path,
             );
         }
 
@@ -498,7 +493,7 @@ const struct_tests = struct {
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
 
-    fn interpolateCtx(writer: anytype, ctx: Context(@TypeOf(writer), DummyPartialsMap, dummy_options), path: []const u8, escape: Escape) anyerror!void {
+    fn interpolateCtx(writer: anytype, ctx: Context(@TypeOf(writer), DummyPartialsMap, dummy_options), identifier: []const u8, escape: Escape) anyerror!void {
         const RenderEngine = rendering.RenderEngine(@TypeOf(writer), DummyPartialsMap, dummy_options);
 
         var stack = RenderEngine.ContextStack{
@@ -513,6 +508,9 @@ const struct_tests = struct {
             .indentation_queue = undefined,
             .template_options = {},
         };
+
+        var path = try Element.createPath(testing.allocator, false, identifier);
+        defer Element.destroyPath(testing.allocator, false, path);
 
         switch (try ctx.interpolate(&data_render, path, escape)) {
             .Lambda => {
@@ -1079,44 +1077,63 @@ const struct_tests = struct {
 
         var person_ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
 
-        list.clearAndFree();
+        {
+            list.clearAndFree();
 
-        try interpolateCtx(writer, person_ctx, "address.street", .Unescaped);
-        try testing.expectEqualStrings("nearby", list.items);
+            try interpolateCtx(writer, person_ctx, "address.street", .Unescaped);
+            try testing.expectEqualStrings("nearby", list.items);
+        }
 
         // Address
 
-        var address_ctx = switch (person_ctx.get("address")) {
-            .Field => |found| found,
-            else => {
-                try testing.expect(false);
-                unreachable;
-            },
+        var address_ctx = address_ctx: {
+            const path = try Element.createPath(allocator, false, "address");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (person_ctx.get(path)) {
+                .Field => |found| break :address_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
         };
 
-        list.clearAndFree();
-        try interpolateCtx(writer, address_ctx, "street", .Unescaped);
-        try testing.expectEqualStrings("nearby", list.items);
+        {
+            list.clearAndFree();
+
+            try interpolateCtx(writer, address_ctx, "street", .Unescaped);
+            try testing.expectEqualStrings("nearby", list.items);
+        }
 
         // Street
 
-        var street_ctx = switch (address_ctx.get("street")) {
-            .Field => |found| found,
-            else => {
-                try testing.expect(false);
-                unreachable;
-            },
+        var street_ctx = street_ctx: {
+            const path = try Element.createPath(allocator, false, "street");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (address_ctx.get(path)) {
+                .Field => |found| break :street_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
         };
 
-        list.clearAndFree();
+        {
+            list.clearAndFree();
 
-        try interpolateCtx(writer, street_ctx, "", .Unescaped);
-        try testing.expectEqualStrings("nearby", list.items);
+            try interpolateCtx(writer, street_ctx, "", .Unescaped);
+            try testing.expectEqualStrings("nearby", list.items);
+        }
 
-        list.clearAndFree();
+        {
+            list.clearAndFree();
 
-        try interpolateCtx(writer, street_ctx, ".", .Unescaped);
-        try testing.expectEqualStrings("nearby", list.items);
+            try interpolateCtx(writer, street_ctx, ".", .Unescaped);
+            try testing.expectEqualStrings("nearby", list.items);
+        }
     }
 
     test "Navigation Pointers" {
@@ -1133,58 +1150,85 @@ const struct_tests = struct {
 
         var person_ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
 
-        list.clearAndFree();
+        {
+            list.clearAndFree();
 
-        try interpolateCtx(writer, person_ctx, "indication.address.street", .Unescaped);
-        try testing.expectEqualStrings("far away street", list.items);
+            try interpolateCtx(writer, person_ctx, "indication.address.street", .Unescaped);
+            try testing.expectEqualStrings("far away street", list.items);
+        }
 
         // Indication
 
-        var indication_ctx = switch (person_ctx.get("indication")) {
-            .Field => |found| found,
-            else => {
-                try testing.expect(false);
-                unreachable;
-            },
+        var indication_ctx = indication_ctx: {
+            const path = try Element.createPath(allocator, false, "indication");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (person_ctx.get(path)) {
+                .Field => |found| break :indication_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
         };
 
-        list.clearAndFree();
-        try interpolateCtx(writer, indication_ctx, "address.street", .Unescaped);
-        try testing.expectEqualStrings("far away street", list.items);
+        {
+            list.clearAndFree();
+
+            try interpolateCtx(writer, indication_ctx, "address.street", .Unescaped);
+            try testing.expectEqualStrings("far away street", list.items);
+        }
 
         // Address
 
-        var address_ctx = switch (indication_ctx.get("address")) {
-            .Field => |found| found,
-            else => {
-                try testing.expect(false);
-                unreachable;
-            },
+        var address_ctx = address_ctx: {
+            const path = try Element.createPath(allocator, false, "address");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (indication_ctx.get(path)) {
+                .Field => |found| break :address_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
         };
 
-        list.clearAndFree();
-        try interpolateCtx(writer, address_ctx, "street", .Unescaped);
-        try testing.expectEqualStrings("far away street", list.items);
+        {
+            list.clearAndFree();
+
+            try interpolateCtx(writer, address_ctx, "street", .Unescaped);
+            try testing.expectEqualStrings("far away street", list.items);
+        }
 
         // Street
 
-        var street_ctx = switch (address_ctx.get("street")) {
-            .Field => |found| found,
-            else => {
-                try testing.expect(false);
-                unreachable;
-            },
+        var street_ctx = street_ctx: {
+            const path = try Element.createPath(allocator, false, "street");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (address_ctx.get(path)) {
+                .Field => |found| break :street_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
         };
 
-        list.clearAndFree();
+        {
+            list.clearAndFree();
 
-        try interpolateCtx(writer, street_ctx, "", .Unescaped);
-        try testing.expectEqualStrings("far away street", list.items);
+            try interpolateCtx(writer, street_ctx, "", .Unescaped);
+            try testing.expectEqualStrings("far away street", list.items);
+        }
 
-        list.clearAndFree();
+        {
+            list.clearAndFree();
 
-        try interpolateCtx(writer, street_ctx, ".", .Unescaped);
-        try testing.expectEqualStrings("far away street", list.items);
+            try interpolateCtx(writer, street_ctx, ".", .Unescaped);
+            try testing.expectEqualStrings("far away street", list.items);
+        }
     }
 
     test "Navigation NotFound" {
@@ -1197,42 +1241,71 @@ const struct_tests = struct {
         const Writer = @TypeOf(std.io.null_writer);
         var person_ctx = getContext(Writer, &person, DummyPartialsMap, dummy_options);
 
-        // Person.address
-        var address_ctx = switch (person_ctx.get("address")) {
-            .Field => |found| found,
-            else => {
-                try testing.expect(false);
-                unreachable;
-            },
+        const address_ctx = address_ctx: {
+            const path = try Element.createPath(allocator, false, "address");
+            defer Element.destroyPath(allocator, false, path);
+
+            // Person.address
+            switch (person_ctx.get(path)) {
+                .Field => |found| break :address_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
         };
 
-        var wrong_address = person_ctx.get("wrong_address");
-        try testing.expect(wrong_address == .NotFoundInContext);
+        {
+            const path = try Element.createPath(allocator, false, "wrong_address");
+            defer Element.destroyPath(allocator, false, path);
 
-        // Person.address.street
-        var street_ctx = switch (address_ctx.get("street")) {
-            .Field => |found| found,
-            else => {
-                try testing.expect(false);
-                unreachable;
-            },
+            var wrong_address = person_ctx.get(path);
+            try testing.expect(wrong_address == .NotFoundInContext);
+        }
+
+        const street_ctx = street_ctx: {
+            const path = try Element.createPath(allocator, false, "street");
+            defer Element.destroyPath(allocator, false, path);
+
+            // Person.address.street
+            switch (address_ctx.get(path)) {
+                .Field => |found| break :street_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
         };
 
-        var wrong_street = address_ctx.get("wrong_street");
-        try testing.expect(wrong_street == .NotFoundInContext);
+        {
+            const path = try Element.createPath(allocator, false, "wrong_street");
+            defer Element.destroyPath(allocator, false, path);
 
-        // Person.address.street.len
-        var street_len_ctx = switch (street_ctx.get("len")) {
-            .Field => |found| found,
-            else => {
-                try testing.expect(false);
-                unreachable;
-            },
-        };
-        _ = street_len_ctx;
+            var wrong_street = address_ctx.get(path);
+            try testing.expect(wrong_street == .NotFoundInContext);
+        }
 
-        var wrong_len = street_ctx.get("wrong_len");
-        try testing.expect(wrong_len == .NotFoundInContext);
+        {
+            const path = try Element.createPath(allocator, false, "len");
+            defer Element.destroyPath(allocator, false, path);
+            // Person.address.street.len
+            var street_len_ctx = switch (street_ctx.get(path)) {
+                .Field => |found| found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            };
+            _ = street_len_ctx;
+        }
+
+        {
+            const path = try Element.createPath(allocator, false, "wrong_len");
+            defer Element.destroyPath(allocator, false, path);
+
+            var wrong_len = street_ctx.get(path);
+            try testing.expect(wrong_len == .NotFoundInContext);
+        }
     }
 
     test "Iterator over slice" {
@@ -1248,7 +1321,10 @@ const struct_tests = struct {
         // Person
         var ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
 
-        var iterator = switch (ctx.iterator("items")) {
+        const path = try Element.createPath(allocator, false, "items");
+        defer Element.destroyPath(allocator, false, path);
+
+        var iterator = switch (ctx.iterator(path)) {
             .Field => |found| found,
             else => {
                 try testing.expect(false);
@@ -1292,7 +1368,10 @@ const struct_tests = struct {
 
         {
             // iterator over true
-            var iterator = switch (ctx.iterator("active")) {
+            const path = try Element.createPath(allocator, false, "active");
+            defer Element.destroyPath(allocator, false, path);
+
+            var iterator = switch (ctx.iterator(path)) {
                 .Field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1309,7 +1388,10 @@ const struct_tests = struct {
 
         {
             // iterator over false
-            var iterator = switch (ctx.iterator("indication.active")) {
+            const path = try Element.createPath(allocator, false, "indication.active");
+            defer Element.destroyPath(allocator, false, path);
+
+            var iterator = switch (ctx.iterator(path)) {
                 .Field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1334,7 +1416,10 @@ const struct_tests = struct {
 
         {
             // iterator over true
-            var iterator = switch (ctx.iterator("additional_information")) {
+            const path = try Element.createPath(allocator, false, "additional_information");
+            defer Element.destroyPath(allocator, false, path);
+
+            var iterator = switch (ctx.iterator(path)) {
                 .Field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1351,7 +1436,10 @@ const struct_tests = struct {
 
         {
             // iterator over false
-            var iterator = switch (ctx.iterator("indication.additional_information")) {
+            const path = try Element.createPath(allocator, false, "indication.additional_information");
+            defer Element.destroyPath(allocator, false, path);
+
+            var iterator = switch (ctx.iterator(path)) {
                 .Field => |found| found,
                 else => {
                     try testing.expect(false);

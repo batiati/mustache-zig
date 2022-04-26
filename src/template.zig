@@ -36,13 +36,15 @@ pub const ParseResult = union(enum) {
 
 pub const Element = union(Element.Type) {
     StaticText: []const u8,
-    Interpolation: []const u8,
-    UnescapedInterpolation: []const u8,
+    Interpolation: Path,
+    UnescapedInterpolation: Path,
     Section: Section,
     InvertedSection: InvertedSection,
     Partial: Partial,
     Parent: Parent,
     Block: Block,
+
+    pub const Path = []const []const u8;
 
     pub const Type = enum {
 
@@ -185,14 +187,14 @@ pub const Element = union(Element.Type) {
     };
 
     pub const Section = struct {
-        key: []const u8,
+        path: Path,
         children_count: u32,
         inner_text: ?[]const u8,
         delimiters: ?Delimiters,
     };
 
     pub const InvertedSection = struct {
-        key: []const u8,
+        path: Path,
         children_count: u32,
     };
 
@@ -215,16 +217,16 @@ pub const Element = union(Element.Type) {
     pub fn deinit(self: Element, allocator: Allocator, owns_string: bool) void {
         switch (self) {
             .StaticText => |content| if (owns_string) allocator.free(content),
-            .Interpolation => |path| if (owns_string) allocator.free(path),
-            .UnescapedInterpolation => |path| if (owns_string) allocator.free(path),
+            .Interpolation => |path| destroyPath(allocator, owns_string, path),
+            .UnescapedInterpolation => |path| destroyPath(allocator, owns_string, path),
             .Section => |section| {
+                destroyPath(allocator, owns_string, section.path);
                 if (owns_string) {
-                    allocator.free(section.key);
                     if (section.inner_text) |inner_text| allocator.free(inner_text);
                 }
             },
             .InvertedSection => |section| {
-                if (owns_string) allocator.free(section.key);
+                destroyPath(allocator, owns_string, section.path);
             },
             .Partial => |partial| {
                 if (owns_string) {
@@ -233,8 +235,8 @@ pub const Element = union(Element.Type) {
                 }
             },
 
-            .Parent => |inheritance| {
-                if (owns_string) allocator.free(inheritance.key);
+            .Parent => |parent| {
+                if (owns_string) allocator.free(parent.key);
             },
 
             .Block => |block| {
@@ -248,6 +250,41 @@ pub const Element = union(Element.Type) {
             item.deinit(allocator, owns_string);
         }
         allocator.free(items);
+    }
+
+    pub fn createPath(allocator: Allocator, copy_strings: bool, identifier: []const u8) Allocator.Error!Path {
+        const action = struct {
+            pub fn action(_allocator: Allocator, _copy_strings: bool, iterator: *std.mem.TokenIterator(u8), index: usize) Allocator.Error!?[][]const u8 {
+                if (iterator.next()) |part| {
+                    var path = (try action(_allocator, _copy_strings, iterator, index + 1)) orelse unreachable;
+                    path[index] = if (_copy_strings) try _allocator.dupe(u8, part) else part;
+                    return path;
+                } else {
+                    return if (index == 0)
+                        null
+                    else
+                        try _allocator.alloc([]const u8, index);
+                }
+            }
+        }.action;
+
+        const EMPTY: Path = &[0][]const u8{};
+
+        if (identifier.len == 0) {
+            return EMPTY;
+        } else {
+            const PATH_SEPARATOR = ".";
+            var iterator = std.mem.tokenize(u8, identifier, PATH_SEPARATOR);
+            return (try action(allocator, copy_strings, &iterator, 0)) orelse EMPTY;
+        }
+    }
+
+    pub inline fn destroyPath(allocator: Allocator, owns_string: bool, path: Path) void {
+        if (path.len > 0) {
+            if (owns_string)
+                for (path) |part| allocator.free(part);
+            allocator.free(path);
+        }
     }
 };
 
@@ -508,6 +545,17 @@ const tests = struct {
         return template;
     }
 
+    pub fn expectPath(expected: []const u8, path: Element.Path) !void {
+        const allocator = testing.allocator;
+        const expected_path = try Element.createPath(allocator, false, expected);
+        defer Element.destroyPath(allocator, false, expected_path);
+
+        try testing.expectEqual(expected_path.len, path.len);
+        for (expected_path) |expected_part, i| {
+            try testing.expectEqualStrings(expected_part, path[i]);
+        }
+    }
+
     const comments = struct {
 
         //
@@ -742,7 +790,7 @@ const tests = struct {
             try testing.expectEqualStrings("(", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try testing.expectEqualStrings("text", elements[1].Interpolation);
+            try expectPath("text", elements[1].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings(")", elements[2].StaticText);
@@ -764,7 +812,7 @@ const tests = struct {
             try testing.expectEqualStrings("(", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try testing.expectEqualStrings("text", elements[1].Interpolation);
+            try expectPath("text", elements[1].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings(")", elements[2].StaticText);
@@ -798,14 +846,14 @@ const tests = struct {
             try testing.expectEqualStrings("[\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("section", elements[1].Section.key);
+            try expectPath("section", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 3), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("  ", elements[2].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try testing.expectEqualStrings("data", elements[3].Interpolation);
+            try expectPath("data", elements[3].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[4]);
             try testing.expectEqualStrings("\n  |data|\n", elements[4].StaticText);
@@ -813,14 +861,14 @@ const tests = struct {
             // Delimiters changed
 
             try testing.expectEqual(Element.Type.Section, elements[5]);
-            try testing.expectEqualStrings("section", elements[5].Section.key);
+            try expectPath("section", elements[5].Section.path);
             try testing.expectEqual(@as(usize, 3), elements[5].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[6]);
             try testing.expectEqualStrings("  {{data}}\n  ", elements[6].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[7]);
-            try testing.expectEqualStrings("data", elements[7].Interpolation);
+            try expectPath("data", elements[7].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[8]);
             try testing.expectEqualStrings("\n", elements[8].StaticText);
@@ -857,14 +905,14 @@ const tests = struct {
             try testing.expectEqualStrings("[\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("section", elements[1].InvertedSection.key);
+            try expectPath("section", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 3), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("  ", elements[2].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try testing.expectEqualStrings("data", elements[3].Interpolation);
+            try expectPath("data", elements[3].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[4]);
             try testing.expectEqualStrings("\n  |data|\n", elements[4].StaticText);
@@ -872,14 +920,14 @@ const tests = struct {
             // Delimiters changed
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[5]);
-            try testing.expectEqualStrings("section", elements[5].InvertedSection.key);
+            try expectPath("section", elements[5].InvertedSection.path);
             try testing.expectEqual(@as(usize, 3), elements[5].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[6]);
             try testing.expectEqualStrings("  {{data}}\n  ", elements[6].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[7]);
-            try testing.expectEqualStrings("data", elements[7].Interpolation);
+            try expectPath("data", elements[7].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[8]);
             try testing.expectEqualStrings("\n", elements[8].StaticText);
@@ -1075,7 +1123,7 @@ const tests = struct {
             try testing.expectEqualStrings("Hello, ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try testing.expectEqualStrings("subject", elements[1].Interpolation);
+            try expectPath("subject", elements[1].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("!", elements[2].StaticText);
@@ -1096,7 +1144,7 @@ const tests = struct {
             try testing.expectEqualStrings("These characters should be HTML escaped: ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try testing.expectEqualStrings("forbidden", elements[1].Interpolation);
+            try expectPath("forbidden", elements[1].Interpolation);
         }
 
         // Triple mustaches should interpolate without HTML escaping.
@@ -1114,7 +1162,7 @@ const tests = struct {
             try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try testing.expectEqualStrings("forbidden", elements[1].UnescapedInterpolation);
+            try expectPath("forbidden", elements[1].UnescapedInterpolation);
         }
 
         // Ampersand should interpolate without HTML escaping.
@@ -1132,7 +1180,7 @@ const tests = struct {
             try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try testing.expectEqualStrings("forbidden", elements[1].UnescapedInterpolation);
+            try expectPath("forbidden", elements[1].UnescapedInterpolation);
         }
 
         // Interpolation should not alter surrounding whitespace.
@@ -1150,7 +1198,7 @@ const tests = struct {
             try testing.expectEqualStrings("| ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation);
+            try expectPath("string", elements[1].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings(" |", elements[2].StaticText);
@@ -1171,7 +1219,7 @@ const tests = struct {
             try testing.expectEqualStrings("| ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
+            try expectPath("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings(" |", elements[2].StaticText);
@@ -1192,7 +1240,7 @@ const tests = struct {
             try testing.expectEqualStrings("| ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
+            try expectPath("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings(" |", elements[2].StaticText);
@@ -1213,7 +1261,7 @@ const tests = struct {
             try testing.expectEqualStrings("  ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation);
+            try expectPath("string", elements[1].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("\n", elements[2].StaticText);
@@ -1234,7 +1282,7 @@ const tests = struct {
             try testing.expectEqualStrings("  ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
+            try expectPath("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("\n", elements[2].StaticText);
@@ -1255,7 +1303,7 @@ const tests = struct {
             try testing.expectEqualStrings("  ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
+            try expectPath("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("\n", elements[2].StaticText);
@@ -1276,7 +1324,7 @@ const tests = struct {
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].Interpolation);
+            try expectPath("string", elements[1].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
@@ -1297,7 +1345,7 @@ const tests = struct {
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
+            try expectPath("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
@@ -1318,7 +1366,7 @@ const tests = struct {
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try testing.expectEqualStrings("string", elements[1].UnescapedInterpolation);
+            try expectPath("string", elements[1].UnescapedInterpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("|", elements[2].StaticText);
@@ -1342,7 +1390,7 @@ const tests = struct {
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try expectPath("boolean", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1367,7 +1415,7 @@ const tests = struct {
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try expectPath("boolean", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 2), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1395,7 +1443,7 @@ const tests = struct {
             try testing.expectEqualStrings(" ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try expectPath("boolean", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1405,7 +1453,7 @@ const tests = struct {
             try testing.expectEqualStrings("\n ", elements[3].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[4]);
-            try testing.expectEqualStrings("boolean", elements[4].Section.key);
+            try expectPath("boolean", elements[4].Section.path);
             try testing.expectEqual(@as(usize, 1), elements[4].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[5]);
@@ -1436,7 +1484,7 @@ const tests = struct {
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try expectPath("boolean", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1461,7 +1509,7 @@ const tests = struct {
             try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try expectPath("boolean", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 0), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1480,7 +1528,7 @@ const tests = struct {
             try testing.expectEqual(@as(usize, 3), elements.len);
 
             try testing.expectEqual(Element.Type.Section, elements[0]);
-            try testing.expectEqualStrings("boolean", elements[0].Section.key);
+            try expectPath("boolean", elements[0].Section.path);
             try testing.expectEqual(@as(usize, 1), elements[0].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[1]);
@@ -1505,7 +1553,7 @@ const tests = struct {
             try testing.expectEqualStrings("#", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try expectPath("boolean", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1533,7 +1581,7 @@ const tests = struct {
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try expectPath("boolean", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1558,7 +1606,7 @@ const tests = struct {
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].Section.key);
+            try expectPath("boolean", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1601,37 +1649,37 @@ const tests = struct {
             try testing.expectEqual(@as(usize, 77), elements.len);
 
             try testing.expectEqual(Element.Type.Section, elements[0]);
-            try testing.expectEqualStrings("a", elements[0].Section.key);
+            try expectPath("a", elements[0].Section.path);
 
             {
                 try testing.expectEqual(@as(usize, 76), elements[0].Section.children_count);
 
                 try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-                try testing.expectEqualStrings("one", elements[1].Interpolation);
+                try expectPath("one", elements[1].Interpolation);
 
                 try testing.expectEqual(Element.Type.StaticText, elements[2]);
                 try testing.expectEqualStrings("\n", elements[2].StaticText);
 
                 try testing.expectEqual(Element.Type.Section, elements[3]);
-                try testing.expectEqualStrings("b", elements[3].Section.key);
+                try expectPath("b", elements[3].Section.path);
 
                 {
                     try testing.expectEqual(@as(usize, 71), elements[3].Section.children_count);
 
                     try testing.expectEqual(Element.Type.Interpolation, elements[4]);
-                    try testing.expectEqualStrings("one", elements[4].Interpolation);
+                    try expectPath("one", elements[4].Interpolation);
 
                     try testing.expectEqual(Element.Type.Interpolation, elements[5]);
-                    try testing.expectEqualStrings("two", elements[5].Interpolation);
+                    try expectPath("two", elements[5].Interpolation);
 
                     try testing.expectEqual(Element.Type.Interpolation, elements[6]);
-                    try testing.expectEqualStrings("one", elements[6].Interpolation);
+                    try expectPath("one", elements[6].Interpolation);
 
                     try testing.expectEqual(Element.Type.StaticText, elements[7]);
                     try testing.expectEqualStrings("\n", elements[7].StaticText);
 
                     try testing.expectEqual(Element.Type.Section, elements[8]);
-                    try testing.expectEqualStrings("c", elements[8].Section.key);
+                    try expectPath("c", elements[8].Section.path);
 
                     {
                         try testing.expectEqual(@as(usize, 62), elements[8].Section.children_count);
@@ -1639,20 +1687,20 @@ const tests = struct {
                     }
 
                     try testing.expectEqual(Element.Type.Interpolation, elements[71]);
-                    try testing.expectEqualStrings("one", elements[71].Interpolation);
+                    try expectPath("one", elements[71].Interpolation);
 
                     try testing.expectEqual(Element.Type.Interpolation, elements[72]);
-                    try testing.expectEqualStrings("two", elements[72].Interpolation);
+                    try expectPath("two", elements[72].Interpolation);
 
                     try testing.expectEqual(Element.Type.Interpolation, elements[73]);
-                    try testing.expectEqualStrings("one", elements[73].Interpolation);
+                    try expectPath("one", elements[73].Interpolation);
 
                     try testing.expectEqual(Element.Type.StaticText, elements[74]);
                     try testing.expectEqualStrings("\n", elements[74].StaticText);
                 }
 
                 try testing.expectEqual(Element.Type.Interpolation, elements[75]);
-                try testing.expectEqualStrings("one", elements[75].Interpolation);
+                try expectPath("one", elements[75].Interpolation);
 
                 try testing.expectEqual(Element.Type.StaticText, elements[76]);
                 try testing.expectEqualStrings("\n", elements[76].StaticText);
@@ -1677,7 +1725,7 @@ const tests = struct {
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try expectPath("boolean", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1702,7 +1750,7 @@ const tests = struct {
             try testing.expectEqualStrings(" | ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try expectPath("boolean", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 2), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1730,7 +1778,7 @@ const tests = struct {
             try testing.expectEqualStrings(" ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try expectPath("boolean", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1740,7 +1788,7 @@ const tests = struct {
             try testing.expectEqualStrings("\n ", elements[3].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[4]);
-            try testing.expectEqualStrings("boolean", elements[4].InvertedSection.key);
+            try expectPath("boolean", elements[4].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[4].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[5]);
@@ -1771,7 +1819,7 @@ const tests = struct {
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try expectPath("boolean", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1796,7 +1844,7 @@ const tests = struct {
             try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try expectPath("boolean", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 0), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1815,7 +1863,7 @@ const tests = struct {
             try testing.expectEqual(@as(usize, 3), elements.len);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[0]);
-            try testing.expectEqualStrings("boolean", elements[0].InvertedSection.key);
+            try expectPath("boolean", elements[0].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[0].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[1]);
@@ -1840,7 +1888,7 @@ const tests = struct {
             try testing.expectEqualStrings("^", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try expectPath("boolean", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1868,7 +1916,7 @@ const tests = struct {
             try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try expectPath("boolean", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1893,7 +1941,7 @@ const tests = struct {
             try testing.expectEqualStrings("|", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try testing.expectEqualStrings("boolean", elements[1].InvertedSection.key);
+            try expectPath("boolean", elements[1].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
@@ -1943,7 +1991,7 @@ const tests = struct {
             try testing.expectEqualStrings("  ", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try testing.expectEqualStrings("data", elements[1].Interpolation);
+            try expectPath("data", elements[1].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("  ", elements[2].StaticText);
@@ -2084,13 +2132,13 @@ const tests = struct {
             try testing.expectEqualStrings("<", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("lambda", elements[1].Section.key);
+            try expectPath("lambda", elements[1].Section.path);
             try testing.expect(elements[1].Section.inner_text != null);
             try testing.expectEqualStrings("{{x}}", elements[1].Section.inner_text.?);
             try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[2]);
-            try testing.expectEqualStrings("x", elements[2].Interpolation);
+            try expectPath("x", elements[2].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[3]);
             try testing.expectEqualStrings(">", elements[3].StaticText);
@@ -2113,7 +2161,7 @@ const tests = struct {
             try testing.expectEqual(Element.Type.Section, elements[1]);
 
             const section = elements[1].Section;
-            try testing.expectEqualStrings("lambda", section.key);
+            try expectPath("lambda", section.path);
             try testing.expect(section.inner_text != null);
             try testing.expectEqualStrings("{{#lambda2}}{{x}}{{/lambda2}}", section.inner_text.?);
             try testing.expectEqual(@as(usize, 2), section.children_count);
@@ -2121,13 +2169,13 @@ const tests = struct {
             try testing.expectEqual(Element.Type.Section, elements[2]);
             const sub_section = elements[2].Section;
 
-            try testing.expectEqualStrings("lambda2", sub_section.key);
+            try expectPath("lambda2", sub_section.path);
             try testing.expect(sub_section.inner_text != null);
             try testing.expectEqualStrings("{{x}}", sub_section.inner_text.?);
             try testing.expectEqual(@as(usize, 1), sub_section.children_count);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try testing.expectEqualStrings("x", elements[3].Interpolation);
+            try expectPath("x", elements[3].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[4]);
             try testing.expectEqualStrings(">", elements[4].StaticText);
@@ -2159,26 +2207,26 @@ const tests = struct {
             try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("section", elements[1].Section.key);
+            try expectPath("section", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 8), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("Name: ", elements[2].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try testing.expectEqualStrings("name", elements[3].Interpolation);
+            try expectPath("name", elements[3].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[4]);
             try testing.expectEqualStrings("\nComments: ", elements[4].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[5]);
-            try testing.expectEqualStrings("comments", elements[5].UnescapedInterpolation);
+            try expectPath("comments", elements[5].UnescapedInterpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[6]);
             try testing.expectEqualStrings("\n", elements[6].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[7]);
-            try testing.expectEqualStrings("inverted", elements[7].InvertedSection.key);
+            try expectPath("inverted", elements[7].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[7].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[8]);
@@ -2241,26 +2289,26 @@ const tests = struct {
             try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
 
             try testing.expectEqual(Element.Type.Section, elements[1]);
-            try testing.expectEqualStrings("section", elements[1].Section.key);
+            try expectPath("section", elements[1].Section.path);
             try testing.expectEqual(@as(usize, 8), elements[1].Section.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[2]);
             try testing.expectEqualStrings("Name: ", elements[2].StaticText);
 
             try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try testing.expectEqualStrings("name", elements[3].Interpolation);
+            try expectPath("name", elements[3].Interpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[4]);
             try testing.expectEqualStrings("\nComments: ", elements[4].StaticText);
 
             try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[5]);
-            try testing.expectEqualStrings("comments", elements[5].UnescapedInterpolation);
+            try expectPath("comments", elements[5].UnescapedInterpolation);
 
             try testing.expectEqual(Element.Type.StaticText, elements[6]);
             try testing.expectEqualStrings("\n", elements[6].StaticText);
 
             try testing.expectEqual(Element.Type.InvertedSection, elements[7]);
-            try testing.expectEqualStrings("inverted", elements[7].InvertedSection.key);
+            try expectPath("inverted", elements[7].InvertedSection.path);
             try testing.expectEqual(@as(usize, 1), elements[7].InvertedSection.children_count);
 
             try testing.expectEqual(Element.Type.StaticText, elements[8]);
@@ -2349,21 +2397,13 @@ const tests = struct {
                     for (elements) |element| {
                         switch (element) {
                             .StaticText => |item| scan(item),
-                            .Interpolation => |item| scan(item),
-                            .UnescapedInterpolation => |item| scan(item),
+                            .Interpolation => |item| scanPath(item),
+                            .UnescapedInterpolation => |item| scanPath(item),
+                            .Section => |item| scanPath(item.path),
+                            .InvertedSection => |item| scanPath(item.path),
                             .Partial => |item| scan(item.key),
-                            .Section => |item| {
-                                scan(item.key);
-                            },
-                            .InvertedSection => |item| {
-                                scan(item.key);
-                            },
-                            .Parent => |item| {
-                                scan(item.key);
-                            },
-                            .Block => |item| {
-                                scan(item.key);
-                            },
+                            .Parent => |item| scan(item.key),
+                            .Block => |item| scan(item.key),
                         }
                     }
                 }
@@ -2376,6 +2416,10 @@ const tests = struct {
                     }
                     _ = prev_char;
                 }
+
+                fn scanPath(value: Element.Path) void {
+                    for (value) |part| scan(part);
+                }
             };
 
             var dummy_render = DummyRender{};
@@ -2386,6 +2430,82 @@ const tests = struct {
     };
 
     const api = struct {
+        test "Path" {
+            const allocator = testing.allocator;
+
+            {
+                var empty_1 = try Element.createPath(allocator, false, "");
+                defer Element.destroyPath(allocator, false, empty_1);
+
+                try testing.expectEqual(@as(usize, 0), empty_1.len);
+            }
+
+            {
+                var empty_2 = try Element.createPath(allocator, false, ".");
+                defer Element.destroyPath(allocator, false, empty_2);
+
+                try testing.expectEqual(@as(usize, 0), empty_2.len);
+            }
+
+            {
+                var empty_3 = try Element.createPath(allocator, false, "..");
+                defer Element.destroyPath(allocator, false, empty_3);
+
+                try testing.expectEqual(@as(usize, 0), empty_3.len);
+            }
+
+            {
+                var single1 = try Element.createPath(allocator, false, "a");
+                defer Element.destroyPath(allocator, false, single1);
+
+                try testing.expectEqual(@as(usize, 1), single1.len);
+                try testing.expectEqualStrings("a", single1[0]);
+            }
+
+            {
+                var single2 = try Element.createPath(allocator, false, ".a");
+                defer Element.destroyPath(allocator, false, single2);
+
+                try testing.expectEqual(@as(usize, 1), single2.len);
+                try testing.expectEqualStrings("a", single2[0]);
+            }
+
+            {
+                var single3 = try Element.createPath(allocator, false, ".a.");
+                defer Element.destroyPath(allocator, false, single3);
+
+                try testing.expectEqual(@as(usize, 1), single3.len);
+                try testing.expectEqualStrings("a", single3[0]);
+            }
+
+            {
+                var double1 = try Element.createPath(allocator, false, "a.b");
+                defer Element.destroyPath(allocator, false, double1);
+
+                try testing.expectEqual(@as(usize, 2), double1.len);
+                try testing.expectEqualStrings("a", double1[0]);
+                try testing.expectEqualStrings("b", double1[1]);
+            }
+
+            {
+                var double2 = try Element.createPath(allocator, false, ".a.b");
+                defer Element.destroyPath(allocator, false, double2);
+
+                try testing.expectEqual(@as(usize, 2), double2.len);
+                try testing.expectEqualStrings("a", double2[0]);
+                try testing.expectEqualStrings("b", double2[1]);
+            }
+
+            {
+                var double3 = try Element.createPath(allocator, false, ".a.b.");
+                defer Element.destroyPath(allocator, false, double3);
+
+                try testing.expectEqual(@as(usize, 2), double3.len);
+                try testing.expectEqualStrings("a", double3[0]);
+                try testing.expectEqualStrings("b", double3[1]);
+            }
+        }
+
         test "parseText API" {
             var result = try parseText(testing.allocator, "{{hello}}world", .{}, .{ .copy_strings = true });
             switch (result) {

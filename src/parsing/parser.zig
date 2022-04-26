@@ -24,6 +24,8 @@ const FileReader = parsing.FileReader;
 
 const memory = @import("memory.zig");
 
+const parsePath = @import("../template.zig").parsePath;
+
 pub fn Parser(comptime options: TemplateOptions) type {
     const copy_string = options.copyStrings();
     const allow_lambdas = options.features.lambdas == .Enabled;
@@ -144,7 +146,8 @@ pub fn Parser(comptime options: TemplateOptions) type {
                             return self.abort(ParseError.UnexpectedCloseSection, &node.text_block);
                         };
 
-                        const key = try self.parseIdentificator(&node.text_block);
+                        const key = try self.parseIdentifier(&node.text_block);
+
                         if (!std.mem.eql(u8, parent_key_value, key)) {
                             return self.abort(ParseError.ClosingTagMismatch, &node.text_block);
                         }
@@ -158,8 +161,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                     => continue,
 
                     else => |block_type| {
-                        const key = try self.dupe(node.text_block.ref_counter, try self.parseIdentificator(&node.text_block));
-                        errdefer if (copy_string) self.gpa.free(key);
+                        const identifier = try self.parseIdentifier(&node.text_block);
 
                         const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
                         errdefer if (copy_string) if (indentation) |indentation_value| self.gpa.free(indentation_value);
@@ -175,26 +177,59 @@ pub fn Parser(comptime options: TemplateOptions) type {
                         errdefer if (copy_string) if (inner_text) |inner_text_value| self.gpa.free(inner_text_value);
 
                         // Just reserve the current position to append the children after this node
+                        // It's safe to increment the len here, since the list already had the capacity adjusted
                         const current_index = list.items.len;
                         list.items.len += 1;
                         count += 1;
 
                         const children_count: u32 = if (node.link.child == null) 0 else children_count: {
                             var children = node.children();
-                            const children_count = try self.createElements(list, key, &children);
+                            const children_count = try self.createElements(list, identifier, &children);
                             count += children_count;
 
                             break :children_count children_count;
                         };
 
-                        const element = switch (block_type) {
-                            .Interpolation => Element{ .Interpolation = key },
-                            .UnescapedInterpolation => Element{ .UnescapedInterpolation = key },
-                            .InvertedSection => Element{ .InvertedSection = .{ .key = key, .children_count = children_count } },
-                            .Section => Element{ .Section = .{ .key = key, .children_count = children_count, .inner_text = inner_text, .delimiters = self.current_level.delimiters } },
-                            .Partial => Element{ .Partial = .{ .key = key, .indentation = indentation } },
-                            .Parent => Element{ .Parent = .{ .key = key, .children_count = children_count, .indentation = indentation } },
-                            .Block => Element{ .Block = .{ .key = key, .children_count = children_count } },
+                        const element: Element = switch (block_type) {
+                            .Interpolation => .{
+                                .Interpolation = try self.parsePath(node.text_block.ref_counter, identifier),
+                            },
+                            .UnescapedInterpolation => .{
+                                .UnescapedInterpolation = try self.parsePath(node.text_block.ref_counter, identifier),
+                            },
+                            .InvertedSection => .{
+                                .InvertedSection = .{
+                                    .path = try self.parsePath(node.text_block.ref_counter, identifier),
+                                    .children_count = children_count,
+                                },
+                            },
+                            .Section => .{
+                                .Section = .{
+                                    .path = try self.parsePath(node.text_block.ref_counter, identifier),
+                                    .children_count = children_count,
+                                    .inner_text = inner_text,
+                                    .delimiters = self.current_level.delimiters,
+                                },
+                            },
+                            .Partial => .{
+                                .Partial = .{
+                                    .key = try self.dupe(node.text_block.ref_counter, identifier),
+                                    .indentation = indentation,
+                                },
+                            },
+                            .Parent => .{
+                                .Parent = .{
+                                    .key = try self.dupe(node.text_block.ref_counter, identifier),
+                                    .children_count = children_count,
+                                    .indentation = indentation,
+                                },
+                            },
+                            .Block => .{
+                                .Block = .{
+                                    .key = try self.dupe(node.text_block.ref_counter, identifier),
+                                    .children_count = children_count,
+                                },
+                            },
                             .StaticText,
                             .Comment,
                             .Delimiters,
@@ -238,7 +273,13 @@ pub fn Parser(comptime options: TemplateOptions) type {
             }
         }
 
-        fn parseIdentificator(self: *Self, text_block: *const TextBlock) AbortError![]const u8 {
+        fn parsePath(self: *Self, ref_counter: RefCounter, identifier: []const u8) Allocator.Error!Element.Path {
+            if (!copy_string) try self.ref_counter_holder.add(self.gpa, ref_counter);
+
+            return try Element.createPath(self.gpa, copy_string, identifier);
+        }
+
+        fn parseIdentifier(self: *Self, text_block: *const TextBlock) AbortError![]const u8 {
             if (text_block.tail) |tail| {
                 var tokenizer = std.mem.tokenize(u8, tail, " \t");
                 if (tokenizer.next()) |token| {
