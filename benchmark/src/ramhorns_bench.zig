@@ -29,6 +29,7 @@ pub fn main() anyerror!void {
         try simpleTemplate(allocator, .Writer, file.writer());
         try partialTemplates(allocator, .Counter, std.io.null_writer);
         try partialTemplates(allocator, .String, std.io.null_writer);
+        try parseTemplates(allocator);
     } else {
         const allocator = std.heap.raw_c_allocator;
 
@@ -37,10 +38,14 @@ pub fn main() anyerror!void {
         try simpleTemplate(allocator, .Writer, file.writer());
         try partialTemplates(allocator, .Counter, std.io.null_writer);
         try partialTemplates(allocator, .String, std.io.null_writer);
+        try parseTemplates(allocator);
     }
 }
 
-const features = mustache.options.Features{
+// Run tests on full featured mustache specs, or minimum settings for the use case
+const full = true;
+const features: mustache.options.Features = if (full)
+.{} else .{
     .preseve_line_breaks_and_indentation = false,
     .lambdas = .Disabled,
 };
@@ -117,6 +122,12 @@ pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anyty
     std.debug.print("----------------------------------\n", .{});
     _ = try repeat("Mustache pre-parsed partials", preParsedPartials, .{ allocator, mode, template, partial_templates, data, writer }, null);
     _ = try repeat("Mustache not parsed partials", notParsedPartials, .{ allocator, mode, template_text, partial_templates_text, data, writer }, null);
+    std.debug.print("\n\n", .{});
+}
+
+pub fn parseTemplates(allocator: Allocator) !void {
+    std.debug.print("----------------------------------\n", .{});
+    _ = try repeat("Parse", parse, .{allocator}, null);
     std.debug.print("\n\n", .{});
 }
 
@@ -222,4 +233,31 @@ fn notParsedPartials(allocator: Allocator, mode: Mode, template_text: []const u8
             return ret.len;
         },
     }
+}
+
+fn parse(allocator: Allocator) !usize {
+    const template_text =
+        \\<html>\
+        \\    <head>\
+        \\        <title>{{title}}</title>\
+        \\    </head>
+        \\    <body>\
+        \\        {{#posts}}\
+        \\            <h1>{{title}}</h1>\
+        \\            <em>{{date}}</em>\
+        \\            <article>\
+        \\                {{{body}}}\
+        \\            </article>\
+        \\        {{/posts}}\
+        \\    </body>\
+        \\</html>\
+    ;
+
+    var template = switch (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })) {
+        .Success => |template| template,
+        else => unreachable,
+    };
+
+    template.deinit(allocator);
+    return template_text.len;
 }
