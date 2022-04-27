@@ -404,9 +404,11 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             var collector = Collector{};
             try self.produceElements(&parser, &collector);
 
-            self.result = .{
-                .Elements = collector.elements,
-            };
+            if (self.result != .Error) {
+                self.result = .{
+                    .Elements = collector.elements,
+                };
+            }
         }
 
         pub fn loadFile(self: *Self, absolute_path: []const u8) Parser.LoadError!void {
@@ -442,7 +444,17 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
         ) ErrorSet(Parser, @TypeOf(render))!void {
             while (true) {
                 var list = std.ArrayListUnmanaged(Element){};
-                defer list.deinit(self.allocator);
+                defer {
+                    if (list.items.len > 0) {
+
+                        // If a parser or render error occurs,
+                        // some elements may be left unconsumed, and need to be freed
+                        const non_consumed_elements = list.toOwnedSlice(self.allocator);
+                        Element.deinitMany(self.allocator, options.copyStrings(), non_consumed_elements);
+                    }
+
+                    list.deinit(self.allocator);
+                }
 
                 var parse_result = try parser.parse();
                 defer parser.ref_counter_holder.free(self.allocator);
@@ -457,8 +469,15 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
                     .Node => |node| {
                         var siblings = node.siblings();
                         _ = parser.createElements(&list, null, &siblings) catch |err| switch (err) {
-                            // TODO: implement a renderError function to render the error message on the output writer
-                            error.ParserAbortedError => return,
+                            error.ParserAbortedError => {
+
+                                // TODO: implement a renderError function to render the error message on the output writer
+                                assert(parser.last_error != null);
+                                self.result = .{
+                                    .Error = parser.last_error.?,
+                                };
+                                return;
+                            },
                             else => return @errSetCast(ErrorSet(@TypeOf(parser), @TypeOf(render)), err),
                         };
 

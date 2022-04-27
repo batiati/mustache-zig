@@ -301,27 +301,29 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
             }
         }
 
-        fn matchTagMark(self: *Self, expected_mark: MarkType) ?Mark {
-            const slice = self.content[self.index..];
+        inline fn matchTagMark(self: *Self, expected_mark: MarkType) ?Mark {
             return switch (expected_mark) {
-                .Starting => matchTagMarkType(.Starting, slice, self.delimiters.starting_delimiter),
-                .Ending => matchTagMarkType(.Ending, slice, self.delimiters.ending_delimiter),
+                .Starting => self.matchTagMarkType(.Starting, self.delimiters.starting_delimiter),
+                .Ending => self.matchTagMarkType(.Ending, self.delimiters.ending_delimiter),
             };
         }
 
-        fn matchTagMarkType(comptime mark_type: MarkType, slice: []const u8, delimiter: []const u8) ?Mark {
+        fn matchTagMarkType(self: *Self, comptime mark_type: MarkType, delimiter: []const u8) ?Mark {
+            const slice = self.content[self.index..];
             const match = std.mem.startsWith(u8, slice, delimiter);
             if (match) {
-                const is_triple_mustache = slice.len > delimiter.len and slice[delimiter.len] == if (mark_type == .Starting) '{' else '}';
+                
+                const triple_mustache = comptime if (mark_type == .Starting) '{' else '}';
+                const is_triple_mustache = slice.len > delimiter.len and slice[delimiter.len] == triple_mustache;
 
                 return Mark{
                     .mark_type = mark_type,
                     .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
                     .delimiter_len = @intCast(u32, if (is_triple_mustache) delimiter.len + 1 else delimiter.len),
                 };
-            } else {
-                return null;
             }
+            
+            return null;
         }
     };
 }
