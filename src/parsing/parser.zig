@@ -176,12 +176,14 @@ pub fn Parser(comptime options: TemplateOptions) type {
                         };
                         errdefer if (copy_string) if (inner_text) |inner_text_value| self.gpa.free(inner_text_value);
 
-                        // Just reserve the current position to append the children after this node
+                        // Just reserve the current position to append the element,
                         // It's safe to increment the len here, since the list already had the capacity adjusted
                         const current_index = list.items.len;
                         list.items.len += 1;
                         count += 1;
 
+                        // Add the children before adding the parent
+                        // because the parent needs the children_count to be calculated
                         const children_count: u32 = if (node.link.child == null) 0 else children_count: {
                             var children = node.children();
                             const children_count = try self.createElements(list, identifier, &children);
