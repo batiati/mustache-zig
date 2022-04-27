@@ -51,7 +51,7 @@ const features: mustache.options.Features = if (full)
 };
 
 pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype) !void {
-    const template_text = "<title>{{&title}}</title><h1>{{&title}}</h1><div>{{{body}}}</div>";
+    const template_text = "<title>{{title}}</title><h1>{{ title }}</h1><div>{{{body}}}</div>";
     const fmt_template = "<title>{s}</title><h1>{s}</h1><div>{s}</div>";
 
     var data = .{
