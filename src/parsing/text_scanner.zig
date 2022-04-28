@@ -309,11 +309,18 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                     const triple_mustache: u8 = if (expected_mark == .Starting) '{' else '}';
                     const is_triple_mustache = slice.len > delimiter.len and slice[delimiter.len] == triple_mustache;
 
-                    return Mark{
-                        .mark_type = expected_mark,
-                        .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
-                        .delimiter_len = @intCast(u32, if (is_triple_mustache) delimiter.len + 1 else delimiter.len),
-                    };
+                    return if (is_triple_mustache)
+                        Mark{
+                            .mark_type = expected_mark,
+                            .delimiter_type = .NoScapeDelimiter,
+                            .delimiter_len = @intCast(u32, delimiter.len + 1),
+                        }
+                    else
+                        Mark{
+                            .mark_type = expected_mark,
+                            .delimiter_type = .Regular,
+                            .delimiter_len = @intCast(u32, delimiter.len),
+                        };
                 }
             }
 
