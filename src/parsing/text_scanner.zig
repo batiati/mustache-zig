@@ -227,7 +227,7 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
 
             if (current_char == '\n') {
                 self.lin += 1;
-                self.col = 1;
+                self.col = 1 + (increment - 1);
             } else {
                 self.col += increment;
             }
