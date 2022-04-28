@@ -169,7 +169,7 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                     var trimmer = Trimmer(Self, TrimmingIndex).init(self);
 
                     while (self.index < self.content.len or
-                        (options.source == .Stream and !self.stream.reader.finished()))
+                        (options.source == .Stream and !self.stream.reader.finished())) : (self.index += 1)
                     {
                         if (options.source == .Stream) {
                             // Request a new slice if near to the end
@@ -179,23 +179,11 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                             }
                         }
 
-                        // Increment the index on defer
-                        var increment: u32 = 1;
-                        defer {
-                            const current_char = self.content[self.index];
-                            self.index += increment;
-
-                            if (current_char == '\n') {
-                                self.lin += 1;
-                                self.col = 1;
-                            } else {
-                                self.col += increment;
-                            }
-                        }
-
                         if (self.matchTagMark(expected_mark)) |mark| {
+                            defer self.index += mark.delimiter_len;
+                            defer self.moveLineCounter(mark.delimiter_len);
+
                             self.state = .{ .ExpectingMark = if (expected_mark == .Starting) .Ending else .Starting };
-                            increment = mark.delimiter_len;
 
                             if (allow_lambdas and mark.mark_type == .Starting) {
                                 self.bookmark.last_starting_mark = self.index;
@@ -213,12 +201,8 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                             };
                         }
 
-                        if (expected_mark == .Starting) {
-
-                            // We just need to keep track of trimming on the text outside tags
-                            // The text inside, like "{{blahblah}}"" will never be trimmed
-                            trimmer.move();
-                        }
+                        self.moveLineCounter(1);
+                        if (expected_mark == .Starting) trimmer.move();
                     }
 
                     // EOF reached, no more parts left
@@ -235,6 +219,17 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                         .right_trimming = trimmer.getRightTrimmingIndex(),
                     };
                 },
+            }
+        }
+
+        fn moveLineCounter(self: *Self, increment: u32) void {
+            const current_char = self.content[self.index];
+
+            if (current_char == '\n') {
+                self.lin += 1;
+                self.col = 1;
+            } else {
+                self.col += increment;
             }
         }
 
@@ -301,28 +296,27 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
             }
         }
 
-        inline fn matchTagMark(self: *Self, expected_mark: MarkType) ?Mark {
-            return switch (expected_mark) {
-                .Starting => self.matchTagMarkType(.Starting, self.delimiters.starting_delimiter),
-                .Ending => self.matchTagMarkType(.Ending, self.delimiters.ending_delimiter),
+        fn matchTagMark(self: *Self, expected_mark: MarkType) ?Mark {
+            const delimiter = switch (expected_mark) {
+                .Starting => self.delimiters.starting_delimiter,
+                .Ending => self.delimiters.ending_delimiter,
             };
-        }
 
-        fn matchTagMarkType(self: *Self, comptime mark_type: MarkType, delimiter: []const u8) ?Mark {
-            const slice = self.content[self.index..];
-            const match = std.mem.startsWith(u8, slice, delimiter);
-            if (match) {
-                
-                const triple_mustache = comptime if (mark_type == .Starting) '{' else '}';
-                const is_triple_mustache = slice.len > delimiter.len and slice[delimiter.len] == triple_mustache;
+            if (delimiter[0] == self.content[self.index]) {
+                const slice = self.content[self.index..];
+                const match = std.mem.startsWith(u8, slice, delimiter);
+                if (match) {
+                    const triple_mustache: u8 = if (expected_mark == .Starting) '{' else '}';
+                    const is_triple_mustache = slice.len > delimiter.len and slice[delimiter.len] == triple_mustache;
 
-                return Mark{
-                    .mark_type = mark_type,
-                    .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
-                    .delimiter_len = @intCast(u32, if (is_triple_mustache) delimiter.len + 1 else delimiter.len),
-                };
+                    return Mark{
+                        .mark_type = expected_mark,
+                        .delimiter_type = if (is_triple_mustache) .NoScapeDelimiter else .Regular,
+                        .delimiter_len = @intCast(u32, if (is_triple_mustache) delimiter.len + 1 else delimiter.len),
+                    };
+                }
             }
-            
+
             return null;
         }
     };

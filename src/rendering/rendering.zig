@@ -436,11 +436,9 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             pub fn render(self: *Self, elements: []const Element) !void {
                 switch (self.out_writer) {
                     .Buffer => |writer| {
-
-                        // Add extra 25% extra capacity for HTML escapes, indentation, etc
                         var list = writer.context;
                         const capacity_hint = self.levelCapacityHint(elements);
-                        try list.ensureUnusedCapacity(list.capacity + (capacity_hint + (capacity_hint / 4)));
+                        try list.ensureUnusedCapacity(capacity_hint);
                     },
                     else => {},
                 }
@@ -869,7 +867,8 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     }
                 }
 
-                return size;
+                // Add extra 25% extra capacity for HTML escapes, indentation, etc
+                return size + (size / 4);
             }
 
             fn pathCapacityHint(
