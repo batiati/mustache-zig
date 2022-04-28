@@ -22,6 +22,8 @@ const LambdaInvoker = lambda.LambdaInvoker;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+pub const FlattenedType = [4]usize;
+
 pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     const Context = RenderEngine.Context;
@@ -567,15 +569,22 @@ pub const Fields = struct {
                 \\Type:
             ++ @typeName(TField));
 
-            return trait.is(.Enum)(TField) or
+            const max_size = @sizeOf(FlattenedType);
+
+            const is_zero_size = @sizeOf(TField) == 0;
+
+            const is_pointer = trait.isSlice(TField) or
+                trait.isSingleItemPtr(TField);
+
+            const can_embed = @sizeOf(TField) <= max_size and
+                (trait.is(.Enum)(TField) or
                 trait.is(.EnumLiteral)(TField) or
-                trait.isSlice(TField) or
-                trait.isSingleItemPtr(TField) or
                 TField == bool or
                 trait.isIntegral(TField) or
                 trait.isFloat(TField) or
-                (trait.is(.Optional)(TField) and byValue(meta.Child(TField))) or
-                @sizeOf(TField) == 0;
+                (trait.is(.Optional)(TField) and byValue(meta.Child(TField))));
+
+            return is_zero_size or is_pointer or can_embed;
         }
     }
 

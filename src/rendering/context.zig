@@ -18,6 +18,7 @@ const LambdaContext = lambda.LambdaContext;
 
 const invoker = @import("invoker.zig");
 const Fields = invoker.Fields;
+const FlattenedType = invoker.FlattenedType;
 
 const map = @import("partials_map.zig");
 
@@ -71,8 +72,6 @@ pub fn getContext(comptime Writer: type, data: anytype, comptime PartialsMap: ty
     const Impl = ContextImpl(Writer, @TypeOf(data), PartialsMap, options);
     return Impl.context(data);
 }
-
-const FlattenedType = [4]usize;
 
 pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
