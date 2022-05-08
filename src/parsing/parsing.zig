@@ -14,76 +14,37 @@ pub const Delimiters = struct {
     ending_delimiter: []const u8 = DefaultEndingDelimiter,
 };
 
-pub const tokens = struct {
-    pub const Comments = '!';
-    pub const Section = '#';
-    pub const InvertedSection = '^';
-    pub const CloseSection = '/';
-    pub const Partial = '>';
-    pub const Parent = '<';
-    pub const Block = '$';
-    pub const NoEscape = '&';
-    pub const Delimiters = '=';
-};
+pub const PartType = enum(u8) {
+    static_text,
+    interpolation,
+    comments = '!',
+    section = '#',
+    inverted_section = '^',
+    close_section = '/',
+    partial = '>',
+    parent = '<',
+    block = '$',
+    no_escape = '&',
+    delimiters = '=',
+    triple_mustache = '{',
 
-pub const BlockType = enum {
-    StaticText,
-    Comment,
-    Delimiters,
-    Interpolation,
-    UnescapedInterpolation,
-    Section,
-    InvertedSection,
-    CloseSection,
-    Partial,
-    Parent,
-    Block,
-
-    pub fn canBeStandAlone(self: BlockType) bool {
+    pub fn canBeStandAlone(self: @This()) bool {
         return switch (self) {
-            .StaticText,
-            .Interpolation,
-            .UnescapedInterpolation,
+            .static_text,
+            .interpolation,
+            .no_escape,
+            .triple_mustache,
             => false,
             else => true,
         };
     }
 
-    pub fn ignoreStaticText(self: BlockType) bool {
+    pub fn ignoreStaticText(self: @This()) bool {
         return switch (self) {
-            .Parent => true,
+            .parent => true,
             else => false,
         };
     }
-};
-
-pub const MarkType = enum {
-
-    /// A starting tag mark, such '{{', '{{{' or any configured delimiter
-    Starting,
-
-    /// A ending tag mark, such '}}', '}}}' or any configured delimiter
-    Ending,
-};
-
-pub const DelimiterType = enum {
-
-    /// Delimiter is '{{', '}}', or any configured delimiter
-    Regular,
-
-    /// Delimiter is a non-scaped (aka triple mustache) delimiter such '{{{' or '}}}'
-    NoScapeDelimiter,
-};
-
-pub const Mark = struct {
-    mark_type: MarkType,
-    delimiter_type: DelimiterType,
-    delimiter_len: u32,
-};
-
-pub const Event = union(enum) {
-    Mark: Mark,
-    Eof,
 };
 
 pub fn TrimmingIndex(comptime options: TemplateOptions) type {
@@ -102,7 +63,7 @@ pub fn TrimmingIndex(comptime options: TemplateOptions) type {
 
 pub const Level = @import("level.zig").Level;
 pub const Node = @import("node.zig").Node;
-pub const TextBlock = @import("text_block.zig").TextBlock;
+pub const TextPart = @import("text_part.zig").TextPart;
 pub const TextScanner = @import("text_scanner.zig").TextScanner;
 pub const Trimmer = @import("trimmer.zig").Trimmer;
 pub const FileReader = @import("file_reader.zig").FileReader;

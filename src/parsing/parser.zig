@@ -18,8 +18,7 @@ const testing = std.testing;
 
 const parsing = @import("parsing.zig");
 const Delimiters = parsing.Delimiters;
-const tokens = parsing.tokens;
-const BlockType = parsing.BlockType;
+const PartType = parsing.PartType;
 const FileReader = parsing.FileReader;
 
 const memory = @import("memory.zig");
@@ -37,7 +36,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
     return struct {
         const Level = parsing.Level(options);
         const Node = parsing.Node(options);
-        const TextBlock = parsing.TextBlock(options);
+        const TextPart = parsing.TextPart(options);
         const TextScanner = parsing.TextScanner(options);
 
         pub const LoadError = Allocator.Error || if (options.source == .Stream) std.fs.File.ReadError || std.fs.File.OpenError else error{};
@@ -123,47 +122,49 @@ pub fn Parser(comptime options: TemplateOptions) type {
             defer Node.unRefMany(self.gpa, iterator);
 
             while (iterator.next()) |node| {
-                switch (node.block_type) {
-                    .StaticText => {
-                        if (node.text_block.tail) |content| {
+                switch (node.part_type) {
+                    .static_text => {
 
-                            //Empty strings are represented as NULL slices
-                            assert(content.len > 0);
-
-                            const static_text = Element{
-                                .StaticText = try self.dupe(node.text_block.ref_counter, content),
-                            };
-
-                            list.appendAssumeCapacity(static_text);
-                            count += 1;
+                        //Empty strings are represented as NULL slices
+                        // TODO: assert(node.text_part.content.len == 0);
+                        if (node.text_part.content.len == 0) {
+                            node.unRef(self.gpa);
+                            continue;
                         }
+
+                        const static_text = Element{
+                            .StaticText = try self.dupe(node.text_part.ref_counter, node.text_part.content),
+                        };
+
+                        list.appendAssumeCapacity(static_text);
+                        count += 1;
 
                         continue;
                     },
 
-                    .CloseSection => {
+                    .close_section => {
                         const parent_key_value = parent_key orelse {
-                            return self.abort(ParseError.UnexpectedCloseSection, &node.text_block);
+                            return self.abort(ParseError.UnexpectedCloseSection, &node.text_part);
                         };
 
-                        const key = try self.parseIdentifier(&node.text_block);
+                        const key = try self.parseIdentifier(&node.text_part);
 
                         if (!std.mem.eql(u8, parent_key_value, key)) {
-                            return self.abort(ParseError.ClosingTagMismatch, &node.text_block);
+                            return self.abort(ParseError.ClosingTagMismatch, &node.text_part);
                         }
 
                         continue;
                     },
 
                     // No output
-                    .Comment,
-                    .Delimiters,
+                    .comments,
+                    .delimiters,
                     => continue,
 
-                    else => |block_type| {
-                        const identifier = try self.parseIdentifier(&node.text_block);
+                    else => |part_type| {
+                        const identifier = try self.parseIdentifier(&node.text_part);
 
-                        const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_block.ref_counter, node_indentation) else null;
+                        const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node.text_part.ref_counter, node_indentation) else null;
                         errdefer if (copy_string) if (indentation) |indentation_value| self.gpa.free(indentation_value);
 
                         const inner_text: ?[]const u8 = inner_text: {
@@ -192,50 +193,50 @@ pub fn Parser(comptime options: TemplateOptions) type {
                             break :children_count children_count;
                         };
 
-                        const element: Element = switch (block_type) {
-                            .Interpolation => .{
-                                .Interpolation = try self.parsePath(node.text_block.ref_counter, identifier),
+                        const element: Element = switch (part_type) {
+                            .interpolation => .{
+                                .Interpolation = try self.parsePath(node.text_part.ref_counter, identifier),
                             },
-                            .UnescapedInterpolation => .{
-                                .UnescapedInterpolation = try self.parsePath(node.text_block.ref_counter, identifier),
+                            .no_escape, .triple_mustache => .{
+                                .UnescapedInterpolation = try self.parsePath(node.text_part.ref_counter, identifier),
                             },
-                            .InvertedSection => .{
+                            .inverted_section => .{
                                 .InvertedSection = .{
-                                    .path = try self.parsePath(node.text_block.ref_counter, identifier),
+                                    .path = try self.parsePath(node.text_part.ref_counter, identifier),
                                     .children_count = children_count,
                                 },
                             },
-                            .Section => .{
+                            .section => .{
                                 .Section = .{
-                                    .path = try self.parsePath(node.text_block.ref_counter, identifier),
+                                    .path = try self.parsePath(node.text_part.ref_counter, identifier),
                                     .children_count = children_count,
                                     .inner_text = inner_text,
                                     .delimiters = self.current_level.delimiters,
                                 },
                             },
-                            .Partial => .{
+                            .partial => .{
                                 .Partial = .{
-                                    .key = try self.dupe(node.text_block.ref_counter, identifier),
+                                    .key = try self.dupe(node.text_part.ref_counter, identifier),
                                     .indentation = indentation,
                                 },
                             },
-                            .Parent => .{
+                            .parent => .{
                                 .Parent = .{
-                                    .key = try self.dupe(node.text_block.ref_counter, identifier),
+                                    .key = try self.dupe(node.text_part.ref_counter, identifier),
                                     .children_count = children_count,
                                     .indentation = indentation,
                                 },
                             },
-                            .Block => .{
+                            .block => .{
                                 .Block = .{
-                                    .key = try self.dupe(node.text_block.ref_counter, identifier),
+                                    .key = try self.dupe(node.text_part.ref_counter, identifier),
                                     .children_count = children_count,
                                 },
                             },
-                            .StaticText,
-                            .Comment,
-                            .Delimiters,
-                            .CloseSection,
+                            .static_text,
+                            .comments,
+                            .delimiters,
+                            .close_section,
                             => unreachable, // Already processed
                         };
 
@@ -248,15 +249,16 @@ pub fn Parser(comptime options: TemplateOptions) type {
             return count;
         }
 
-        fn parseDelimiters(self: *Self, text_block: *TextBlock) AbortError!Delimiters {
-            var delimiter: ?Delimiters = if (text_block.tail) |content| blk: {
+        fn parseDelimiters(self: *Self, text_part: *TextPart) AbortError!Delimiters {
+            var delimiter: ?Delimiters = blk: {
+                var content = text_part.content;
 
                 // Delimiters are the only case of match closing tags {{= and =}}
                 // Validate if the content ends with the proper "=" symbol before parsing the delimiters
-                if (content[content.len - 1] != tokens.Delimiters) break :blk null;
-                text_block.tail = content[0 .. content.len - 1];
+                if (content[content.len - 1] != @enumToInt(PartType.delimiters)) break :blk null;
+                content = content[0 .. content.len - 1];
 
-                var iterator = std.mem.tokenize(u8, text_block.tail.?, " \t");
+                var iterator = std.mem.tokenize(u8, content, " \t");
 
                 var starting_delimiter = iterator.next() orelse break :blk null;
                 var ending_delimiter = iterator.next() orelse break :blk null;
@@ -266,12 +268,12 @@ pub fn Parser(comptime options: TemplateOptions) type {
                     .starting_delimiter = starting_delimiter,
                     .ending_delimiter = ending_delimiter,
                 };
-            } else null;
+            };
 
             if (delimiter) |ret| {
                 return ret;
             } else {
-                return self.abort(ParseError.InvalidDelimiters, text_block);
+                return self.abort(ParseError.InvalidDelimiters, text_part);
             }
         }
 
@@ -281,17 +283,15 @@ pub fn Parser(comptime options: TemplateOptions) type {
             return try Element.createPath(self.gpa, copy_string, identifier);
         }
 
-        fn parseIdentifier(self: *Self, text_block: *const TextBlock) AbortError![]const u8 {
-            if (text_block.tail) |tail| {
-                var tokenizer = std.mem.tokenize(u8, tail, " \t");
-                if (tokenizer.next()) |token| {
-                    if (tokenizer.next() == null) {
-                        return token;
-                    }
+        fn parseIdentifier(self: *Self, text_part: *const TextPart) AbortError![]const u8 {
+            var tokenizer = std.mem.tokenize(u8, text_part.content, " \t");
+            if (tokenizer.next()) |token| {
+                if (tokenizer.next() == null) {
+                    return token;
                 }
             }
 
-            return self.abort(ParseError.InvalidIdentifier, text_block);
+            return self.abort(ParseError.InvalidIdentifier, text_part);
         }
 
         fn parseTree(self: *Self) (AbortError || LoadError)!?*Node {
@@ -302,61 +302,56 @@ pub fn Parser(comptime options: TemplateOptions) type {
             }
 
             const arena = self.epoch_arena.allocator();
-            var static_text_block: ?*Node = null;
+            var static_text_part: ?*Node = null;
 
-            while (try self.text_scanner.next(self.gpa)) |*text_block| {
-                errdefer text_block.unRef(self.gpa);
-
-                var block_type = (try self.matchBlockType(text_block)) orelse {
-                    text_block.unRef(self.gpa);
-                    continue;
-                };
+            while (try self.text_scanner.next(self.gpa)) |*text_part| {
+                errdefer text_part.unRef(self.gpa);
 
                 // Befone adding,
-                switch (block_type) {
-                    .StaticText => {
+                switch (text_part.part_type) {
+                    .static_text => {
                         if (self.current_level.current_node) |current_node| {
-                            if (current_node.block_type.ignoreStaticText()) {
-                                text_block.unRef(self.gpa);
+                            if (current_node.part_type.ignoreStaticText()) {
+                                text_part.unRef(self.gpa);
                                 continue;
                             }
                         }
                     },
-                    .Delimiters => {
+                    .delimiters => {
 
                         //Apply the new delimiters to the reader immediately
-                        const new_delimiters = try self.parseDelimiters(text_block);
+                        const new_delimiters = try self.parseDelimiters(text_part);
 
                         self.text_scanner.setDelimiters(new_delimiters) catch |err| {
-                            return self.abort(err, text_block);
+                            return self.abort(err, text_part);
                         };
 
                         self.current_level.delimiters = new_delimiters;
-                        text_block.unRef(self.gpa);
+                        text_part.unRef(self.gpa);
                     },
 
                     else => {},
                 }
 
                 // Adding,
-                try self.current_level.addNode(arena, block_type, text_block.*);
+                try self.current_level.addNode(arena, text_part.*);
 
                 // After adding
-                switch (block_type) {
-                    .StaticText => {
-                        static_text_block = self.current_level.current_node;
-                        assert(static_text_block != null);
+                switch (text_part.part_type) {
+                    .static_text => {
+                        static_text_part = self.current_level.current_node;
+                        assert(static_text_part != null);
 
-                        static_text_block.?.trimStandAlone();
+                        static_text_part.?.trimStandAlone();
 
                         // When options.output = .Render,
                         // A stand-alone line in the root level indicates that the previous produced nodes can be rendered
                         if (options.output == .Render) {
                             if (self.current_level == self.root and
-                                static_text_block.?.text_block.left_trimming != .PreserveWhitespaces)
+                                static_text_part.?.text_part.left_trimming != .PreserveWhitespaces)
                             {
 
-                                // This text_block is independent from the rest and can be yelded later
+                                // This text_part is independent from the rest and can be yelded later
                                 // Let's produce the elements parsed until now
                                 if (self.root.list.removeLast()) {
                                     const node = self.root.list.finish();
@@ -369,31 +364,31 @@ pub fn Parser(comptime options: TemplateOptions) type {
                                     self.current_level = root;
 
                                     // Adding it again for the next iteration,
-                                    try self.current_level.addNode(new_arena, block_type, static_text_block.?.text_block);
+                                    try self.current_level.addNode(new_arena, static_text_part.?.text_part);
                                     return node;
                                 }
                             }
                         }
                     },
 
-                    .Section => {
+                    .section => {
                         try self.text_scanner.beginBookmark(self.gpa);
                         self.current_level = try self.current_level.nextLevel(arena);
                     },
-                    .InvertedSection,
-                    .Parent,
-                    .Block,
+                    .inverted_section,
+                    .parent,
+                    .block,
                     => {
                         self.current_level = try self.current_level.nextLevel(arena);
                     },
 
-                    .CloseSection => {
+                    .close_section => {
                         const ret = self.current_level.endLevel() catch |err| {
-                            return self.abort(err, text_block);
+                            return self.abort(err, text_part);
                         };
 
                         self.current_level = ret.level;
-                        if (allow_lambdas and ret.parent_node.block_type == .Section) {
+                        if (allow_lambdas and ret.parent_node.part_type == .section) {
                             if (try self.text_scanner.endBookmark(self.gpa)) |bookmark| {
                                 ret.parent_node.inner_text = bookmark;
                             }
@@ -402,7 +397,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                         // Restore parent delimiters
 
                         self.text_scanner.setDelimiters(self.current_level.delimiters) catch |err| {
-                            return self.abort(err, text_block);
+                            return self.abort(err, text_part);
                         };
                     },
 
@@ -414,7 +409,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                 return self.abort(ParseError.UnexpectedEof, null);
             }
 
-            if (static_text_block) |static_text| {
+            if (static_text_part) |static_text| {
                 if (self.current_level.current_node) |last_node| {
                     static_text.trimLast(last_node);
                 }
@@ -425,47 +420,11 @@ pub fn Parser(comptime options: TemplateOptions) type {
             return node;
         }
 
-        /// Matches the BlockType produced so far
-        fn matchBlockType(self: *Self, text_block: *TextBlock) !?BlockType {
-            switch (text_block.event) {
-                .Mark => |tag_mark| {
-                    switch (tag_mark.mark_type) {
-                        .Starting => {
-
-                            // If there is no current action, any content is a static text
-                            if (text_block.tail != null) {
-                                return .StaticText;
-                            }
-                        },
-
-                        .Ending => {
-                            const is_triple_mustache = tag_mark.delimiter_type == .NoScapeDelimiter;
-                            if (is_triple_mustache) {
-                                return .UnescapedInterpolation;
-                            } else {
-
-                                // Consider "interpolation" if there is none of the tagType indication (!, #, ^, >, <, $, =, &, /)
-                                return text_block.readBlockType() orelse .Interpolation;
-                            }
-                        },
-                    }
-                },
-                .Eof => {
-                    switch (self.text_scanner.state) {
-                        .Finished => if (text_block.tail != null) return .StaticText,
-                        else => return self.abort(ParseError.UnexpectedEof, text_block),
-                    }
-                },
-            }
-
-            return null;
-        }
-
-        fn abort(self: *Self, err: ParseError, text_block: ?*const TextBlock) AbortError {
+        fn abort(self: *Self, err: ParseError, text_part: ?*const TextPart) AbortError {
             self.last_error = ParseErrorDetail{
                 .parse_error = err,
-                .lin = if (text_block) |p| p.lin else 0,
-                .col = if (text_block) |p| p.col else 0,
+                .lin = if (text_part) |p| p.lin else 0,
+                .col = if (text_part) |p| p.col else 0,
             };
 
             return AbortError.ParserAbortedError;
@@ -500,7 +459,7 @@ test "Basic parse" {
         defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
         try testing.expectEqual(@as(usize, 1), siblings.len());
-        try testing.expectEqual(BlockType.Comment, siblings.next().?.block_type);
+        try testing.expectEqual(PartType.comments, siblings.next().?.part_type);
     } else {
         try testing.expect(false);
     }
@@ -515,43 +474,43 @@ test "Basic parse" {
         try testing.expectEqual(@as(usize, 2), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
-        try testing.expectEqualStrings("  Hello\n", node_0.text_block.tail.?);
+        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expectEqualStrings("  Hello\n", node_0.text_part.content);
 
         const node_1 = siblings.next().?;
-        try testing.expectEqual(BlockType.Section, node_1.block_type);
+        try testing.expectEqual(PartType.section, node_1.part_type);
 
         if (node_1.link.child != null) {
             var children = node_1.children();
             try testing.expectEqual(@as(usize, 8), children.len());
 
             const section_0 = children.next().?;
-            try testing.expectEqual(BlockType.StaticText, section_0.block_type);
+            try testing.expectEqual(PartType.static_text, section_0.part_type);
 
             const section_1 = children.next().?;
-            try testing.expectEqual(BlockType.Interpolation, section_1.block_type);
-            try testing.expectEqualStrings("name", section_1.text_block.tail.?);
+            try testing.expectEqual(PartType.interpolation, section_1.part_type);
+            try testing.expectEqualStrings("name", section_1.text_part.content);
 
             const section_2 = children.next().?;
-            try testing.expectEqual(BlockType.StaticText, section_2.block_type);
+            try testing.expectEqual(PartType.static_text, section_2.part_type);
 
             const section_3 = children.next().?;
-            try testing.expectEqual(BlockType.UnescapedInterpolation, section_3.block_type);
-            try testing.expectEqualStrings("comments", section_3.text_block.tail.?);
+            try testing.expectEqual(PartType.no_escape, section_3.part_type);
+            try testing.expectEqualStrings("comments", section_3.text_part.content);
 
             const section_4 = children.next().?;
-            try testing.expectEqual(BlockType.StaticText, section_4.block_type);
-            try testing.expectEqualStrings("\n", section_4.text_block.tail.?);
+            try testing.expectEqual(PartType.static_text, section_4.part_type);
+            try testing.expectEqualStrings("\n", section_4.text_part.content);
 
             const section_5 = children.next().?;
-            try testing.expectEqual(BlockType.InvertedSection, section_5.block_type);
+            try testing.expectEqual(PartType.inverted_section, section_5.part_type);
 
             const section_6 = children.next().?;
-            try testing.expectEqual(BlockType.StaticText, section_6.block_type);
-            try testing.expectEqualStrings("\n", section_6.text_block.tail.?);
+            try testing.expectEqual(PartType.static_text, section_6.part_type);
+            try testing.expectEqualStrings("\n", section_6.text_part.content);
 
             const section_7 = children.next().?;
-            try testing.expectEqual(BlockType.CloseSection, section_7.block_type);
+            try testing.expectEqual(PartType.close_section, section_7.part_type);
         } else {
             try testing.expect(false);
         }
@@ -568,8 +527,8 @@ test "Basic parse" {
         try testing.expectEqual(@as(usize, 1), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
-        try testing.expectEqualStrings("World", node_0.text_block.tail.?);
+        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expectEqualStrings("World", node_0.text_part.content);
     } else {
         try testing.expect(false);
     }
@@ -601,11 +560,11 @@ test "Scan standAlone tags" {
         try testing.expectEqual(@as(usize, 2), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
-        try testing.expect(node_0.text_block.tail == null);
+        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expect(node_0.text_part.content.len == 0);
 
         const node_1 = siblings.next().?;
-        try testing.expectEqual(BlockType.Comment, node_1.block_type);
+        try testing.expectEqual(PartType.comments, node_1.part_type);
     } else {
         try testing.expect(false);
     }
@@ -618,8 +577,8 @@ test "Scan standAlone tags" {
         try testing.expectEqual(@as(usize, 1), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
-        try testing.expectEqualStrings("Hello", node_0.text_block.tail.?);
+        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expectEqualStrings("Hello", node_0.text_part.content);
     } else {
         try testing.expect(false);
     }
@@ -649,8 +608,8 @@ test "Scan delimiters Tags" {
         try testing.expectEqual(@as(usize, 1), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(BlockType.Delimiters, node_0.block_type);
-        try testing.expectEqualStrings("[ ]", node_0.text_block.tail.?);
+        try testing.expectEqual(PartType.delimiters, node_0.part_type);
+        try testing.expectEqualStrings("[ ]", node_0.text_part.content);
     } else {
         try testing.expect(false);
     }
@@ -663,12 +622,12 @@ test "Scan delimiters Tags" {
         try testing.expectEqual(@as(usize, 2), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(BlockType.StaticText, node_0.block_type);
-        try testing.expect(node_0.text_block.tail == null);
+        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expect(node_0.text_part.content.len == 0);
 
         const node_1 = siblings.next().?;
-        try testing.expectEqual(BlockType.Interpolation, node_1.block_type);
-        try testing.expectEqualStrings("interpolation", node_1.text_block.tail.?);
+        try testing.expectEqual(PartType.interpolation, node_1.part_type);
+        try testing.expectEqualStrings("interpolation", node_1.text_part.content);
     } else {
         try testing.expect(false);
     }
@@ -714,8 +673,8 @@ test "Parse - Malformed " {
 
         const node_0 = siblings.next();
         try testing.expect(node_0 != null);
-        try testing.expectEqual(BlockType.StaticText, node_0.?.block_type);
-        try testing.expectEqualStrings("missing}}", node_0.?.text_block.tail.?);
+        try testing.expectEqual(PartType.static_text, node_0.?.part_type);
+        try testing.expectEqualStrings("missing}}", node_0.?.text_part.content);
     } else {
         try testing.expect(false);
     }

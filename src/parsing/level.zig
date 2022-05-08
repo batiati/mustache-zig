@@ -8,13 +8,13 @@ const ParseError = mustache.ParseError;
 const TemplateOptions = mustache.options.TemplateOptions;
 
 const parsing = @import("parsing.zig");
-const BlockType = parsing.BlockType;
+const PartType = parsing.PartType;
 
 const assert = std.debug.assert;
 const testing = std.testing;
 
 pub fn Level(comptime options: TemplateOptions) type {
-    const TextBlock = parsing.TextBlock(options);
+    const TextPart = parsing.TextPart(options);
     const Node = parsing.Node(options);
 
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
@@ -95,11 +95,11 @@ pub fn Level(comptime options: TemplateOptions) type {
             return self;
         }
 
-        pub fn addNode(self: *Self, arena: Allocator, block_type: BlockType, text_block: TextBlock) Allocator.Error!void {
+        pub fn addNode(self: *Self, arena: Allocator, text_part: TextPart) Allocator.Error!void {
             var node = try arena.create(Node);
             node.* = .{
-                .block_type = block_type,
-                .text_block = text_block,
+                .part_type = text_part.part_type,
+                .text_part = text_part,
                 .link = .{
                     .prev = if (has_trimming) self.current_node else {},
                 },
@@ -140,7 +140,7 @@ pub fn Level(comptime options: TemplateOptions) type {
             var level = try Self.create(allocator, .{});
             try testing.expect(level.current_node == null);
 
-            try level.addNode(allocator, undefined, undefined);
+            try level.addNode(allocator, undefined);
             try testing.expect(level.current_node != null);
             var n1 = level.current_node;
 
@@ -148,7 +148,7 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expect(n1.?.link.prev == null);
             try testing.expect(n1.?.link.next_sibling == null);
 
-            try level.addNode(allocator, undefined, undefined);
+            try level.addNode(allocator, undefined);
             try testing.expect(level.current_node != null);
             var n2 = level.current_node.?;
             try testing.expect(n2.link.prev != null);
@@ -161,7 +161,7 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expect(level2.current_node != null);
             try testing.expectEqual(level2.current_node.?, n2);
 
-            try level2.addNode(allocator, undefined, undefined);
+            try level2.addNode(allocator, undefined);
             try testing.expect(level2.current_node != null);
             var n3 = level2.current_node.?;
             try testing.expect(n3.link.prev != null);
@@ -169,7 +169,7 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expect(n3.link.next_sibling == null);
             try testing.expect(n2.link.next_sibling == null);
 
-            try level2.addNode(allocator, undefined, undefined);
+            try level2.addNode(allocator, undefined);
             try testing.expect(level2.current_node != null);
             var n4 = level2.current_node.?;
             try testing.expectEqual(level2.current_node.?, n4);
@@ -211,8 +211,8 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expectEqual(false, list.removeLast());
 
             var n1: Node = .{
-                .block_type = undefined,
-                .text_block = undefined,
+                .part_type = undefined,
+                .text_part = undefined,
                 .inner_text = undefined,
             };
 
@@ -223,8 +223,8 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expectEqual(false, list.removeLast());
 
             var n2: Node = .{
-                .block_type = undefined,
-                .text_block = undefined,
+                .part_type = undefined,
+                .text_part = undefined,
                 .inner_text = undefined,
             };
 
@@ -236,8 +236,8 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expectEqual(&n2, list.items.?.head.link.next_sibling.?);
 
             var n3: Node = .{
-                .block_type = undefined,
-                .text_block = undefined,
+                .part_type = undefined,
+                .text_part = undefined,
                 .inner_text = undefined,
             };
 

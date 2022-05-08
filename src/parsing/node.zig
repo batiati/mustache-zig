@@ -10,11 +10,11 @@ const TemplateOptions = mustache.options.TemplateOptions;
 const memory = @import("memory.zig");
 
 const parsing = @import("parsing.zig");
-const BlockType = parsing.BlockType;
+const PartType = parsing.PartType;
 
 pub fn Node(comptime options: TemplateOptions) type {
     const RefCountedSlice = memory.RefCountedSlice(options);
-    const TextBlock = parsing.TextBlock(options);
+    const TextPart = parsing.TextPart(options);
 
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
     const allow_lambdas = options.features.lambdas == .Enabled;
@@ -22,8 +22,8 @@ pub fn Node(comptime options: TemplateOptions) type {
     return struct {
         const Self = @This();
 
-        block_type: BlockType,
-        text_block: TextBlock,
+        part_type: PartType,
+        text_part: TextPart,
         inner_text: if (allow_lambdas) ?RefCountedSlice else void = if (allow_lambdas) null else {},
 
         /// Pointers used to navigate during the parse process
@@ -98,7 +98,7 @@ pub fn Node(comptime options: TemplateOptions) type {
         /// A node holds a RefCounter to the underlying text buffer
         /// This functions unref the counter and free the buffer if no other Node references it
         pub fn unRef(self: *Self, allocator: Allocator) void {
-            self.text_block.unRef(allocator);
+            self.text_part.unRef(allocator);
             if (allow_lambdas) {
                 if (self.inner_text) |*inner_text| {
                     inner_text.ref_counter.free(allocator);
@@ -109,18 +109,18 @@ pub fn Node(comptime options: TemplateOptions) type {
         pub fn trimStandAlone(self: *Self) void {
             if (comptime !has_trimming) return;
 
-            if (self.block_type == .StaticText) {
+            if (self.part_type == .static_text) {
                 if (self.link.prev) |prev_node| {
-                    switch (self.text_block.left_trimming) {
+                    switch (self.text_part.left_trimming) {
                         .PreserveWhitespaces => {},
                         .Trimmed => assert(false),
                         .AllowTrimming => {
                             const can_trim = trimPreviousNodesRight(prev_node);
 
                             if (can_trim) {
-                                self.text_block.trimLeft();
+                                self.text_part.trimLeft();
                             } else {
-                                self.text_block.left_trimming = .PreserveWhitespaces;
+                                self.text_part.left_trimming = .PreserveWhitespaces;
                             }
                         },
                     }
@@ -131,29 +131,29 @@ pub fn Node(comptime options: TemplateOptions) type {
         pub fn trimLast(self: *Self, last_node: *Self) void {
             if (comptime !has_trimming) return;
 
-            if (self.block_type == .StaticText) {
+            if (self.part_type == .static_text) {
                 if (self == last_node) return;
 
                 var node = last_node;
                 while (node != self) {
-                    assert(node.block_type != .StaticText);
+                    assert(node.part_type != .static_text);
                     assert(node.link.prev != null);
 
-                    if (!node.block_type.canBeStandAlone()) {
+                    if (!node.part_type.canBeStandAlone()) {
                         return;
                     } else {
                         node = node.link.prev.?;
                     }
                 }
 
-                node.text_block.trimRight();
+                node.text_part.trimRight();
             }
         }
 
         pub fn getIndentation(self: *const Self) ?[]const u8 {
             return if (comptime has_trimming)
-                switch (self.block_type) {
-                    .Partial, .Parent => getPreviousNodeIndentation(self.link.prev),
+                switch (self.part_type) {
+                    .partial, .parent => getPreviousNodeIndentation(self.link.prev),
                     else => null,
                 }
             else
@@ -164,27 +164,27 @@ pub fn Node(comptime options: TemplateOptions) type {
             if (comptime !has_trimming) return false;
 
             if (parent_node) |node| {
-                if (node.block_type == .StaticText) {
-                    switch (node.text_block.right_trimming) {
+                if (node.part_type == .static_text) {
+                    switch (node.text_part.right_trimming) {
                         .AllowTrimming => |trimming| {
 
                             // Non standalone tags must check the previous node
                             const can_trim = trimming.stand_alone or trimPreviousNodesRight(node.link.prev);
                             if (can_trim) {
-                                node.text_block.trimRight();
+                                node.text_part.trimRight();
                                 return true;
                             } else {
-                                node.text_block.right_trimming = .PreserveWhitespaces;
+                                node.text_part.right_trimming = .PreserveWhitespaces;
 
                                 // If the space is preserved, it is not considered indentation
-                                node.text_block.indentation = null;
+                                node.text_part.indentation = null;
                                 return false;
                             }
                         },
                         .Trimmed => return true,
                         .PreserveWhitespaces => return false,
                     }
-                } else if (node.block_type.canBeStandAlone()) {
+                } else if (node.part_type.canBeStandAlone()) {
                     // Depends on the previous node
                     return trimPreviousNodesRight(node.link.prev);
                 } else {
@@ -201,8 +201,8 @@ pub fn Node(comptime options: TemplateOptions) type {
             if (comptime !has_trimming) return null;
 
             if (parent_node) |node| {
-                return switch (node.block_type) {
-                    .StaticText => node.text_block.indentation,
+                return switch (node.part_type) {
+                    .static_text => node.text_part.indentation,
                     else => getPreviousNodeIndentation(node.link.prev),
                 };
             } else {
