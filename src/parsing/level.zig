@@ -98,7 +98,6 @@ pub fn Level(comptime options: TemplateOptions) type {
         pub fn addNode(self: *Self, arena: Allocator, text_part: TextPart) Allocator.Error!void {
             var node = try arena.create(Node);
             node.* = .{
-                .part_type = text_part.part_type,
                 .text_part = text_part,
                 .link = .{
                     .prev = if (has_trimming) self.current_node else {},
@@ -211,7 +210,6 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expectEqual(false, list.removeLast());
 
             var n1: Node = .{
-                .part_type = undefined,
                 .text_part = undefined,
                 .inner_text = undefined,
             };
@@ -223,7 +221,6 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expectEqual(false, list.removeLast());
 
             var n2: Node = .{
-                .part_type = undefined,
                 .text_part = undefined,
                 .inner_text = undefined,
             };
@@ -236,7 +233,6 @@ pub fn Level(comptime options: TemplateOptions) type {
             try testing.expectEqual(&n2, list.items.?.head.link.next_sibling.?);
 
             var n3: Node = .{
-                .part_type = undefined,
                 .text_part = undefined,
                 .inner_text = undefined,
             };

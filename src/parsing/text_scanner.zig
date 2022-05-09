@@ -232,7 +232,7 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
             } else {
                 self.col += 1;
             }
-        }        
+        }
 
         inline fn produceOpen(self: *Self, trimmer: Trimmer, char: u8) ?TextPart {
             const tail = tail: {
@@ -444,7 +444,7 @@ test "basic tests" {
     var part_1 = try reader.next(allocator);
     try expectTag(.static_text, "Hello", part_1, 1, 6);
     defer part_1.?.unRef(allocator);
-    
+
     var part_2 = try reader.next(allocator);
     try expectTag(.interpolation, "tag1", part_2, 1, 12);
     defer part_2.?.unRef(allocator);
@@ -568,13 +568,13 @@ test "bookmarks" {
     try reader.beginBookmark(allocator);
 
     var part_4 = try reader.next(allocator);
-    try expectTag(.static_text,  "content2", part_4, 1, 49);
+    try expectTag(.static_text, "content2", part_4, 1, 49);
     defer part_4.?.unRef(allocator);
 
     var part_5 = try reader.next(allocator);
-    try expectTag(.close_section,  "section2", part_5, 1, 60);
+    try expectTag(.close_section, "section2", part_5, 1, 60);
     defer part_5.?.unRef(allocator);
-    
+
     if (try reader.endBookmark(allocator)) |*bookmark_1| {
         try testing.expectEqualStrings("content2", bookmark_1.content);
         bookmark_1.ref_counter.free(allocator);
@@ -583,11 +583,11 @@ test "bookmarks" {
     }
 
     var part_6 = try reader.next(allocator);
-    try expectTag(.static_text, "end_content1",  part_6, 1, 74);
+    try expectTag(.static_text, "end_content1", part_6, 1, 74);
     defer part_6.?.unRef(allocator);
 
     var part_7 = try reader.next(allocator);
-    try expectTag(.close_section,  "section1", part_7, 1, 85);
+    try expectTag(.close_section, "section1", part_7, 1, 85);
     defer part_7.?.unRef(allocator);
 
     if (try reader.endBookmark(allocator)) |*bookmark_2| {
@@ -605,7 +605,7 @@ fn expectTag(part_type: PartType, content: []const u8, value: anytype, lin: u32,
     if (value) |part| {
         try testing.expectEqual(part_type, part.part_type);
         try testing.expectEqualStrings(content, part.content);
-        _=lin;
+        _ = lin;
         _ = col;
         //try testing.expectEqual(lin, part.lin);
         //try testing.expectEqual(col, part.col);

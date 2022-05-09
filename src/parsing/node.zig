@@ -21,8 +21,6 @@ pub fn Node(comptime options: TemplateOptions) type {
 
     return struct {
         const Self = @This();
-
-        part_type: PartType,
         text_part: TextPart,
         inner_text: if (allow_lambdas) ?RefCountedSlice else void = if (allow_lambdas) null else {},
 
@@ -109,7 +107,7 @@ pub fn Node(comptime options: TemplateOptions) type {
         pub fn trimStandAlone(self: *Self) void {
             if (comptime !has_trimming) return;
 
-            if (self.part_type == .static_text) {
+            if (self.text_part.part_type == .static_text) {
                 if (self.link.prev) |prev_node| {
                     switch (self.text_part.left_trimming) {
                         .PreserveWhitespaces => {},
@@ -131,15 +129,15 @@ pub fn Node(comptime options: TemplateOptions) type {
         pub fn trimLast(self: *Self, last_node: *Self) void {
             if (comptime !has_trimming) return;
 
-            if (self.part_type == .static_text) {
+            if (self.text_part.part_type == .static_text) {
                 if (self == last_node) return;
 
                 var node = last_node;
                 while (node != self) {
-                    assert(node.part_type != .static_text);
+                    assert(node.text_part.part_type != .static_text);
                     assert(node.link.prev != null);
 
-                    if (!node.part_type.canBeStandAlone()) {
+                    if (!node.text_part.part_type.canBeStandAlone()) {
                         return;
                     } else {
                         node = node.link.prev.?;
@@ -152,7 +150,7 @@ pub fn Node(comptime options: TemplateOptions) type {
 
         pub fn getIndentation(self: *const Self) ?[]const u8 {
             return if (comptime has_trimming)
-                switch (self.part_type) {
+                switch (self.text_part.part_type) {
                     .partial, .parent => getPreviousNodeIndentation(self.link.prev),
                     else => null,
                 }
@@ -164,7 +162,7 @@ pub fn Node(comptime options: TemplateOptions) type {
             if (comptime !has_trimming) return false;
 
             if (parent_node) |node| {
-                if (node.part_type == .static_text) {
+                if (node.text_part.part_type == .static_text) {
                     switch (node.text_part.right_trimming) {
                         .AllowTrimming => |trimming| {
 
@@ -184,7 +182,7 @@ pub fn Node(comptime options: TemplateOptions) type {
                         .Trimmed => return true,
                         .PreserveWhitespaces => return false,
                     }
-                } else if (node.part_type.canBeStandAlone()) {
+                } else if (node.text_part.part_type.canBeStandAlone()) {
                     // Depends on the previous node
                     return trimPreviousNodesRight(node.link.prev);
                 } else {
@@ -201,7 +199,7 @@ pub fn Node(comptime options: TemplateOptions) type {
             if (comptime !has_trimming) return null;
 
             if (parent_node) |node| {
-                return switch (node.part_type) {
+                return switch (node.text_part.part_type) {
                     .static_text => node.text_part.indentation,
                     else => getPreviousNodeIndentation(node.link.prev),
                 };

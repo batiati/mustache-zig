@@ -122,7 +122,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
             defer Node.unRefMany(self.gpa, iterator);
 
             while (iterator.next()) |node| {
-                switch (node.part_type) {
+                switch (node.text_part.part_type) {
                     .static_text => {
 
                         //Empty strings are represented as NULL slices
@@ -311,7 +311,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                 switch (text_part.part_type) {
                     .static_text => {
                         if (self.current_level.current_node) |current_node| {
-                            if (current_node.part_type.ignoreStaticText()) {
+                            if (current_node.text_part.part_type.ignoreStaticText()) {
                                 text_part.unRef(self.gpa);
                                 continue;
                             }
@@ -388,7 +388,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                         };
 
                         self.current_level = ret.level;
-                        if (allow_lambdas and ret.parent_node.part_type == .section) {
+                        if (allow_lambdas and ret.parent_node.text_part.part_type == .section) {
                             if (try self.text_scanner.endBookmark(self.gpa)) |bookmark| {
                                 ret.parent_node.inner_text = bookmark;
                             }
@@ -459,7 +459,7 @@ test "Basic parse" {
         defer StreamedParser.Node.unRefMany(allocator, &siblings);
 
         try testing.expectEqual(@as(usize, 1), siblings.len());
-        try testing.expectEqual(PartType.comments, siblings.next().?.part_type);
+        try testing.expectEqual(PartType.comments, siblings.next().?.text_part.part_type);
     } else {
         try testing.expect(false);
     }
@@ -474,43 +474,43 @@ test "Basic parse" {
         try testing.expectEqual(@as(usize, 2), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expectEqual(PartType.static_text, node_0.text_part.part_type);
         try testing.expectEqualStrings("  Hello\n", node_0.text_part.content);
 
         const node_1 = siblings.next().?;
-        try testing.expectEqual(PartType.section, node_1.part_type);
+        try testing.expectEqual(PartType.section, node_1.text_part.part_type);
 
         if (node_1.link.child != null) {
             var children = node_1.children();
             try testing.expectEqual(@as(usize, 8), children.len());
 
             const section_0 = children.next().?;
-            try testing.expectEqual(PartType.static_text, section_0.part_type);
+            try testing.expectEqual(PartType.static_text, section_0.text_part.part_type);
 
             const section_1 = children.next().?;
-            try testing.expectEqual(PartType.interpolation, section_1.part_type);
+            try testing.expectEqual(PartType.interpolation, section_1.text_part.part_type);
             try testing.expectEqualStrings("name", section_1.text_part.content);
 
             const section_2 = children.next().?;
-            try testing.expectEqual(PartType.static_text, section_2.part_type);
+            try testing.expectEqual(PartType.static_text, section_2.text_part.part_type);
 
             const section_3 = children.next().?;
-            try testing.expectEqual(PartType.no_escape, section_3.part_type);
+            try testing.expectEqual(PartType.no_escape, section_3.text_part.part_type);
             try testing.expectEqualStrings("comments", section_3.text_part.content);
 
             const section_4 = children.next().?;
-            try testing.expectEqual(PartType.static_text, section_4.part_type);
+            try testing.expectEqual(PartType.static_text, section_4.text_part.part_type);
             try testing.expectEqualStrings("\n", section_4.text_part.content);
 
             const section_5 = children.next().?;
-            try testing.expectEqual(PartType.inverted_section, section_5.part_type);
+            try testing.expectEqual(PartType.inverted_section, section_5.text_part.part_type);
 
             const section_6 = children.next().?;
-            try testing.expectEqual(PartType.static_text, section_6.part_type);
+            try testing.expectEqual(PartType.static_text, section_6.text_part.part_type);
             try testing.expectEqualStrings("\n", section_6.text_part.content);
 
             const section_7 = children.next().?;
-            try testing.expectEqual(PartType.close_section, section_7.part_type);
+            try testing.expectEqual(PartType.close_section, section_7.text_part.part_type);
         } else {
             try testing.expect(false);
         }
@@ -527,7 +527,7 @@ test "Basic parse" {
         try testing.expectEqual(@as(usize, 1), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expectEqual(PartType.static_text, node_0.text_part.part_type);
         try testing.expectEqualStrings("World", node_0.text_part.content);
     } else {
         try testing.expect(false);
@@ -560,11 +560,11 @@ test "Scan standAlone tags" {
         try testing.expectEqual(@as(usize, 2), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expectEqual(PartType.static_text, node_0.text_part.part_type);
         try testing.expect(node_0.text_part.content.len == 0);
 
         const node_1 = siblings.next().?;
-        try testing.expectEqual(PartType.comments, node_1.part_type);
+        try testing.expectEqual(PartType.comments, node_1.text_part.part_type);
     } else {
         try testing.expect(false);
     }
@@ -577,7 +577,7 @@ test "Scan standAlone tags" {
         try testing.expectEqual(@as(usize, 1), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expectEqual(PartType.static_text, node_0.text_part.part_type);
         try testing.expectEqualStrings("Hello", node_0.text_part.content);
     } else {
         try testing.expect(false);
@@ -608,7 +608,7 @@ test "Scan delimiters Tags" {
         try testing.expectEqual(@as(usize, 1), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(PartType.delimiters, node_0.part_type);
+        try testing.expectEqual(PartType.delimiters, node_0.text_part.part_type);
         try testing.expectEqualStrings("[ ]", node_0.text_part.content);
     } else {
         try testing.expect(false);
@@ -622,11 +622,11 @@ test "Scan delimiters Tags" {
         try testing.expectEqual(@as(usize, 2), siblings.len());
 
         const node_0 = siblings.next().?;
-        try testing.expectEqual(PartType.static_text, node_0.part_type);
+        try testing.expectEqual(PartType.static_text, node_0.text_part.part_type);
         try testing.expect(node_0.text_part.content.len == 0);
 
         const node_1 = siblings.next().?;
-        try testing.expectEqual(PartType.interpolation, node_1.part_type);
+        try testing.expectEqual(PartType.interpolation, node_1.text_part.part_type);
         try testing.expectEqualStrings("interpolation", node_1.text_part.content);
     } else {
         try testing.expect(false);
@@ -673,7 +673,7 @@ test "Parse - Malformed " {
 
         const node_0 = siblings.next();
         try testing.expect(node_0 != null);
-        try testing.expectEqual(PartType.static_text, node_0.?.part_type);
+        try testing.expectEqual(PartType.static_text, node_0.?.text_part.part_type);
         try testing.expectEqualStrings("missing}}", node_0.?.text_part.content);
     } else {
         try testing.expect(false);
