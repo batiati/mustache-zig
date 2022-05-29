@@ -18,18 +18,24 @@ const PartType = parsing.PartType;
 const DelimiterType = parsing.DelimiterType;
 const Delimiters = parsing.Delimiters;
 const FileReader = parsing.FileReader;
+const IndexBookmark = parsing.IndexBookmark;
 
-pub fn TextScanner(comptime options: TemplateOptions) type {
+pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type {
     const RefCounter = memory.RefCounter(options);
-    const RefCountedSlice = memory.RefCountedSlice(options);
-    const TextPart = parsing.TextPart(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 
     const allow_lambdas = options.features.lambdas == .Enabled;
 
     return struct {
         const Self = @This();
+
+        const TextPart = Node.TextPart;
         const Trimmer = parsing.Trimmer(Self, TrimmingIndex);
+
+        const Pos = struct {
+            lin: u32 = 1,
+            col: u32 = 1,
+        };
 
         const State = union(enum) {
             matching_open: DelimiterIndex,
@@ -45,17 +51,12 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
             };
         };
 
-        const Bookmark = struct {
-            prev: ?*@This(),
-            index: u32,
-        };
-
         content: []const u8 = &.{},
         index: u32 = 0,
         block_index: u32 = 0,
         state: State = .{ .matching_open = 0 },
-        lin: u32 = 1,
-        col: u32 = 1,
+        start_pos: Pos = .{},
+        current_pos: Pos = .{},
         delimiter_max_size: u32 = 0,
         delimiters: Delimiters = undefined,
 
@@ -69,7 +70,7 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
         } = undefined,
 
         bookmark: if (allow_lambdas) struct {
-            stack: ?*Bookmark = null,
+            stack: ?*IndexBookmark = null,
             last_starting_mark: u32 = 0,
         } else void = if (allow_lambdas) .{} else {},
 
@@ -92,8 +93,6 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
             if (options.source == .Stream) {
                 self.stream.ref_counter.free(allocator);
                 self.stream.reader.deinit(allocator);
-
-                freeBookmarks(allocator, self.bookmark.stack);
             }
         }
 
@@ -182,7 +181,6 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                 }
 
                 const char = self.content[self.index];
-                defer self.moveLineCounter(char);
 
                 switch (self.state) {
                     .matching_open => |delimiter_index| {
@@ -195,14 +193,17 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                                 self.state.matching_open = next_index;
                             }
                         } else {
-                            trimmer.move();
                             self.state.matching_open = 0;
+                            trimmer.move();
                         }
+
+                        self.moveLineCounter(char);
                     },
                     .matching_close => |*close_state| {
                         const delimiter_char = self.delimiters.ending_delimiter[close_state.delimiter_index];
                         if (char == delimiter_char) {
                             const next_index = close_state.delimiter_index + 1;
+
                             if (self.delimiters.ending_delimiter.len == next_index) {
                                 self.state = .{ .produce_close = close_state.part_type };
                             } else {
@@ -211,6 +212,8 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                         } else {
                             close_state.delimiter_index = 0;
                         }
+
+                        self.moveLineCounter(char);
                     },
                     .produce_open => {
                         return self.produceOpen(trimmer, char) orelse continue;
@@ -227,97 +230,128 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
 
         inline fn moveLineCounter(self: *Self, char: u8) void {
             if (char == '\n') {
-                self.lin += 1;
-                self.col = 1;
+                self.current_pos.lin += 1;
+                self.current_pos.col = 1;
             } else {
-                self.col += 1;
+                self.current_pos.col += 1;
             }
         }
 
         inline fn produceOpen(self: *Self, trimmer: Trimmer, char: u8) ?TextPart {
-            const tail = tail: {
-                switch (char) {
-                    @enumToInt(PartType.comments),
-                    @enumToInt(PartType.section),
-                    @enumToInt(PartType.inverted_section),
-                    @enumToInt(PartType.close_section),
-                    @enumToInt(PartType.partial),
-                    @enumToInt(PartType.parent),
-                    @enumToInt(PartType.block),
-                    @enumToInt(PartType.no_escape),
-                    @enumToInt(PartType.delimiters),
-                    @enumToInt(PartType.triple_mustache),
-                    => {
-                        defer {
-                            self.block_index = self.index + 1;
-                            self.state = .{
-                                .matching_close = .{
-                                    .delimiter_index = 0,
-                                    .part_type = @intToEnum(PartType, char),
-                                },
-                            };
-                        }
-
-                        const last_pos = self.index - @intCast(u32, self.delimiters.starting_delimiter.len);
-                        if (allow_lambdas) self.bookmark.last_starting_mark = last_pos;
-                        break :tail self.content[self.block_index..last_pos];
-                    },
-                    else => {
-                        defer {
-                            self.block_index = self.index;
-                            self.state = .{
-                                .matching_close = .{
-                                    .delimiter_index = 0,
-                                    .part_type = .interpolation,
-                                },
-                            };
-                        }
-
-                        const last_pos = self.index - @intCast(u32, self.delimiters.starting_delimiter.len);
-                        if (allow_lambdas) self.bookmark.last_starting_mark = last_pos;
-                        break :tail self.content[self.block_index..last_pos];
-                    },
-                }
+            const skip_current = switch (char) {
+                @enumToInt(PartType.comments),
+                @enumToInt(PartType.section),
+                @enumToInt(PartType.inverted_section),
+                @enumToInt(PartType.close_section),
+                @enumToInt(PartType.partial),
+                @enumToInt(PartType.parent),
+                @enumToInt(PartType.block),
+                @enumToInt(PartType.no_escape),
+                @enumToInt(PartType.delimiters),
+                @enumToInt(PartType.triple_mustache),
+                => true,
+                else => false,
             };
 
+            const delimiter_len = @intCast(u32, self.delimiters.starting_delimiter.len);
+
+            defer {
+                self.start_pos = .{
+                    .lin = self.current_pos.lin,
+                    .col = self.current_pos.col - delimiter_len,
+                };
+
+                if (skip_current) {
+
+                    // Skips the current char on the next iteration if it is part of the tag, like '#' is part of '{{#'
+                    self.block_index = self.index + 1;
+                    self.moveLineCounter(char);
+
+                    // Sets the next state
+                    self.state = .{
+                        .matching_close = .{
+                            .delimiter_index = 0,
+                            .part_type = @intToEnum(PartType, char),
+                        },
+                    };
+                } else {
+
+                    // If the current char is not part of the tag, it must be processed again on the next iteration
+                    self.block_index = self.index;
+
+                    // Sets the next state
+                    self.state = .{
+                        .matching_close = .{
+                            .delimiter_index = 0,
+                            .part_type = .interpolation,
+                        },
+                    };
+                }
+            }
+
+            const last_pos = self.index - delimiter_len;
+            if (allow_lambdas) self.bookmark.last_starting_mark = last_pos;
+            const tail = self.content[self.block_index..last_pos];
+
             return if (tail.len > 0) TextPart{
-                .content = tail,
                 .part_type = .static_text,
-                .lin = self.lin,
-                .col = self.col,
+                .is_stand_alone = PartType.canBeStandAlone(.static_text),
+                .content = tail,
                 .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
-                .left_trimming = trimmer.getLeftTrimmingIndex(),
-                .right_trimming = trimmer.getRightTrimmingIndex(),
+                .source = .{
+                    .lin = self.start_pos.lin,
+                    .col = self.start_pos.col,
+                },
+                .trimming = .{
+                    .left = trimmer.getLeftTrimmingIndex(),
+                    .right = trimmer.getRightTrimmingIndex(),
+                },
             } else null;
         }
 
         inline fn produceClose(self: *Self, trimmer: Trimmer, char: u8) TextPart {
             const triple_mustache_close = '}';
+            const Mark = struct { block_index: u32, skip_current: bool };
 
-            defer self.state = .{ .matching_open = 0 };
-            const tail = tail: {
+            const mark: Mark = mark: {
                 switch (char) {
                     triple_mustache_close => {
                         defer self.block_index = self.index + 1;
-                        const last_pos = self.index - self.delimiters.ending_delimiter.len;
-                        break :tail self.content[self.block_index..last_pos];
+                        break :mark .{ .block_index = self.block_index, .skip_current = true };
                     },
                     else => {
                         defer self.block_index = self.index;
-                        const last_pos = self.index - self.delimiters.ending_delimiter.len;
-                        break :tail self.content[self.block_index..last_pos];
+                        break :mark .{ .block_index = self.block_index, .skip_current = false };
                     },
                 }
             };
 
+            defer {
+                self.state = .{ .matching_open = 0 };
+
+                if (mark.skip_current) self.moveLineCounter(char);
+                self.start_pos = .{
+                    .lin = self.current_pos.lin,
+                    .col = self.current_pos.col,
+                };
+            }
+
+            const last_pos = self.index - self.delimiters.ending_delimiter.len;
+            const tail = self.content[mark.block_index..last_pos];
+
             return TextPart{
-                .content = tail,
                 .part_type = self.state.produce_close,
-                .lin = self.lin,
-                .col = self.col,
+                .is_stand_alone = PartType.canBeStandAlone(self.state.produce_close),
+                .content = tail,
                 .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
-                .left_trimming = trimmer.getLeftTrimmingIndex(),
-                .right_trimming = trimmer.getRightTrimmingIndex(),
+                .source = .{
+                    .lin = self.start_pos.lin,
+                    .col = self.start_pos.col,
+                },
+                .trimming = .{
+                    .left = trimmer.getLeftTrimmingIndex(),
+                    .right = trimmer.getRightTrimmingIndex(),
+                },
             };
         }
 
@@ -330,13 +364,18 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                     const tail = self.content[self.block_index..last_pos];
 
                     return TextPart{
-                        .content = tail,
                         .part_type = part_type,
-                        .lin = self.lin,
-                        .col = self.col,
+                        .is_stand_alone = part_type.canBeStandAlone(),
+                        .content = tail,
                         .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
-                        .left_trimming = trimmer.getLeftTrimmingIndex(),
-                        .right_trimming = trimmer.getRightTrimmingIndex(),
+                        .source = .{
+                            .lin = self.start_pos.lin,
+                            .col = self.start_pos.col,
+                        },
+                        .trimming = .{
+                            .left = trimmer.getLeftTrimmingIndex(),
+                            .right = trimmer.getRightTrimmingIndex(),
+                        },
                     };
                 },
                 else => {
@@ -344,13 +383,18 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
 
                     return if (tail.len > 0)
                         TextPart{
-                            .content = tail,
                             .part_type = .static_text,
-                            .lin = self.lin,
-                            .col = self.col,
+                            .is_stand_alone = PartType.canBeStandAlone(.static_text),
+                            .content = tail,
                             .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
-                            .left_trimming = trimmer.getLeftTrimmingIndex(),
-                            .right_trimming = trimmer.getRightTrimmingIndex(),
+                            .source = .{
+                                .lin = self.start_pos.lin,
+                                .col = self.start_pos.col,
+                            },
+                            .trimming = .{
+                                .left = trimmer.getLeftTrimmingIndex(),
+                                .right = trimmer.getRightTrimmingIndex(),
+                            },
                         }
                     else
                         null;
@@ -358,15 +402,15 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
             }
         }
 
-        pub fn beginBookmark(self: *Self, allocator: Allocator) Allocator.Error!void {
+        pub fn beginBookmark(self: *Self, node: *Node) Allocator.Error!void {
             if (allow_lambdas) {
-                var bookmark = try allocator.create(Bookmark);
-                bookmark.* = .{
+                assert(node.inner_text.bookmark == null);
+                node.inner_text.bookmark = IndexBookmark{
                     .prev = self.bookmark.stack,
                     .index = self.index,
                 };
 
-                self.bookmark.stack = bookmark;
+                self.bookmark.stack = &node.inner_text.bookmark.?;
                 if (options.source == .Stream) {
                     if (self.stream.preserve_bookmark) |preserve| {
                         assert(preserve <= self.index);
@@ -377,7 +421,7 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
             }
         }
 
-        pub fn endBookmark(self: *Self, allocator: Allocator) Allocator.Error!?RefCountedSlice {
+        pub fn endBookmark(self: *Self) Allocator.Error!?[]const u8 {
             if (allow_lambdas) {
                 if (self.bookmark.stack) |bookmark| {
                     defer {
@@ -385,24 +429,20 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                         if (options.source == .Stream and bookmark.prev == null) {
                             self.stream.preserve_bookmark = null;
                         }
-                        allocator.destroy(bookmark);
                     }
 
                     assert(bookmark.index < self.content.len);
                     assert(bookmark.index <= self.bookmark.last_starting_mark);
                     assert(self.bookmark.last_starting_mark < self.content.len);
 
-                    return RefCountedSlice{
-                        .content = self.content[bookmark.index..self.bookmark.last_starting_mark],
-                        .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
-                    };
+                    return self.content[bookmark.index..self.bookmark.last_starting_mark];
                 }
             }
 
             return null;
         }
 
-        fn adjustBookmarkOffset(bookmark: ?*Bookmark, off_set: u32) void {
+        fn adjustBookmarkOffset(bookmark: ?*IndexBookmark, off_set: u32) void {
             if (allow_lambdas) {
                 if (bookmark) |current| {
                     assert(current.index >= off_set);
@@ -411,22 +451,16 @@ pub fn TextScanner(comptime options: TemplateOptions) type {
                 }
             }
         }
-
-        fn freeBookmarks(allocator: Allocator, bookmark: ?*Bookmark) void {
-            if (allow_lambdas) {
-                if (bookmark) |current| {
-                    freeBookmarks(allocator, current.prev);
-                    allocator.destroy(current);
-                }
-            }
-        }
     };
 }
 
-const TestTextScanner = TextScanner(.{
+const testing_options = TemplateOptions{
     .source = .{ .String = .{} },
     .output = .Render,
-});
+};
+const TestingNode = parsing.Node(testing_options, 32);
+const TestingTextScanner = parsing.TextScanner(TestingNode, testing_options);
+const TestingTrimmingIndex = parsing.TrimmingIndex(testing_options);
 
 test "basic tests" {
     const content =
@@ -436,29 +470,30 @@ test "basic tests" {
 
     const allocator = testing.allocator;
 
-    var reader = try TestTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
 
     var part_1 = try reader.next(allocator);
-    try expectTag(.static_text, "Hello", part_1, 1, 6);
+    try expectTag(.static_text, "Hello", part_1, 1, 1);
     defer part_1.?.unRef(allocator);
 
     var part_2 = try reader.next(allocator);
-    try expectTag(.interpolation, "tag1", part_2, 1, 12);
+    try expectTag(.interpolation, "tag1", part_2, 1, 6);
     defer part_2.?.unRef(allocator);
 
     var part_3 = try reader.next(allocator);
-    try expectTag(.static_text, "\nWorld", part_3, 2, 6);
+
+    try expectTag(.static_text, "\nWorld", part_3, 1, 14);
     defer part_3.?.unRef(allocator);
 
     var part_4 = try reader.next(allocator);
-    try expectTag(.triple_mustache, " tag2 ", part_4, 2, 15);
+    try expectTag(.triple_mustache, " tag2 ", part_4, 2, 6);
     defer part_4.?.unRef(allocator);
 
     var part_5 = try reader.next(allocator);
-    try expectTag(.static_text, "Until eof", part_5, 2, 27);
+    try expectTag(.static_text, "Until eof", part_5, 2, 18);
     defer part_5.?.unRef(allocator);
 
     var part_6 = try reader.next(allocator);
@@ -473,29 +508,29 @@ test "custom tags" {
 
     const allocator = testing.allocator;
 
-    var reader = try TestTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
     var part_1 = try reader.next(allocator);
-    try expectTag(.static_text, "Hello", part_1, 1, 6);
+    try expectTag(.static_text, "Hello", part_1, 1, 1);
     defer part_1.?.unRef(allocator);
 
     var part_2 = try reader.next(allocator);
-    try expectTag(.interpolation, "tag1", part_2, 1, 11);
+    try expectTag(.interpolation, "tag1", part_2, 1, 6);
     defer part_2.?.unRef(allocator);
 
     var part_3 = try reader.next(allocator);
-    try expectTag(.static_text, "\nWorld", part_3, 2, 6);
+    try expectTag(.static_text, "\nWorld", part_3, 1, 12);
     defer part_3.?.unRef(allocator);
 
     var part_4 = try reader.next(allocator);
-    try expectTag(.interpolation, " tag2 ", part_4, 2, 13);
+    try expectTag(.interpolation, " tag2 ", part_4, 2, 6);
     defer part_4.?.unRef(allocator);
 
     var part_5 = try reader.next(allocator);
-    try expectTag(.static_text, "Until eof", part_5, 2, 23);
+    try expectTag(.static_text, "Until eof", part_5, 2, 14);
     defer part_5.?.unRef(allocator);
 
     var part_6 = try reader.next(allocator);
@@ -507,13 +542,13 @@ test "EOF" {
 
     const allocator = testing.allocator;
 
-    var reader = try TestTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
 
     var part_1 = try reader.next(allocator);
-    try expectTag(.interpolation, "tag1", part_1, 1, 4);
+    try expectTag(.interpolation, "tag1", part_1, 1, 1);
     defer part_1.?.unRef(allocator);
 
     var part_2 = try reader.next(allocator);
@@ -525,13 +560,13 @@ test "EOF custom tags" {
 
     const allocator = testing.allocator;
 
-    var reader = try TestTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
 
     var part_1 = try reader.next(allocator);
-    try expectTag(.interpolation, "tag1", part_1, 1, 6);
+    try expectTag(.interpolation, "tag1", part_1, 1, 1);
     defer part_1.?.unRef(allocator);
 
     var part_2 = try reader.next(allocator);
@@ -540,59 +575,59 @@ test "EOF custom tags" {
 
 test "bookmarks" {
 
-    //               0          1        2         3         4         5         6         7         8
-    //               01234567890123456789012345678901234567890123456789012345678901234567890123456789012345
-    //                ↓          ↓               ↓          ↓         ↓          ↓             ↓          ↓
+    //                        1         2         3         4         5         6         7         8
+    //               1234567890123456789012345678901234567890123456789012345678901234567890123456789012345
+    //               ↓            ↓             ↓            ↓       ↓            ↓           ↓
     const content = "{{#section1}}begin_content1{{#section2}}content2{{/section2}}end_content1{{/section1}}";
     const allocator = testing.allocator;
 
-    var reader = try TestTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
 
-    var part_1 = try reader.next(allocator);
-    try expectTag(.section, "section1", part_1, 1, 12);
-    defer part_1.?.unRef(allocator);
+    var token_1 = try reader.next(allocator);
+    try expectTag(.section, "section1", token_1, 1, 1);
+    defer token_1.?.unRef(allocator);
 
-    try reader.beginBookmark(allocator);
+    var node_1 = TestingNode{ .index = 0, .identifier = undefined, .text_part = token_1.? };
+    try reader.beginBookmark(&node_1);
 
-    var part_2 = try reader.next(allocator);
-    try expectTag(.static_text, "begin_content1", part_2, 1, 28);
-    defer part_2.?.unRef(allocator);
+    var token_2 = try reader.next(allocator);
+    try expectTag(.static_text, "begin_content1", token_2, 1, 14);
+    defer token_2.?.unRef(allocator);
 
-    var part_3 = try reader.next(allocator);
-    try expectTag(.section, "section2", part_3, 1, 39);
-    defer part_3.?.unRef(allocator);
+    var token_3 = try reader.next(allocator);
+    try expectTag(.section, "section2", token_3, 1, 28);
+    defer token_3.?.unRef(allocator);
 
-    try reader.beginBookmark(allocator);
+    var node_3 = TestingNode{ .index = 0, .identifier = undefined, .text_part = token_3.? };
+    try reader.beginBookmark(&node_3);
 
-    var part_4 = try reader.next(allocator);
-    try expectTag(.static_text, "content2", part_4, 1, 49);
-    defer part_4.?.unRef(allocator);
+    var token_4 = try reader.next(allocator);
+    try expectTag(.static_text, "content2", token_4, 1, 41);
+    defer token_4.?.unRef(allocator);
 
-    var part_5 = try reader.next(allocator);
-    try expectTag(.close_section, "section2", part_5, 1, 60);
-    defer part_5.?.unRef(allocator);
+    var token_5 = try reader.next(allocator);
+    try expectTag(.close_section, "section2", token_5, 1, 49);
+    defer token_5.?.unRef(allocator);
 
-    if (try reader.endBookmark(allocator)) |*bookmark_1| {
-        try testing.expectEqualStrings("content2", bookmark_1.content);
-        bookmark_1.ref_counter.free(allocator);
+    if (try reader.endBookmark()) |bookmark_1| {
+        try testing.expectEqualStrings("content2", bookmark_1);
     } else {
         try testing.expect(false);
     }
 
-    var part_6 = try reader.next(allocator);
-    try expectTag(.static_text, "end_content1", part_6, 1, 74);
-    defer part_6.?.unRef(allocator);
+    var token_6 = try reader.next(allocator);
+    try expectTag(.static_text, "end_content1", token_6, 1, 62);
+    defer token_6.?.unRef(allocator);
 
-    var part_7 = try reader.next(allocator);
-    try expectTag(.close_section, "section1", part_7, 1, 85);
-    defer part_7.?.unRef(allocator);
+    var token_7 = try reader.next(allocator);
+    try expectTag(.close_section, "section1", token_7, 1, 74);
+    defer token_7.?.unRef(allocator);
 
-    if (try reader.endBookmark(allocator)) |*bookmark_2| {
-        try testing.expectEqualStrings("begin_content1{{#section2}}content2{{/section2}}end_content1", bookmark_2.content);
-        bookmark_2.ref_counter.free(allocator);
+    if (try reader.endBookmark()) |bookmark_2| {
+        try testing.expectEqualStrings("begin_content1{{#section2}}content2{{/section2}}end_content1", bookmark_2);
     } else {
         try testing.expect(false);
     }
@@ -605,10 +640,8 @@ fn expectTag(part_type: PartType, content: []const u8, value: anytype, lin: u32,
     if (value) |part| {
         try testing.expectEqual(part_type, part.part_type);
         try testing.expectEqualStrings(content, part.content);
-        _ = lin;
-        _ = col;
-        //try testing.expectEqual(lin, part.lin);
-        //try testing.expectEqual(col, part.col);
+        try testing.expectEqual(lin, part.source.lin);
+        try testing.expectEqual(col, part.source.col);
     } else {
         try testing.expect(false);
     }

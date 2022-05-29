@@ -10,6 +10,12 @@ const TemplateOptions = mustache.options.TemplateOptions;
 
 pub fn RefCountedSlice(comptime options: TemplateOptions) type {
     return struct {
+
+        pub const empty: @This() = .{
+            .content = &[_]u8{},
+            .ref_counter = .{},
+        };
+
         content: []const u8,
         ref_counter: RefCounter(options),
     };
@@ -17,10 +23,6 @@ pub fn RefCountedSlice(comptime options: TemplateOptions) type {
 
 pub fn RefCounter(comptime options: TemplateOptions) type {
     return if (options.isRefCounted()) RefCounterImpl else NoOpRefCounter;
-}
-
-pub fn RefCounterHolder(comptime options: TemplateOptions) type {
-    return if (options.isRefCounted()) RefCounterHolderImpl else NoOpRefCounterHolder;
 }
 
 const RefCounterImpl = struct {
@@ -133,129 +135,10 @@ const NoOpRefCounter = struct {
     }
 };
 
-const NoOpRefCounterHolder = struct {
-    const Self = @This();
-
-    pub const Iterator = struct {
-        pub inline fn next(self: *Iterator) ?NoOpRefCounter {
-            _ = self;
-            return null;
-        }
-    };
-
-    pub inline fn add(self: *Self, allocator: Allocator, ref_counter: NoOpRefCounter) Allocator.Error!void {
-        _ = self;
-        _ = allocator;
-        _ = ref_counter;
-    }
-
-    pub inline fn iterator(self: *const Self) Iterator {
-        _ = self;
-        return .{};
-    }
-
-    pub inline fn free(self: *Self, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-    }
-};
-
-pub fn EpochArena(comptime options: TemplateOptions) type {
-    const is_epoch_arena = options.output == .Render;
-
-    return struct {
-        const Self = @This();
-
-        current_arena: ArenaAllocator,
-        last_epoch_arena: if (is_epoch_arena) ArenaAllocator.State else void,
-
-        pub fn init(child_allocator: Allocator) Self {
-            return .{
-                .current_arena = ArenaAllocator.init(child_allocator),
-                .last_epoch_arena = if (is_epoch_arena) .{} else {},
-            };
-        }
-
-        pub inline fn allocator(self: *Self) Allocator {
-            return self.current_arena.allocator();
-        }
-
-        pub fn nextEpoch(self: *Self) void {
-            if (is_epoch_arena) {
-                const child_allocator = self.current_arena.child_allocator;
-
-                var last_arena = self.last_epoch_arena.promote(child_allocator);
-                last_arena.deinit();
-
-                self.last_epoch_arena = self.current_arena.state;
-                self.current_arena = ArenaAllocator.init(child_allocator);
-            }
-        }
-
-        pub fn deinit(self: *Self) void {
-            if (is_epoch_arena) {
-                var last_arena = self.last_epoch_arena.promote(self.current_arena.child_allocator);
-                last_arena.deinit();
-            }
-
-            self.current_arena.deinit();
-        }
-    };
-}
-
 const testing_options = TemplateOptions{
     .source = .{ .Stream = .{} },
     .output = .Render,
 };
-
-test "group" {
-    const allocator = testing.allocator;
-
-    // No defer here, should be freed by the ref_counter
-    const some_text = try allocator.dupe(u8, "some text");
-
-    var counter_1 = try RefCounter(testing_options).init(allocator, some_text);
-    defer counter_1.free(allocator);
-
-    var counter_2 = counter_1.ref();
-    defer counter_2.free(allocator);
-
-    var counter_3 = counter_2.ref();
-    defer counter_3.free(allocator);
-
-    try testing.expect(counter_1.state != null);
-    try testing.expect(counter_1.state.?.counter == 3);
-
-    try testing.expect(counter_2.state != null);
-    try testing.expect(counter_2.state.?.counter == 3);
-
-    try testing.expect(counter_3.state != null);
-    try testing.expect(counter_3.state.?.counter == 3);
-
-    var holder = RefCounterHolder(testing_options){};
-
-    // Adding a ref_counter to the Holder, increases the counter
-    try holder.add(allocator, counter_1);
-    try testing.expect(counter_1.state.?.counter == 4);
-    try testing.expect(counter_2.state.?.counter == 4);
-    try testing.expect(counter_3.state.?.counter == 4);
-
-    // Adding a ref_counter to the same buffer, keeps the counter unchanged
-    try holder.add(allocator, counter_1);
-    try holder.add(allocator, counter_2);
-    try holder.add(allocator, counter_3);
-
-    try testing.expect(counter_1.state.?.counter == 4);
-    try testing.expect(counter_2.state.?.counter == 4);
-    try testing.expect(counter_3.state.?.counter == 4);
-
-    // Free should decrease the counter
-    holder.free(allocator);
-
-    try testing.expect(counter_1.state.?.counter == 3);
-    try testing.expect(counter_2.state.?.counter == 3);
-    try testing.expect(counter_3.state.?.counter == 3);
-}
 
 test "ref and free" {
     const allocator = testing.allocator;
@@ -299,36 +182,4 @@ test "ref and free" {
     try testing.expect(counter_1.state == null);
     try testing.expect(counter_2.state == null);
     try testing.expect(counter_3.state == null);
-}
-
-test "epoch" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
-
-    var epoch_arena = EpochArena(testing_options).init(gpa.allocator());
-
-    // First epoch,
-    const arena = epoch_arena.allocator();
-    var chunk = try arena.alloc(u8, 1024);
-    const total_mem_1 = gpa.total_requested_bytes;
-    try testing.expect(total_mem_1 >= chunk.len);
-
-    // Second epoch, must keep previous epoch
-    epoch_arena.nextEpoch();
-    const new_arena = epoch_arena.allocator();
-    var new_chunk = try new_arena.alloc(u8, 512);
-    const total_mem_2 = gpa.total_requested_bytes;
-    try testing.expect(total_mem_2 > total_mem_1);
-    try testing.expect(total_mem_2 >= chunk.len + new_chunk.len);
-
-    // Third epoch, must keep previous epoch and free the oldest one
-    epoch_arena.nextEpoch();
-    const total_mem_3 = gpa.total_requested_bytes;
-    try testing.expect(total_mem_3 < total_mem_1);
-    try testing.expect(total_mem_3 < total_mem_2);
-    try testing.expect(total_mem_3 >= new_chunk.len);
-
-    // Last epoch allocated nothing, so the total_mem must be zero
-    epoch_arena.nextEpoch();
-    const total_mem_4 = gpa.total_requested_bytes;
-    try testing.expect(total_mem_4 == 0);
 }

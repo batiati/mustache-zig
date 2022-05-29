@@ -472,8 +472,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             .allocator = allocator,
                         };
                         errdefer template_loader.deinit();
-
-                        try template_loader.collectElementsFromFile(template, self);
+                        try template_loader.collectElements(template, self);
                     },
 
                     .Template => unreachable,

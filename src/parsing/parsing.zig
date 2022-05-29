@@ -28,21 +28,14 @@ pub const PartType = enum(u8) {
     delimiters = '=',
     triple_mustache = '{',
 
-    pub fn canBeStandAlone(self: @This()) bool {
-        return switch (self) {
+    pub fn canBeStandAlone(part_type: @This()) bool {
+        return switch (part_type) {
             .static_text,
             .interpolation,
             .no_escape,
             .triple_mustache,
             => false,
             else => true,
-        };
-    }
-
-    pub fn ignoreStaticText(self: @This()) bool {
-        return switch (self) {
-            .parent => true,
-            else => false,
         };
     }
 };
@@ -61,7 +54,11 @@ pub fn TrimmingIndex(comptime options: TemplateOptions) type {
         enum { PreserveWhitespaces };
 }
 
-pub const Level = @import("level.zig").Level;
+pub const IndexBookmark = struct {
+    prev: ?*@This(),
+    index: u32,
+};
+
 pub const Node = @import("node.zig").Node;
 pub const TextPart = @import("text_part.zig").TextPart;
 pub const TextScanner = @import("text_scanner.zig").TextScanner;
@@ -69,6 +66,6 @@ pub const Trimmer = @import("trimmer.zig").Trimmer;
 pub const FileReader = @import("file_reader.zig").FileReader;
 pub const Parser = @import("parser.zig").Parser;
 
-test {
-    _ = testing.refAllDecls(@This());
-}
+//test {
+// _ = testing.refAllDecls(@This());
+//}

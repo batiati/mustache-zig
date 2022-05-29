@@ -11,7 +11,6 @@ const TemplateSource = mustache.options.TemplateSource;
 const Features = mustache.options.Features;
 
 const parsing = @import("parsing/parsing.zig");
-const Node = parsing.Node;
 
 pub const Delimiters = parsing.Delimiters;
 
@@ -268,14 +267,14 @@ pub const Element = union(Element.Type) {
             }
         }.action;
 
-        const EMPTY: Path = &[0][]const u8{};
+        const empty: Path = &[0][]const u8{};
 
         if (identifier.len == 0) {
-            return EMPTY;
+            return empty;
         } else {
-            const PATH_SEPARATOR = ".";
-            var iterator = std.mem.tokenize(u8, identifier, PATH_SEPARATOR);
-            return (try action(allocator, copy_strings, &iterator, 0)) orelse EMPTY;
+            const path_separator = ".";
+            var iterator = std.mem.tokenize(u8, identifier, path_separator);
+            return (try action(allocator, copy_strings, &iterator, 0)) orelse empty;
         }
     }
 
@@ -310,11 +309,6 @@ pub fn parseText(
     default_delimiters: Delimiters,
     comptime options: mustache.options.ParseTextOptions,
 ) Allocator.Error!ParseResult {
-
-    //Note: the "default_delimiters" parameter must be runtime-known
-    //This field could be inserted on "ParseTextOptions" when comptime fields get fixed
-    //https://github.com/ziglang/zig/issues/5497
-
     const source = TemplateSource{ .String = .{ .copy_strings = options.copy_strings } };
     return try parseSource(source, options.features, allocator, template_text, default_delimiters);
 }
@@ -332,11 +326,6 @@ pub fn parseFile(
     default_delimiters: Delimiters,
     comptime options: mustache.options.ParseFileOptions,
 ) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseResult {
-
-    //Note: the "default_delimiters" parameter must be runtime-known
-    //This field could be inserted on "ParseTextOptions" when comptime fields get fixed
-    //https://github.com/ziglang/zig/issues/5497
-
     const source = TemplateSource{ .Stream = .{ .read_buffer_size = options.read_buffer_size } };
     return try parseSource(source, options.features, allocator, template_absolute_path, default_delimiters);
 }
@@ -360,11 +349,7 @@ fn parseSource(
     };
 
     errdefer template.deinit();
-
-    switch (source) {
-        .Stream => try template.loadFile(source_content),
-        .String => try template.load(source_content),
-    }
+    try template.load(source_content);
 
     switch (template.result) {
         .Error => |last_error| return ParseResult{ .ParseError = last_error },
@@ -377,7 +362,8 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
     return struct {
         const Self = @This();
 
-        const Parser = parsing.Parser(options);
+        const Parser = parsing.Parser(options, 32);
+        const Node = Parser.Node;
 
         const Collector = struct {
             pub const Error = Allocator.Error;
@@ -397,29 +383,17 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             NotLoaded,
         } = .NotLoaded,
 
-        pub fn load(self: *Self, template_text: []const u8) Parser.LoadError!void {
-            var parser = try Parser.init(self.allocator, template_text, self.delimiters);
+        pub fn load(self: *Self, template: []const u8) Parser.LoadError!void {
+            var parser = try Parser.init(self.allocator, template, self.delimiters);
             defer parser.deinit();
 
             var collector = Collector{};
-            try self.produceElements(&parser, &collector);
+            var success = try parser.parse(&collector);
 
-            if (self.result != .Error) {
-                self.result = .{
-                    .Elements = collector.elements,
-                };
-            }
-        }
-
-        pub fn loadFile(self: *Self, absolute_path: []const u8) Parser.LoadError!void {
-            var parser = try Parser.init(self.allocator, absolute_path, self.delimiters);
-            defer parser.deinit();
-
-            var collector = Collector{};
-            try self.produceElements(&parser, &collector);
-
-            self.result = .{
+            self.result = if (success) .{
                 .Elements = collector.elements,
+            } else .{
+                .Error = parser.last_error.?,
             };
         }
 
@@ -427,71 +401,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             var parser = try Parser.init(self.allocator, template_text, self.delimiters);
             defer parser.deinit();
 
-            try self.produceElements(&parser, render);
-        }
-
-        pub fn collectElementsFromFile(self: *Self, absolute_path: []const u8, render: anytype) ErrorSet(Parser, @TypeOf(render))!void {
-            var parser = try Parser.init(self.allocator, absolute_path, self.delimiters);
-            defer parser.deinit();
-
-            try self.produceElements(&parser, render);
-        }
-
-        fn produceElements(
-            self: *Self,
-            parser: *Parser,
-            render: anytype,
-        ) ErrorSet(Parser, @TypeOf(render))!void {
-            while (true) {
-                var list = std.ArrayListUnmanaged(Element){};
-                defer {
-                    if (list.items.len > 0) {
-
-                        // If a parser or render error occurs,
-                        // some elements may be left unconsumed, and need to be freed
-                        const non_consumed_elements = list.toOwnedSlice(self.allocator);
-                        Element.deinitMany(self.allocator, options.copyStrings(), non_consumed_elements);
-                    }
-
-                    list.deinit(self.allocator);
-                }
-
-                var parse_result = try parser.parse();
-                defer parser.ref_counter_holder.free(self.allocator);
-
-                switch (parse_result) {
-                    .Error => |err| {
-                        self.result = .{
-                            .Error = err,
-                        };
-                        return;
-                    },
-                    .Node => |node| {
-                        var siblings = node.siblings();
-                        _ = parser.createElements(&list, null, &siblings) catch |err| switch (err) {
-                            error.ParserAbortedError => {
-
-                                // TODO: implement a renderError function to render the error message on the output writer
-                                assert(parser.last_error != null);
-                                self.result = .{
-                                    .Error = parser.last_error.?,
-                                };
-                                return;
-                            },
-                            else => return @errSetCast(ErrorSet(@TypeOf(parser), @TypeOf(render)), err),
-                        };
-
-                        const elements = list.toOwnedSlice(self.allocator);
-                        defer if (options.output == .Render) Element.deinitMany(self.allocator, options.copyStrings(), elements);
-                        try render.render(elements);
-
-                        // No need for loop again
-                        // when output == .Parse, all nodes are produced at once
-                        if (options.output == .Parse) break;
-                    },
-                    .Done => break,
-                }
-            }
+            _ = try parser.parse(render);
         }
 
         pub fn deinit(self: *Self) void {
@@ -2297,7 +2207,7 @@ const tests = struct {
 
             defer template.deinit();
 
-            try template.loadFile(absolute_file_path);
+            try template.load(absolute_file_path);
 
             try testing.expect(template.result == .Elements);
             const elements = template.result.Elements;
@@ -2442,7 +2352,7 @@ const tests = struct {
             };
 
             var dummy_render = DummyRender{};
-            try template.collectElementsFromFile(test_10MB_file, &dummy_render);
+            try template.collectElements(test_10MB_file, &dummy_render);
 
             try testing.expectEqual(@as(usize, 11 * REPEAT), dummy_render.count);
         }

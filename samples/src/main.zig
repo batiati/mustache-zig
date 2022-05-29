@@ -25,13 +25,13 @@ var ctx = .{
         .mustache_version = "alpha",
     },
     .features = .{
-        .{ .name = "interpolation", .condition = "done" },
-        .{ .name = "sections", .condition = "done" },
-        .{ .name = "comments", .condition = "done" },
-        .{ .name = "delimiters", .condition = "done" },
-        .{ .name = "partials", .condition = "comming soon" },
-        .{ .name = "inheritance", .condition = "comming soon" },
-        .{ .name = "functions", .condition = "comming soon" },
+        .{ .name = "interpolation", .condition = "✅ done" },
+        .{ .name = "sections", .condition = "✅ done" },
+        .{ .name = "comments", .condition = "✅ done" },
+        .{ .name = "delimiters", .condition = "✅ done" },
+        .{ .name = "partials", .condition = "✅ done" },
+        .{ .name = "lambdas", .condition = "✅ done" },
+        .{ .name = "inheritance", .condition = "⏳ comming soon" },
     },
 };
 

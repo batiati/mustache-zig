@@ -1,5 +1,3 @@
-/// TextBlock is some slice of string containing information about how it appears on the template source.
-/// Each TextBlock is produced by the TextScanner, it is the first stage of the parsing process,
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
@@ -16,68 +14,67 @@ const Delimiters = parsing.Delimiters;
 
 pub fn TextPart(comptime options: TemplateOptions) type {
     const RefCounter = memory.RefCounter(options);
+    const RefCountedSlice = memory.RefCountedSlice(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 
     return struct {
         const Self = @This();
 
-        content: []const u8,
-
         part_type: PartType,
-
-        /// A ref counter for the buffer that holds this strings
+        is_stand_alone: bool,
+        content: []const u8,
         ref_counter: RefCounter,
 
-        /// The line on the template source
+        indentation: RefCountedSlice = RefCountedSlice.empty,
+
+        /// The line and column on the template source
         /// Used mostly for error messages
-        lin: u32,
+        source: struct {
+            lin: u32,
+            col: u32,
+        },
 
-        /// The column on the template source
-        /// Used mostly for error messages
-        col: u32,
-
-        /// Trimming rules for the left side of the slice
-        left_trimming: TrimmingIndex = .PreserveWhitespaces,
-
-        /// Trimming rules for the right side of the slice
-        right_trimming: TrimmingIndex = .PreserveWhitespaces,
-
-        /// Indentation presented on this text block
-        /// All indentation must be propagated to the child elements
-        indentation: ?[]const u8 = null,
+        /// Trimming rules
+        trimming: struct {
+            left: TrimmingIndex = .PreserveWhitespaces,
+            right: TrimmingIndex = .PreserveWhitespaces,
+        } = .{},
 
         pub inline fn unRef(self: *Self, allocator: Allocator) void {
             self.ref_counter.free(allocator);
+            self.indentation.ref_counter.free(allocator);
         }
 
         /// Processes the trimming rules for the right side of the slice
-        pub fn trimRight(self: *Self) void {
-            switch (self.right_trimming) {
-                .PreserveWhitespaces, .Trimmed => {},
-                .AllowTrimming => |right_trimming| {
+        pub fn trimRight(self: *Self) ?RefCountedSlice {
+            return switch (self.trimming.right) {
+                .PreserveWhitespaces, .Trimmed => null,
+                .AllowTrimming => |right_trimming| indentation: {
                     const content = self.content;
 
                     if (right_trimming.index == 0) {
                         self.content = &.{};
-                        // TODO: unref??
                     } else if (right_trimming.index < content.len) {
                         self.content = content[0..right_trimming.index];
                     }
 
+                    self.trimming.right = .Trimmed;
+                    
                     if (right_trimming.index + 1 >= content.len) {
-                        self.indentation = null;
+                        break :indentation null;                          
                     } else {
-                        self.indentation = content[right_trimming.index..];
+                        break :indentation RefCountedSlice {
+                            .content = content[right_trimming.index..],
+                            .ref_counter = self.ref_counter.ref(),
+                        };
                     }
-
-                    self.right_trimming = .Trimmed;
                 },
-            }
+            };
         }
 
         /// Processes the trimming rules for the left side of the slice
         pub fn trimLeft(self: *Self) void {
-            switch (self.left_trimming) {
+            switch (self.trimming.left) {
                 .PreserveWhitespaces, .Trimmed => {},
                 .AllowTrimming => |left_trimming| {
                     const content = self.content;
@@ -93,9 +90,9 @@ pub fn TextPart(comptime options: TemplateOptions) type {
                     //                    ↓
                     //const value = "ABC\n  "
 
-                    switch (self.right_trimming) {
+                    switch (self.trimming.right) {
                         .AllowTrimming => |right_trimming| {
-                            self.right_trimming = .{
+                            self.trimming.right = .{
                                 .AllowTrimming = .{
                                     .index = right_trimming.index - left_trimming.index - 1,
                                     .stand_alone = right_trimming.stand_alone,
@@ -108,12 +105,11 @@ pub fn TextPart(comptime options: TemplateOptions) type {
 
                     if (left_trimming.index >= content.len - 1) {
                         self.content = &.{};
-                        //TODO: unref??
                     } else {
                         self.content = content[left_trimming.index + 1 ..];
                     }
 
-                    self.left_trimming = .Trimmed;
+                    self.trimming.left = .Trimmed;
                 },
             }
         }
