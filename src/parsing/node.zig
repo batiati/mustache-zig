@@ -87,8 +87,13 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
                 }
 
                 if (text_part.trimRight()) |*indentation| {
-                    // The last tag can't produce any meaningful indentation, so we discard it
-                    indentation.ref_counter.free(allocator);
+                    if (self.index == nodes.len - 1) {
+                        // The last tag can't produce any meaningful indentation, so we discard it
+                        indentation.ref_counter.free(allocator);
+                    } else {
+                        var next_node = nodes.at(self.index + 1);
+                        next_node.text_part.indentation = indentation.*;
+                    }
                 }
             }
         }
@@ -121,7 +126,6 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
                             // Non standalone tags must check the previous node
                             const can_trim = trimming.stand_alone or trimPreviousNodesRight(nodes, prev_index);
                             if (can_trim) {
-                                
                                 if (text_part.trimRight()) |indentation| {
                                     current_node.text_part.indentation = indentation;
                                 }

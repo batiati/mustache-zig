@@ -186,11 +186,8 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                     break :current_node ptr;
                 };
 
-                
-
                 switch (current_node.text_part.part_type) {
                     .static_text => {
-
                         current_node.trimStandAlone(&self.nodes);
                         if (current_node.text_part.content.len == 0) {
                             current_node.text_part.unRef(self.gpa);

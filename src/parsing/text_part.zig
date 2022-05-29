@@ -59,11 +59,11 @@ pub fn TextPart(comptime options: TemplateOptions) type {
                     }
 
                     self.trimming.right = .Trimmed;
-                    
+
                     if (right_trimming.index + 1 >= content.len) {
-                        break :indentation null;                          
+                        break :indentation null;
                     } else {
-                        break :indentation RefCountedSlice {
+                        break :indentation RefCountedSlice{
                             .content = content[right_trimming.index..],
                             .ref_counter = self.ref_counter.ref(),
                         };

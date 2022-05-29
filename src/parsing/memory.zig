@@ -10,7 +10,6 @@ const TemplateOptions = mustache.options.TemplateOptions;
 
 pub fn RefCountedSlice(comptime options: TemplateOptions) type {
     return struct {
-
         pub const empty: @This() = .{
             .content = &[_]u8{},
             .ref_counter = .{},
