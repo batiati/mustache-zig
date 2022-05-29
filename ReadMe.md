@@ -10,6 +10,8 @@
 
 # ! Under development !
 
+Needs zig `0.10.0-dev` to build.
+
 ## Features
 
 - [X] [Comments](https://github.com/mustache/spec/blob/master/specs/comments.yml) `{{! Mustache is awesome }}`.

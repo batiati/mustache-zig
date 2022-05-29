@@ -8,14 +8,14 @@ const TemplateOptions = mustache.options.TemplateOptions;
 
 const Element = mustache.Element;
 
-const memory = @import("memory.zig");
+const ref_counter = @import("ref_counter.zig");
 
 const parsing = @import("parsing.zig");
 const Delimiters = parsing.Delimiters;
 const IndexBookmark = parsing.IndexBookmark;
 
 pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usize) type {
-    const RefCounter = memory.RefCounter(options);
+    const RefCounter = ref_counter.RefCounter(options);
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
     const allow_lambdas = options.features.lambdas == .Enabled;
 
@@ -103,7 +103,7 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
                 switch (self.text_part.part_type) {
                     .partial,
                     .parent,
-                    => if (self.text_part.indentation.content.len > 0) self.text_part.indentation.content else null,
+                    => if (self.text_part.indentation) |indentation| indentation.slice else null,
                     else => null,
                 }
             else

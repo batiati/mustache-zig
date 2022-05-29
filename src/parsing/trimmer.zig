@@ -159,7 +159,7 @@ test "Line breaks" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("  \nABC\n  ", block.?.content);
+    try testing.expectEqualStrings("  \nABC\n  ", block.?.content.slice);
 
     // Trim all white-spaces, including the first line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -182,7 +182,7 @@ test "Line breaks \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("  \r\nABC\r\n  ", block.?.content);
+    try testing.expectEqualStrings("  \r\nABC\r\n  ", block.?.content.slice);
 
     // Trim all white-spaces, including the first line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -205,7 +205,7 @@ test "Multiple line breaks" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("  \nABC\nABC\n  ", block.?.content);
+    try testing.expectEqualStrings("  \nABC\nABC\n  ", block.?.content.slice);
 
     // Trim all white-spaces, including the first line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -217,14 +217,14 @@ test "Multiple line breaks" {
 
     block.?.trimLeft();
     try testing.expectEqual(TestingTrimmingIndex.Trimmed, block.?.trimming.left);
-    try testing.expectEqualStrings("ABC\nABC\n  ", block.?.content);
+    try testing.expectEqualStrings("ABC\nABC\n  ", block.?.content.slice);
 
     var indentation = block.?.trimRight();
     try testing.expect(indentation != null);
-    try testing.expectEqualStrings("  ", indentation.?.content);
+    try testing.expectEqualStrings("  ", indentation.?.slice);
 
     try testing.expectEqual(TestingTrimmingIndex.Trimmed, block.?.trimming.right);
-    try testing.expectEqualStrings("ABC\nABC\n", block.?.content);
+    try testing.expectEqualStrings("ABC\nABC\n", block.?.content.slice);
 }
 
 test "Multiple line breaks \\r\\n" {
@@ -239,7 +239,7 @@ test "Multiple line breaks \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("  \r\nABC\r\nABC\r\n  ", block.?.content);
+    try testing.expectEqualStrings("  \r\nABC\r\nABC\r\n  ", block.?.content.slice);
 
     // Trim all white-spaces, including the first line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -251,14 +251,14 @@ test "Multiple line breaks \\r\\n" {
 
     block.?.trimLeft();
     try testing.expectEqual(TestingTrimmingIndex.Trimmed, block.?.trimming.left);
-    try testing.expectEqualStrings("ABC\r\nABC\r\n  ", block.?.content);
+    try testing.expectEqualStrings("ABC\r\nABC\r\n  ", block.?.content.slice);
 
     var indentation = block.?.trimRight();
     try testing.expect(indentation != null);
-    try testing.expectEqualStrings("  ", indentation.?.content);
+    try testing.expectEqualStrings("  ", indentation.?.slice);
 
     try testing.expectEqual(TestingTrimmingIndex.Trimmed, block.?.trimming.right);
-    try testing.expectEqualStrings("ABC\r\nABC\r\n", block.?.content);
+    try testing.expectEqualStrings("ABC\r\nABC\r\n", block.?.content.slice);
 }
 
 test "Whitespace text trimming" {
@@ -272,7 +272,7 @@ test "Whitespace text trimming" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("  \n  ", block.?.content);
+    try testing.expectEqualStrings("  \n  ", block.?.content.slice);
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -284,14 +284,14 @@ test "Whitespace text trimming" {
 
     block.?.trimLeft();
     try testing.expectEqual(TestingTrimmingIndex.Trimmed, block.?.trimming.left);
-    try testing.expectEqualStrings("  ", block.?.content);
+    try testing.expectEqualStrings("  ", block.?.content.slice);
 
     var indentation = block.?.trimRight();
     try testing.expect(indentation != null);
-    try testing.expectEqualStrings("  ", indentation.?.content);
+    try testing.expectEqualStrings("  ", indentation.?.slice);
 
     try testing.expectEqual(TestingTrimmingIndex.Trimmed, block.?.trimming.right);
-    try testing.expect(block.?.content.len == 0);
+    try testing.expect(block.?.content.slice.len == 0);
 }
 
 test "Whitespace text trimming \\r\\n" {
@@ -306,7 +306,7 @@ test "Whitespace text trimming \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("  \r\n  ", block.?.content);
+    try testing.expectEqualStrings("  \r\n  ", block.?.content.slice);
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -330,7 +330,7 @@ test "Tabs text trimming" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("\t\t\n\t\t", block.?.content);
+    try testing.expectEqualStrings("\t\t\n\t\t", block.?.content.slice);
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -354,7 +354,7 @@ test "Whitespace left trimming" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("  \n", block.?.content);
+    try testing.expectEqualStrings("  \n", block.?.content.slice);
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -362,7 +362,7 @@ test "Whitespace left trimming" {
 
     // Nothing to trim right (index == len)
     try testing.expect(block.?.trimming.right == .AllowTrimming);
-    try testing.expectEqual(block.?.content.len, block.?.trimming.right.AllowTrimming.index);
+    try testing.expectEqual(block.?.content.slice.len, block.?.trimming.right.AllowTrimming.index);
     try testing.expectEqual(true, block.?.trimming.right.AllowTrimming.stand_alone);
 }
 
@@ -378,7 +378,7 @@ test "Whitespace left trimming \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("  \r\n", block.?.content);
+    try testing.expectEqualStrings("  \r\n", block.?.content.slice);
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -386,7 +386,7 @@ test "Whitespace left trimming \\r\\n" {
 
     // Nothing to trim right (index == len)
     try testing.expect(block.?.trimming.right == .AllowTrimming);
-    try testing.expectEqual(block.?.content.len, block.?.trimming.right.AllowTrimming.index);
+    try testing.expectEqual(block.?.content.slice.len, block.?.trimming.right.AllowTrimming.index);
     try testing.expectEqual(true, block.?.trimming.right.AllowTrimming.stand_alone);
 }
 
@@ -402,7 +402,7 @@ test "Tabs left trimming" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("\t\t\n", block.?.content);
+    try testing.expectEqualStrings("\t\t\n", block.?.content.slice);
 
     // Trim all white-spaces, including the line break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -410,7 +410,7 @@ test "Tabs left trimming" {
 
     // Nothing to trim right (index == len)
     try testing.expect(block.?.trimming.right == .AllowTrimming);
-    try testing.expectEqual(block.?.content.len, block.?.trimming.right.AllowTrimming.index);
+    try testing.expectEqual(block.?.content.slice.len, block.?.trimming.right.AllowTrimming.index);
     try testing.expectEqual(true, block.?.trimming.right.AllowTrimming.stand_alone);
 }
 
@@ -426,7 +426,7 @@ test "Whitespace right trimming" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("\n  ", block.?.content);
+    try testing.expectEqualStrings("\n  ", block.?.content.slice);
 
     // line break belongs to the left side
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -450,7 +450,7 @@ test "Whitespace right trimming \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("\r\n  ", block.?.content);
+    try testing.expectEqualStrings("\r\n  ", block.?.content.slice);
 
     // line break belongs to the left side
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -474,7 +474,7 @@ test "Tabs right trimming" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("\n\t\t", block.?.content);
+    try testing.expectEqualStrings("\n\t\t", block.?.content.slice);
 
     // line break belongs to the left side
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -498,7 +498,7 @@ test "Single line break" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("\n", block.?.content);
+    try testing.expectEqualStrings("\n", block.?.content.slice);
 
     // Trim the line-break
     try testing.expect(block.?.trimming.left == .AllowTrimming);
@@ -506,7 +506,7 @@ test "Single line break" {
 
     // Nothing to trim right (index == len)
     try testing.expect(block.?.trimming.right == .AllowTrimming);
-    try testing.expectEqual(block.?.content.len, block.?.trimming.right.AllowTrimming.index);
+    try testing.expectEqual(block.?.content.slice.len, block.?.trimming.right.AllowTrimming.index);
     try testing.expectEqual(true, block.?.trimming.right.AllowTrimming.stand_alone);
 }
 
@@ -522,14 +522,14 @@ test "Single line break \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("\r\n", block.?.content);
+    try testing.expectEqualStrings("\r\n", block.?.content.slice);
 
     try testing.expect(block.?.trimming.left == .AllowTrimming);
     try testing.expectEqual(@as(usize, 1), block.?.trimming.left.AllowTrimming.index);
 
     // Nothing to trim right (index == len)
     try testing.expect(block.?.trimming.right == .AllowTrimming);
-    try testing.expectEqual(block.?.content.len, block.?.trimming.right.AllowTrimming.index);
+    try testing.expectEqual(block.?.content.slice.len, block.?.trimming.right.AllowTrimming.index);
     try testing.expectEqual(true, block.?.trimming.right.AllowTrimming.stand_alone);
 }
 
@@ -543,7 +543,7 @@ test "No trimming" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("   ABC\nABC   ", block.?.content);
+    try testing.expectEqualStrings("   ABC\nABC   ", block.?.content.slice);
 
     // No trimming
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);
@@ -562,14 +562,14 @@ test "No trimming, no whitespace" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("|\n", block.?.content);
+    try testing.expectEqualStrings("|\n", block.?.content.slice);
 
     // No trimming left
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);
 
     // Nothing to trim right (index == len)
     try testing.expect(block.?.trimming.right == .AllowTrimming);
-    try testing.expectEqual(block.?.content.len, block.?.trimming.right.AllowTrimming.index);
+    try testing.expectEqual(block.?.content.slice.len, block.?.trimming.right.AllowTrimming.index);
     try testing.expectEqual(true, block.?.trimming.right.AllowTrimming.stand_alone);
 }
 
@@ -585,14 +585,14 @@ test "No trimming, no whitespace \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("|\r\n", block.?.content);
+    try testing.expectEqualStrings("|\r\n", block.?.content.slice);
 
     // No trimming left
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);
 
     // Nothing to trim right (index == len)
     try testing.expect(block.?.trimming.right == .AllowTrimming);
-    try testing.expectEqual(block.?.content.len, block.?.trimming.right.AllowTrimming.index);
+    try testing.expectEqual(block.?.content.slice.len, block.?.trimming.right.AllowTrimming.index);
     try testing.expectEqual(true, block.?.trimming.right.AllowTrimming.stand_alone);
 }
 
@@ -606,7 +606,7 @@ test "No trimming \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("   ABC\r\nABC   ", block.?.content);
+    try testing.expectEqualStrings("   ABC\r\nABC   ", block.?.content.slice);
 
     // No trimming both left and right
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);
@@ -625,7 +625,7 @@ test "No whitespace" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("ABC", block.?.content);
+    try testing.expectEqualStrings("ABC", block.?.content.slice);
 
     // No trimming both left and right
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);
@@ -644,7 +644,7 @@ test "Trimming left only" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("   \nABC   ", block.?.content);
+    try testing.expectEqualStrings("   \nABC   ", block.?.content.slice);
 
     try testing.expect(block.?.trimming.left == .AllowTrimming);
     try testing.expectEqual(@as(usize, 3), block.?.trimming.left.AllowTrimming.index);
@@ -665,7 +665,7 @@ test "Trimming left only \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("   \r\nABC   ", block.?.content);
+    try testing.expectEqualStrings("   \r\nABC   ", block.?.content.slice);
 
     try testing.expect(block.?.trimming.left == .AllowTrimming);
     try testing.expectEqual(@as(usize, 4), block.?.trimming.left.AllowTrimming.index);
@@ -686,7 +686,7 @@ test "Trimming right only" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("   ABC\n   ", block.?.content);
+    try testing.expectEqualStrings("   ABC\n   ", block.?.content.slice);
 
     // No trimming left
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);
@@ -708,7 +708,7 @@ test "Trimming right only \\r\\n" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("   ABC\r\n   ", block.?.content);
+    try testing.expectEqualStrings("   ABC\r\n   ", block.?.content.slice);
 
     // No trimming left
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);
@@ -730,7 +730,7 @@ test "Only whitespace" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("   ", block.?.content);
+    try testing.expectEqualStrings("   ", block.?.content.slice);
 
     // No trimming left
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);
@@ -753,7 +753,7 @@ test "Only tabs" {
 
     var block = try text_scanner.next(allocator);
     try testing.expect(block != null);
-    try testing.expectEqualStrings("\t\t\t", block.?.content);
+    try testing.expectEqualStrings("\t\t\t", block.?.content.slice);
 
     // No trimming left
     try testing.expect(block.?.trimming.left == .PreserveWhitespaces);

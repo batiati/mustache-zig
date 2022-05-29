@@ -21,7 +21,7 @@ const Delimiters = parsing.Delimiters;
 const PartType = parsing.PartType;
 const FileReader = parsing.FileReader;
 
-const memory = @import("memory.zig");
+const ref_counter = @import("ref_counter.zig");
 
 const parsePath = @import("../template.zig").parsePath;
 
@@ -37,7 +37,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
 
         const TextScanner = parsing.TextScanner(Node, options);
         const TextPart = Node.TextPart;
-        const RefCounter = memory.RefCounter(options);
+        const RefCounter = ref_counter.RefCounter(options);
 
         fn RenderError(comptime TRender: type) type {
             switch (@typeInfo(TRender)) {
@@ -189,7 +189,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                 switch (current_node.text_part.part_type) {
                     .static_text => {
                         current_node.trimStandAlone(&self.nodes);
-                        if (current_node.text_part.content.len == 0) {
+                        if (current_node.text_part.isEmpty()) {
                             current_node.text_part.unRef(self.gpa);
                             _ = self.nodes.pop();
                             continue;
@@ -274,7 +274,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                     const final_index = self.nodes.len - min_nodes;
                     while (index < final_index) : (index += 1) {
                         const node = self.nodes.at(index);
-                        if (node.text_part.content.len > 0) {
+                        if (!node.text_part.isEmpty()) {
                             return true;
                         }
                     }
@@ -288,10 +288,11 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
 
             // Delimiters are the only case of match closing tags {{= and =}}
             // Validate if the content ends with the proper "=" symbol before parsing the delimiters
-            const last_index = text_part.content.len - 1;
-            if (text_part.content[last_index] != @enumToInt(PartType.delimiters)) return self.abort(ParseError.InvalidDelimiters, text_part);
+            var content = text_part.content.slice;
+            const last_index = content.len - 1;
+            if (content[last_index] != @enumToInt(PartType.delimiters)) return self.abort(ParseError.InvalidDelimiters, text_part);
 
-            const content = text_part.content[0..last_index];
+            content = content[0..last_index];
             var iterator = std.mem.tokenize(u8, content, " \t");
 
             const starting_delimiter = iterator.next() orelse return self.abort(ParseError.InvalidDelimiters, text_part);
@@ -312,7 +313,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                 => return null,
 
                 else => {
-                    var tokenizer = std.mem.tokenize(u8, text_part.content, " \t");
+                    var tokenizer = std.mem.tokenize(u8, text_part.content.slice, " \t");
                     if (tokenizer.next()) |value| {
                         if (tokenizer.next() == null) {
                             return value;
@@ -350,7 +351,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
 
             var iterator = self.nodes.iterator(0);
             while (iterator.next()) |node| {
-                if (node.text_part.content.len > 0) {
+                if (!node.text_part.isEmpty()) {
                     buffer.appendAssumeCapacity(try self.createElement(node));
                 }
             }
@@ -381,7 +382,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
         fn createElement(self: *Self, node: *const Node) (AbortError || Allocator.Error)!Element {
             return switch (node.text_part.part_type) {
                 .static_text => .{
-                    .StaticText = try self.dupe(node.text_part.content),
+                    .StaticText = try self.dupe(node.text_part.content.slice),
                 },
 
                 else => |part_type| {

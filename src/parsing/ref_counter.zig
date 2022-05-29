@@ -10,12 +10,7 @@ const TemplateOptions = mustache.options.TemplateOptions;
 
 pub fn RefCountedSlice(comptime options: TemplateOptions) type {
     return struct {
-        pub const empty: @This() = .{
-            .content = &[_]u8{},
-            .ref_counter = .{},
-        };
-
-        content: []const u8,
+        slice: []const u8,
         ref_counter: RefCounter(options),
     };
 }
@@ -28,7 +23,7 @@ const RefCounterImpl = struct {
     const Self = @This();
 
     const State = struct {
-        counter: u32,
+        counter: usize,
         buffer: []const u8,
     };
 
@@ -65,49 +60,6 @@ const RefCounterImpl = struct {
                 allocator.free(state.buffer);
                 allocator.destroy(state);
             }
-        }
-    }
-};
-
-const RefCounterHolderImpl = struct {
-    const Self = @This();
-    const HashMap = std.AutoHashMapUnmanaged(*RefCounterImpl.State, void);
-    group: HashMap = .{},
-
-    pub const Iterator = struct {
-        hash_map_iterator: HashMap.KeyIterator,
-
-        pub fn next(self: *Iterator) ?RefCounterImpl {
-            return if (self.hash_map_iterator.next()) |item| blk: {
-                break :blk RefCounterImpl{ .state = item.* };
-            } else null;
-        }
-    };
-
-    pub fn add(self: *Self, allocator: Allocator, ref_counter: RefCounterImpl) Allocator.Error!void {
-        if (ref_counter.state) |state| {
-            var prev = try self.group.fetchPut(allocator, state, {});
-            if (prev == null) {
-                _ = ref_counter.ref();
-            }
-        }
-    }
-
-    pub fn iterator(self: *const Self) Iterator {
-        return Iterator{
-            .hash_map_iterator = self.group.keyIterator(),
-        };
-    }
-
-    pub fn free(self: *Self, allocator: Allocator) void {
-        defer {
-            self.group.deinit(allocator);
-            self.group = .{};
-        }
-
-        var it = self.iterator();
-        while (it.next()) |*ref_counter| {
-            ref_counter.free(allocator);
         }
     }
 };

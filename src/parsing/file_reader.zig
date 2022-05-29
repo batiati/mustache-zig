@@ -8,7 +8,7 @@ const testing = std.testing;
 const mustache = @import("../mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
 
-const memory = @import("memory.zig");
+const ref_counter = @import("ref_counter.zig");
 
 const File = std.fs.File;
 
@@ -18,8 +18,8 @@ pub fn FileReader(comptime options: TemplateOptions) type {
         .String => return void,
     };
 
-    const RefCounter = memory.RefCounter(options);
-    const RefCountedSlice = memory.RefCountedSlice(options);
+    const RefCounter = ref_counter.RefCounter(options);
+    const RefCountedSlice = ref_counter.RefCountedSlice(options);
 
     return struct {
         const Self = @This();
@@ -68,7 +68,7 @@ pub fn FileReader(comptime options: TemplateOptions) type {
             }
 
             return RefCountedSlice{
-                .content = buffer,
+                .slice = buffer,
                 .ref_counter = try RefCounter.init(allocator, buffer),
             };
         }
@@ -89,7 +89,7 @@ test "StreamReader.Slices" {
 
     // Test the StreamReader slicing mechanism
     // In a real use case, the read_buffer_len is much larger than the amount needed to produce a token
-    // So we can parse many tokens on a single read, and read a new slice containing only the lasts unparsed bytes
+    // So we can parse many tokens on a single read, and read a new slice containing only the last unparsed bytes
     //
     // Just 5 chars in our test
     const SlicedReader = FileReader(.{ .source = .{ .Stream = .{ .read_buffer_size = 5 } }, .output = .Parse });
@@ -123,7 +123,7 @@ test "StreamReader.Slices" {
     // We got a slice with "read_buffer_len" size to parse
     var result_1 = try reader.read(allocator, slice);
     defer result_1.ref_counter.free(allocator);
-    slice = result_1.content;
+    slice = result_1.slice;
 
     try testing.expectEqual(false, reader.finished());
     try testing.expectEqual(@as(usize, 5), slice.len);
@@ -135,7 +135,7 @@ test "StreamReader.Slices" {
     // so we expect the next read to return the remaining bytes plus new 5 bytes read
     var result_2 = try reader.read(allocator, slice[2..]);
     defer result_2.ref_counter.free(allocator);
-    slice = result_2.content;
+    slice = result_2.slice;
 
     try testing.expectEqual(false, reader.finished());
     try testing.expectEqualStrings("name}}Ju", slice);
@@ -145,7 +145,7 @@ test "StreamReader.Slices" {
     // so we need another slice
     var result_3 = try reader.read(allocator, slice[6..]);
     defer result_3.ref_counter.free(allocator);
-    slice = result_3.content;
+    slice = result_3.slice;
 
     try testing.expectEqual(false, reader.finished());
     try testing.expectEqualStrings("Just st", slice);
@@ -154,7 +154,7 @@ test "StreamReader.Slices" {
     // Nothing was parsed,
     var result_4 = try reader.read(allocator, slice);
     defer result_4.ref_counter.free(allocator);
-    slice = result_4.content;
+    slice = result_4.slice;
 
     try testing.expectEqual(true, reader.finished());
     try testing.expectEqualStrings("Just static", slice);
@@ -162,7 +162,7 @@ test "StreamReader.Slices" {
     // After that, EOF
     var result_5 = try reader.read(allocator, slice);
     defer result_5.ref_counter.free(allocator);
-    slice = result_5.content;
+    slice = result_5.slice;
 
     try testing.expectEqual(true, reader.finished());
     try testing.expectEqualStrings("Just static", slice);

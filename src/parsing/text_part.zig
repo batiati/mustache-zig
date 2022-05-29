@@ -6,15 +6,14 @@ const assert = std.debug.assert;
 const mustache = @import("../mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
 
-const memory = @import("memory.zig");
+const ref_counter = @import("ref_counter.zig");
 
 const parsing = @import("parsing.zig");
 const PartType = parsing.PartType;
 const Delimiters = parsing.Delimiters;
 
 pub fn TextPart(comptime options: TemplateOptions) type {
-    const RefCounter = memory.RefCounter(options);
-    const RefCountedSlice = memory.RefCountedSlice(options);
+    const RefCountedSlice = ref_counter.RefCountedSlice(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 
     return struct {
@@ -22,10 +21,14 @@ pub fn TextPart(comptime options: TemplateOptions) type {
 
         part_type: PartType,
         is_stand_alone: bool,
-        content: []const u8,
-        ref_counter: RefCounter,
 
-        indentation: RefCountedSlice = RefCountedSlice.empty,
+        /// Slice containing the content for this TextPart
+        /// When parsing from streams, RefCounter holds a reference to the underlying read buffer, otherwise the RefCounter is a no-op.
+        content: RefCountedSlice,
+
+        /// Slice containing the indentation for this TextPart
+        /// When parsing from streams, RefCounter holds a reference to the underlying read buffer, otherwise the RefCounter is a no-op.        
+        indentation: ?RefCountedSlice = null,
 
         /// The line and column on the template source
         /// Used mostly for error messages
@@ -41,8 +44,16 @@ pub fn TextPart(comptime options: TemplateOptions) type {
         } = .{},
 
         pub inline fn unRef(self: *Self, allocator: Allocator) void {
-            self.ref_counter.free(allocator);
-            self.indentation.ref_counter.free(allocator);
+            self.content.ref_counter.free(allocator);
+
+            if (self.indentation) |*indentation| {
+                indentation.ref_counter.free(allocator);
+            }
+        }
+
+        /// Determines if this TextPart is empty
+        pub fn isEmpty(self: *const Self) bool {
+            return self.content.slice.len == 0;
         }
 
         /// Processes the trimming rules for the right side of the slice
@@ -50,12 +61,12 @@ pub fn TextPart(comptime options: TemplateOptions) type {
             return switch (self.trimming.right) {
                 .PreserveWhitespaces, .Trimmed => null,
                 .AllowTrimming => |right_trimming| indentation: {
-                    const content = self.content;
+                    const content = self.content.slice;
 
                     if (right_trimming.index == 0) {
-                        self.content = &.{};
+                        self.content.slice = &.{};
                     } else if (right_trimming.index < content.len) {
-                        self.content = content[0..right_trimming.index];
+                        self.content.slice = content[0..right_trimming.index];
                     }
 
                     self.trimming.right = .Trimmed;
@@ -64,8 +75,8 @@ pub fn TextPart(comptime options: TemplateOptions) type {
                         break :indentation null;
                     } else {
                         break :indentation RefCountedSlice{
-                            .content = content[right_trimming.index..],
-                            .ref_counter = self.ref_counter.ref(),
+                            .slice = content[right_trimming.index..],
+                            .ref_counter = self.content.ref_counter.ref(),
                         };
                     }
                 },
@@ -77,7 +88,7 @@ pub fn TextPart(comptime options: TemplateOptions) type {
             switch (self.trimming.left) {
                 .PreserveWhitespaces, .Trimmed => {},
                 .AllowTrimming => |left_trimming| {
-                    const content = self.content;
+                    const content = self.content.slice;
 
                     // Update the trim-right index and indentation after trimming left
                     // BEFORE:
@@ -104,9 +115,9 @@ pub fn TextPart(comptime options: TemplateOptions) type {
                     }
 
                     if (left_trimming.index >= content.len - 1) {
-                        self.content = &.{};
+                        self.content.slice = &.{};
                     } else {
-                        self.content = content[left_trimming.index + 1 ..];
+                        self.content.slice = content[left_trimming.index + 1 ..];
                     }
 
                     self.trimming.left = .Trimmed;

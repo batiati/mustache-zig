@@ -11,7 +11,7 @@ const mustache = @import("../mustache.zig");
 const ParseError = mustache.ParseError;
 const TemplateOptions = mustache.options.TemplateOptions;
 
-const memory = @import("memory.zig");
+const ref_counter = @import("ref_counter.zig");
 
 const parsing = @import("parsing.zig");
 const PartType = parsing.PartType;
@@ -21,7 +21,7 @@ const FileReader = parsing.FileReader;
 const IndexBookmark = parsing.IndexBookmark;
 
 pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type {
-    const RefCounter = memory.RefCounter(options);
+    const RefCounter = ref_counter.RefCounter(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 
     const allow_lambdas = options.features.lambdas == .Enabled;
@@ -148,7 +148,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                     self.stream.ref_counter.free(allocator);
                     self.stream.ref_counter = read.ref_counter;
 
-                    self.content = read.content;
+                    self.content = read.slice;
                     self.index -= adjust.off_set;
                     self.block_index -= adjust.off_set;
 
@@ -296,8 +296,10 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             return if (tail.len > 0) TextPart{
                 .part_type = .static_text,
                 .is_stand_alone = PartType.canBeStandAlone(.static_text),
-                .content = tail,
-                .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                .content = .{
+                    .slice = tail,
+                    .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                },
                 .source = .{
                     .lin = self.start_pos.lin,
                     .col = self.start_pos.col,
@@ -342,8 +344,10 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             return TextPart{
                 .part_type = self.state.produce_close,
                 .is_stand_alone = PartType.canBeStandAlone(self.state.produce_close),
-                .content = tail,
-                .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                .content = .{ 
+                    .slice = tail,
+                    .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                },
                 .source = .{
                     .lin = self.start_pos.lin,
                     .col = self.start_pos.col,
@@ -366,8 +370,10 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                     return TextPart{
                         .part_type = part_type,
                         .is_stand_alone = part_type.canBeStandAlone(),
-                        .content = tail,
-                        .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                        .content = .{
+                            .slice = tail,
+                            .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                        },
                         .source = .{
                             .lin = self.start_pos.lin,
                             .col = self.start_pos.col,
@@ -385,8 +391,10 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                         TextPart{
                             .part_type = .static_text,
                             .is_stand_alone = PartType.canBeStandAlone(.static_text),
-                            .content = tail,
-                            .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                            .content = .{
+                                .slice = tail,
+                                .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                            },
                             .source = .{
                                 .lin = self.start_pos.lin,
                                 .col = self.start_pos.col,
@@ -639,7 +647,7 @@ test "bookmarks" {
 fn expectTag(part_type: PartType, content: []const u8, value: anytype, lin: u32, col: u32) !void {
     if (value) |part| {
         try testing.expectEqual(part_type, part.part_type);
-        try testing.expectEqualStrings(content, part.content);
+        try testing.expectEqualStrings(content, part.content.slice);
         try testing.expectEqual(lin, part.source.lin);
         try testing.expectEqual(col, part.source.col);
     } else {
