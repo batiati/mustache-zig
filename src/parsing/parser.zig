@@ -121,7 +121,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                     },
 
                     .comments => {
-                        defer text_part.unRef(self.gpa);
+                        defer if (options.isRefCounted()) text_part.unRef(self.gpa);
 
                         // Comments are just ignored
                         self.checkIfLastNodeCanBeStandAlone(text_part.part_type);
@@ -129,7 +129,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                     },
 
                     .delimiters => {
-                        defer text_part.unRef(self.gpa);
+                        defer if (options.isRefCounted()) text_part.unRef(self.gpa);
 
                         current_delimiters = try self.parseDelimiters(text_part);
 
@@ -143,7 +143,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                     },
 
                     .close_section => {
-                        defer text_part.unRef(self.gpa);
+                        defer if (options.isRefCounted()) text_part.unRef(self.gpa);
 
                         if (level == 0 or initial_index == 0) {
                             return self.abort(ParseError.UnexpectedCloseSection, text_part);
@@ -338,7 +338,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
         fn produceNodes(self: *Self, render: anytype) !void {
             if (self.nodes.len == 0) return;
 
-            defer self.unRefNodes();
+            defer if (options.isRefCounted()) self.unRefNodes();
 
             var buffer = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, self.nodes.len);
             defer {
@@ -361,9 +361,11 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
         }
 
         fn unRefNodes(self: *Self) void {
-            var iterator = self.nodes.iterator(0);
-            while (iterator.next()) |node| {
-                node.unRef(self.gpa);
+            if (options.isRefCounted()) {
+                var iterator = self.nodes.iterator(0);
+                while (iterator.next()) |node| {
+                    node.unRef(self.gpa);
+                }
             }
         }
 
@@ -464,7 +466,6 @@ const DummyRender = struct {
 };
 
 test "Basic parse" {
-    if (true) return error.SkipZigTest;
     const template_text =
         \\{{! Comments block }}
         \\  Hello
@@ -481,103 +482,83 @@ test "Basic parse" {
 
         calls: u32 = 0,
 
-        pub fn render(self: *@This(), iterator: *StreamedParser.Iterator) Error!void {
+        pub fn render(self: *@This(), elements: []Element) Error!void {
             defer self.calls += 1;
 
             switch (self.calls) {
                 0 => {
+                    try testing.expectEqual(@as(usize, 10), elements.len);
+
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.static_text, node.text_part.part_type);
-                        try testing.expect(node.identifier == null);
-                        try testing.expectEqualStrings("  Hello\n", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
+                        const element = elements[0];
+                        try testing.expectEqual(Element.Type.StaticText, element);
+                        try testing.expectEqualStrings("  Hello\n", element.StaticText);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.section, node.text_part.part_type);
-                        try testing.expect(node.identifier != null);
-                        try testing.expectEqualStrings("section", node.identifier.?);
-                        try testing.expectEqual(@as(u32, 8), node.children_count);
+                        const element = elements[1];
+                        try testing.expectEqual(Element.Type.Section, element);
+                        try testing.expectEqualStrings("section", element.Section.path[0]);
+                        try testing.expectEqual(@as(u32, 8), element.Section.children_count);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.static_text, node.text_part.part_type);
-                        try testing.expect(node.identifier == null);
-                        try testing.expectEqualStrings("Name: ", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
+                        const element = elements[2];
+                        try testing.expectEqual(Element.Type.StaticText, element);
+                        try testing.expectEqualStrings("Name: ", element.StaticText);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.interpolation, node.text_part.part_type);
-                        try testing.expect(node.identifier != null);
-                        try testing.expectEqualStrings("name", node.identifier.?);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
+                        const element = elements[3];
+                        try testing.expectEqual(Element.Type.Interpolation, element);
+                        try testing.expectEqualStrings("name", element.Interpolation[0]);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.static_text, node.text_part.part_type);
-                        try testing.expect(node.identifier == null);
-                        try testing.expectEqualStrings("\nComments: ", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
+                        const element = elements[4];
+                        try testing.expectEqual(Element.Type.StaticText, element);
+                        try testing.expectEqualStrings("\nComments: ", element.StaticText);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.no_escape, node.text_part.part_type);
-                        try testing.expect(node.identifier != null);
-                        try testing.expectEqualStrings("comments", node.identifier.?);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
+                        const element = elements[5];
+                        try testing.expectEqual(Element.Type.UnescapedInterpolation, element);
+                        try testing.expectEqualStrings("comments", element.UnescapedInterpolation[0]);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.static_text, node.text_part.part_type);
-                        try testing.expect(node.identifier == null);
-                        try testing.expectEqualStrings("\n", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
+                        const element = elements[6];
+                        try testing.expectEqual(Element.Type.StaticText, element);
+                        try testing.expectEqualStrings("\n", element.StaticText);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.inverted_section, node.text_part.part_type);
-                        try testing.expect(node.identifier != null);
-                        try testing.expectEqualStrings("inverted", node.identifier.?);
-                        try testing.expectEqual(@as(u32, 1), node.children_count);
+                        const element = elements[7];
+                        try testing.expectEqual(Element.Type.InvertedSection, element);
+                        try testing.expectEqualStrings("inverted", element.InvertedSection.path[0]);
+                        try testing.expectEqual(@as(u32, 1), element.InvertedSection.children_count);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.static_text, node.text_part.part_type);
-                        try testing.expect(node.identifier == null);
-                        try testing.expectEqualStrings("Inverted text", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
+                        const element = elements[8];
+                        try testing.expectEqual(Element.Type.StaticText, element);
+                        try testing.expectEqualStrings("Inverted text", element.StaticText);
                     }
 
                     {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.static_text, node.text_part.part_type);
-                        try testing.expect(node.identifier == null);
-                        try testing.expectEqualStrings("\n", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
+                        const element = elements[9];
+                        try testing.expectEqual(Element.Type.StaticText, element);
+                        try testing.expectEqualStrings("\n", element.StaticText);
                     }
-
-                    try testing.expect(iterator.next() == null);
                 },
                 1 => {
-                    {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.static_text, node.text_part.part_type);
-                        try testing.expect(node.identifier == null);
-                        try testing.expectEqualStrings("World", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
-                    }
+                    try testing.expectEqual(@as(usize, 1), elements.len);
 
-                    try testing.expect(iterator.next() == null);
+                    {
+                        const element = elements[0];
+                        try testing.expectEqual(Element.Type.StaticText, element);
+                        try testing.expectEqualStrings("World", element.StaticText);
+                    }
                 },
                 else => try testing.expect(false),
             }
@@ -603,14 +584,13 @@ test "Basic parse" {
     try runTheTest();
 
     //Comptime test
-    if (enable_comptime_tests) comptime {
-        @setEvalBranchQuota(9999);
-        try runTheTest();
-    };
+    //if (enable_comptime_tests) comptime {
+    //    @setEvalBranchQuota(9999);
+    //    try runTheTest();
+    //};
 }
 
 test "Scan standAlone tags" {
-    if (true) return error.SkipZigTest;
     const template_text =
         \\   {{!           
         \\   Comments block 
@@ -623,20 +603,18 @@ test "Scan standAlone tags" {
 
         calls: u32 = 0,
 
-        pub fn render(self: *@This(), iterator: *StreamedParser.Iterator) Error!void {
+        pub fn render(self: *@This(), elements: []Element) Error!void {
             defer self.calls += 1;
 
             switch (self.calls) {
                 0 => {
-                    {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.static_text, node.text_part.part_type);
-                        try testing.expect(node.identifier == null);
-                        try testing.expectEqualStrings("Hello", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
-                    }
+                    try testing.expectEqual(@as(usize, 1), elements.len);
 
-                    try testing.expect(iterator.next() == null);
+                    {
+                        var element = elements[0];
+                        try testing.expectEqual(Element.Type.StaticText, element);
+                        try testing.expectEqualStrings("Hello", element.StaticText);
+                    }
                 },
                 else => try testing.expect(false),
             }
@@ -662,17 +640,16 @@ test "Scan standAlone tags" {
     try runTheTest();
 
     //Comptime test
-    if (enable_comptime_tests) comptime {
-        @setEvalBranchQuota(9999);
-        try runTheTest();
-    };
+    //if (enable_comptime_tests) comptime {
+    //    @setEvalBranchQuota(9999);
+    //    try runTheTest();
+    //};
 }
 
 test "Scan delimiters Tags" {
-    if (true) return error.SkipZigTest;
     const template_text =
         \\{{=[ ]=}}           
-        \\[interpolation]
+        \\[interpolation.value]
     ;
 
     const TestRender = struct {
@@ -680,20 +657,19 @@ test "Scan delimiters Tags" {
 
         calls: u32 = 0,
 
-        pub fn render(self: *@This(), iterator: *StreamedParser.Iterator) Error!void {
+        pub fn render(self: *@This(), elements: []Element) Error!void {
             defer self.calls += 1;
 
             switch (self.calls) {
                 0 => {
-                    {
-                        const node = iterator.next() orelse return try testing.expect(false);
-                        try testing.expectEqual(PartType.interpolation, node.text_part.part_type);
-                        try testing.expect(node.identifier != null);
-                        try testing.expectEqualStrings("interpolation", node.text_part.content);
-                        try testing.expectEqual(@as(u32, 0), node.children_count);
-                    }
+                    try testing.expectEqual(@as(usize, 1), elements.len);
 
-                    try testing.expect(iterator.next() == null);
+                    {
+                        var element = elements[0];
+                        try testing.expectEqual(Element.Type.Interpolation, element);
+                        try testing.expectEqualStrings("interpolation", element.Interpolation[0]);
+                        try testing.expectEqualStrings("value", element.Interpolation[1]);
+                    }
                 },
                 else => try testing.expect(false),
             }
@@ -719,10 +695,10 @@ test "Scan delimiters Tags" {
     try runTheTest();
 
     //Comptime test
-    if (enable_comptime_tests) comptime {
-        @setEvalBranchQuota(9999);
-        try runTheTest();
-    };
+    //if (enable_comptime_tests) comptime {
+    //    @setEvalBranchQuota(9999);
+    //    try runTheTest();
+    //};
 }
 
 test "Parse - UnexpectedCloseSection " {

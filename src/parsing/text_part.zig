@@ -27,7 +27,7 @@ pub fn TextPart(comptime options: TemplateOptions) type {
         content: RefCountedSlice,
 
         /// Slice containing the indentation for this TextPart
-        /// When parsing from streams, RefCounter holds a reference to the underlying read buffer, otherwise the RefCounter is a no-op.        
+        /// When parsing from streams, RefCounter holds a reference to the underlying read buffer, otherwise the RefCounter is a no-op.
         indentation: ?RefCountedSlice = null,
 
         /// The line and column on the template source

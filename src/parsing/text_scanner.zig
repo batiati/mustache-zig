@@ -344,7 +344,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             return TextPart{
                 .part_type = self.state.produce_close,
                 .is_stand_alone = PartType.canBeStandAlone(self.state.produce_close),
-                .content = .{ 
+                .content = .{
                     .slice = tail,
                     .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
                 },

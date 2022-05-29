@@ -39,9 +39,11 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
         } else void = if (allow_lambdas) .{} else {},
 
         pub fn unRef(self: *Self, allocator: Allocator) void {
-            self.text_part.unRef(allocator);
-            if (allow_lambdas) {
-                self.inner_text.ref_counter.free(allocator);
+            if (options.isRefCounted()) {
+                self.text_part.unRef(allocator);
+                if (allow_lambdas) {
+                    self.inner_text.ref_counter.free(allocator);
+                }
             }
         }
 

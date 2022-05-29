@@ -80,7 +80,7 @@ const NoOpRefCounter = struct {
         return null_ref;
     }
 
-    pub inline fn free(self: *Self, allocator: Allocator) void {
+    pub inline fn free(self: Self, allocator: Allocator) void {
         _ = self;
         _ = allocator;
     }
