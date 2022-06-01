@@ -66,6 +66,6 @@ pub const Trimmer = @import("trimmer.zig").Trimmer;
 pub const FileReader = @import("file_reader.zig").FileReader;
 pub const Parser = @import("parser.zig").Parser;
 
-//test {
-// _ = testing.refAllDecls(@This());
-//}
+test {
+ _ = testing.refAllDecls(@This());
+}
