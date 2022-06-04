@@ -340,24 +340,24 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
 
             defer if (options.isRefCounted()) self.unRefNodes();
 
-            var buffer = try std.ArrayListUnmanaged(Element).initCapacity(self.gpa, self.nodes.len);
-            defer {
+            var index: usize = 0;
+            var buffer = try render.allocBuffer(self.nodes.len);
 
-                // Clean up any elements left,
-                // Both in case of error during the creation, or in case of output == .Render
-                const deinit_elements = buffer.toOwnedSlice(self.gpa);
-                Element.deinitMany(self.gpa, copy_string, deinit_elements);
-            }
+            defer if (comptime options.output == .Render) render.freeBuffer(buffer);
+            defer if (comptime options.output == .Render) Element.deinitMany(self.gpa, copy_string, buffer[0..index]);
+
+            errdefer if (comptime options.output == .Parse) render.freeBuffer(buffer);
+            errdefer if (comptime options.output == .Parse) Element.deinitMany(self.gpa, copy_string, buffer[0..index]);
 
             var iterator = self.nodes.iterator(0);
             while (iterator.next()) |node| {
                 if (!node.text_part.isEmpty()) {
-                    buffer.appendAssumeCapacity(try self.createElement(node));
+                    buffer[index] = try self.createElement(node);
+                    index += 1;
                 }
             }
 
-            const elements = if (options.output == .Render) buffer.items else buffer.toOwnedSlice(self.gpa);
-            try render.render(elements);
+            try render.render(buffer[0..index]);
         }
 
         fn unRefNodes(self: *Self) void {
@@ -459,8 +459,19 @@ const StreamedParser = Parser(.{ .source = .{ .String = .{} }, .output = .Render
 const DummyRender = struct {
     pub const Error = error{};
 
-    pub fn render(self: *@This(), elements: []Element) Error!void {
-        _ = self;
+    buffer: [128]Element = undefined,
+
+    pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
+        return ctx.buffer[0..size];
+    }
+
+    pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
+        _ = ctx;
+        _ = buffer;
+    }
+
+    pub fn render(ctx: *@This(), elements: []Element) Error!void {
+        _ = ctx;
         _ = elements;
     }
 };
@@ -481,11 +492,21 @@ test "Basic parse" {
         pub const Error = error{ TestUnexpectedResult, TestExpectedEqual };
 
         calls: u32 = 0,
+        buffer: [128]Element = undefined,
 
-        pub fn render(self: *@This(), elements: []Element) Error!void {
-            defer self.calls += 1;
+        pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
+            return ctx.buffer[0..size];
+        }
 
-            switch (self.calls) {
+        pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
+            _ = ctx;
+            _ = buffer;
+        }
+
+        pub fn render(ctx: *@This(), elements: []Element) Error!void {
+            defer ctx.calls += 1;
+
+            switch (ctx.calls) {
                 0 => {
                     try testing.expectEqual(@as(usize, 10), elements.len);
 
@@ -602,11 +623,21 @@ test "Scan standAlone tags" {
         pub const Error = error{ TestUnexpectedResult, TestExpectedEqual };
 
         calls: u32 = 0,
+        buffer: [128]Element = undefined,
 
-        pub fn render(self: *@This(), elements: []Element) Error!void {
-            defer self.calls += 1;
+        pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
+            return ctx.buffer[0..size];
+        }
 
-            switch (self.calls) {
+        pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
+            _ = ctx;
+            _ = buffer;
+        }
+
+        pub fn render(ctx: *@This(), elements: []Element) Error!void {
+            defer ctx.calls += 1;
+
+            switch (ctx.calls) {
                 0 => {
                     try testing.expectEqual(@as(usize, 1), elements.len);
 
@@ -641,7 +672,7 @@ test "Scan standAlone tags" {
 
     //Comptime test
     //if (enable_comptime_tests) comptime {
-    //    @setEvalBranchQuota(9999);
+    //   @setEvalBranchQuota(9999);
     //    try runTheTest();
     //};
 }
@@ -656,11 +687,21 @@ test "Scan delimiters Tags" {
         pub const Error = error{ TestUnexpectedResult, TestExpectedEqual };
 
         calls: u32 = 0,
+        buffer: [128]Element = undefined,
 
-        pub fn render(self: *@This(), elements: []Element) Error!void {
-            defer self.calls += 1;
+        pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
+            return ctx.buffer[0..size];
+        }
 
-            switch (self.calls) {
+        pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
+            _ = ctx;
+            _ = buffer;
+        }
+
+        pub fn render(ctx: *@This(), elements: []Element) Error!void {
+            defer ctx.calls += 1;
+
+            switch (ctx.calls) {
                 0 => {
                     try testing.expectEqual(@as(usize, 1), elements.len);
 

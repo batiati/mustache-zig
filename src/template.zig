@@ -248,7 +248,6 @@ pub const Element = union(Element.Type) {
         for (items) |item| {
             item.deinit(allocator, owns_string);
         }
-        allocator.free(items);
     }
 
     pub fn createPath(allocator: Allocator, copy_strings: bool, identifier: []const u8) Allocator.Error!Path {
@@ -293,6 +292,7 @@ pub const Template = struct {
 
     pub fn deinit(self: Template, allocator: Allocator) void {
         Element.deinitMany(allocator, self.options.copyStrings(), self.elements);
+        allocator.free(self.elements);
     }
 };
 
@@ -368,10 +368,20 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
         const Collector = struct {
             pub const Error = Allocator.Error;
 
-            elements: []Element = undefined,
+            allocator: Allocator,
+            buffer: []Element = &.{},
 
-            pub fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
-                ctx.elements = elements;
+            pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
+                ctx.buffer = try ctx.allocator.alloc(Element, size);
+                return ctx.buffer;
+            }
+
+            pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
+                ctx.allocator.free(buffer);
+            }
+
+            pub inline fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
+                ctx.buffer = ctx.allocator.shrink(ctx.buffer, elements.len);
             }
         };
 
@@ -387,11 +397,13 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             var parser = try Parser.init(self.allocator, template, self.delimiters);
             defer parser.deinit();
 
-            var collector = Collector{};
+            var collector = Collector{
+                .allocator = self.allocator,
+            };
             var success = try parser.parse(&collector);
 
             self.result = if (success) .{
-                .Elements = collector.elements,
+                .Elements = collector.buffer,
             } else .{
                 .Error = parser.last_error.?,
             };
@@ -406,7 +418,10 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
 
         pub fn deinit(self: *Self) void {
             switch (self.result) {
-                .Elements => |elements| Element.deinitMany(self.allocator, options.copyStrings(), elements),
+                .Elements => |elements| {
+                    Element.deinitMany(self.allocator, options.copyStrings(), elements);
+                    self.allocator.free(elements);
+                },
                 .Error, .NotLoaded => {},
             }
         }
@@ -2281,11 +2296,11 @@ const tests = struct {
                 try file.writeAll(template_text);
             }
 
-            const size = try file.getEndPos();
+            const file_size = try file.getEndPos();
             file.close();
 
             // Must be at least 10MB big
-            try testing.expect(size > 10 * 1024 * 1024);
+            try testing.expect(file_size > 10 * 1024 * 1024);
 
             // 32KB should be enough memory for this job
             // 16KB if we don't need to support lambdas 😅
@@ -2313,9 +2328,19 @@ const tests = struct {
                 pub const Error = Allocator.Error;
 
                 count: usize = 0,
+                buffer: [128]Element = undefined,
 
-                pub fn render(self: *@This(), elements: []Element) Allocator.Error!void {
-                    self.count += elements.len;
+                pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
+                    return ctx.buffer[0..size];
+                }
+
+                pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
+                    _ = ctx;
+                    _ = buffer;
+                }
+
+                pub fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
+                    ctx.count += elements.len;
                     checkStrings(elements);
                 }
 

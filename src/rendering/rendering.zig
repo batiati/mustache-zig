@@ -425,7 +425,6 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
         pub const DataRender = struct {
             const Self = @This();
-            pub const Error = Allocator.Error || Writer.Error;
 
             out_writer: OutWriter,
             stack: *const ContextStack,
@@ -433,20 +432,31 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             indentation_queue: *IndentationQueue,
             template_options: if (options == .Template) *const TemplateOptions else void,
 
-            pub fn render(self: *Self, elements: []const Element) !void {
-                switch (self.out_writer) {
-                    .Buffer => |writer| {
-                        var list = writer.context;
-                        const capacity_hint = self.levelCapacityHint(elements);
-                        try list.ensureUnusedCapacity(capacity_hint);
-                    },
-                    else => {},
+            const Collector = struct {
+                pub const Error = Allocator.Error || Writer.Error;
+
+                parent: *Self,
+                allocator: Allocator,
+
+                pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
+                    return try ctx.allocator.alloc(Element, size);
                 }
 
-                try self.renderLevel(elements);
-            }
+                pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
+                    ctx.allocator.free(buffer);
+                }
+
+                pub inline fn render(ctx: *@This(), elements: []const Element) !void {
+                    try ctx.parent.render(elements);
+                }
+            };
 
             pub fn collect(self: *Self, allocator: Allocator, template: []const u8) !void {
+                var collector = Collector{
+                    .parent = self,
+                    .allocator = allocator,
+                };
+
                 switch (comptime options) {
                     .Text => |text_options| {
                         const template_options = mustache.options.TemplateOptions{
@@ -459,7 +469,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             .allocator = allocator,
                         };
                         errdefer template_loader.deinit();
-                        try template_loader.collectElements(template, self);
+                        try template_loader.collectElements(template, &collector);
                     },
                     .File => |file_options| {
                         const render_file_options = TemplateOptions{
@@ -472,11 +482,24 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             .allocator = allocator,
                         };
                         errdefer template_loader.deinit();
-                        try template_loader.collectElements(template, self);
+                        try template_loader.collectElements(template, &collector);
                     },
 
                     .Template => unreachable,
                 }
+            }
+
+            pub fn render(self: *Self, elements: []const Element) !void {
+                switch (self.out_writer) {
+                    .Buffer => |writer| {
+                        var list = writer.context;
+                        const capacity_hint = self.levelCapacityHint(elements);
+                        try list.ensureUnusedCapacity(capacity_hint);
+                    },
+                    else => {},
+                }
+
+                try self.renderLevel(elements);
             }
 
             inline fn lambdasSupported(self: *Self) bool {
