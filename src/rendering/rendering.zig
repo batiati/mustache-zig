@@ -529,10 +529,10 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     index += 1;
 
                     switch (element) {
-                        .StaticText => |content| _ = try self.write(content, .Unescaped),
-                        .Interpolation => |path| try self.interpolate(path, .Escaped),
-                        .UnescapedInterpolation => |path| try self.interpolate(path, .Unescaped),
-                        .Section => |section| {
+                        .static_text => |content| _ = try self.write(content, .Unescaped),
+                        .interpolation => |path| try self.interpolate(path, .Escaped),
+                        .unescaped_interpolation => |path| try self.interpolate(path, .Unescaped),
+                        .section => |section| {
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
@@ -560,7 +560,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                 }
                             }
                         },
-                        .InvertedSection => |section| {
+                        .inverted_section => |section| {
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
@@ -573,7 +573,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             }
                         },
 
-                        .Partial => |partial| {
+                        .partial => |partial| {
                             if (comptime PartialsMap.isEmpty()) continue;
 
                             if (self.partials_map.get(partial.key)) |partial_template| {
@@ -855,9 +855,9 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     index += 1;
 
                     switch (element) {
-                        .StaticText => |content| size += content.len,
-                        .Interpolation, .UnescapedInterpolation => |path| size += self.pathCapacityHint(path),
-                        .Section => |section| {
+                        .static_text => |content| size += content.len,
+                        .interpolation, .unescaped_interpolation => |path| size += self.pathCapacityHint(path),
+                        .section => |section| {
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
@@ -875,7 +875,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                 }
                             }
                         },
-                        .InvertedSection => |section| {
+                        .inverted_section => |section| {
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
@@ -3977,11 +3977,11 @@ const tests = struct {
 
         // Cached template render
         switch (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false })) {
-            .ParseError => {
+            .success => |ret| return ret,
+            .parse_error => {
                 try testing.expect(false);
                 unreachable;
             },
-            .Success => |ret| return ret,
         }
     }
 

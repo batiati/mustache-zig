@@ -59,7 +59,7 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype
         .body = "This is a really simple test of the rendering!",
     };
 
-    var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })).Success;
+    var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })).success;
     defer template.deinit(allocator);
 
     std.debug.print("Mode {s}\n", .{@tagName(mode)});
@@ -93,13 +93,13 @@ pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anyty
 
     const footer_partial_text = "<footer>Sup?</footer>";
 
-    var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })).Success;
+    var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })).success;
     defer template.deinit(allocator);
 
-    var head_template = (try mustache.parseText(allocator, head_partial_text, .{}, .{ .copy_strings = false, .features = features })).Success;
+    var head_template = (try mustache.parseText(allocator, head_partial_text, .{}, .{ .copy_strings = false, .features = features })).success;
     defer head_template.deinit(allocator);
 
-    var footer_template = (try mustache.parseText(allocator, footer_partial_text, .{}, .{ .copy_strings = false, .features = features })).Success;
+    var footer_template = (try mustache.parseText(allocator, footer_partial_text, .{}, .{ .copy_strings = false, .features = features })).success;
     defer footer_template.deinit(allocator);
 
     var partial_templates = std.StringHashMap(mustache.Template).init(allocator);
@@ -254,7 +254,7 @@ fn parse(allocator: Allocator) !usize {
     ;
 
     var template = switch (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })) {
-        .Success => |template| template,
+        .success => |template| template,
         else => unreachable,
     };
 

@@ -4,10 +4,6 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const mustache = @import("../mustache.zig");
 const Element = mustache.Element;
-const Section = mustache.Section;
-const Partial = mustache.Partial;
-const Parent = mustache.Parent;
-const Block = mustache.Block;
 const ParseError = mustache.ParseError;
 const ParseErrorDetail = mustache.ParseErrorDetail;
 
@@ -384,7 +380,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
         fn createElement(self: *Self, node: *const Node) (AbortError || Allocator.Error)!Element {
             return switch (node.text_part.part_type) {
                 .static_text => .{
-                    .StaticText = try self.dupe(node.text_part.content.slice),
+                    .static_text = try self.dupe(node.text_part.content.slice),
                 },
 
                 else => |part_type| {
@@ -408,19 +404,19 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
 
                     return switch (part_type) {
                         .interpolation => .{
-                            .Interpolation = try self.parsePath(identifier),
+                            .interpolation = try self.parsePath(identifier),
                         },
-                        .no_escape, .triple_mustache => .{
-                            .UnescapedInterpolation = try self.parsePath(identifier),
+                        .unescaped_interpolation, .triple_mustache => .{
+                            .unescaped_interpolation = try self.parsePath(identifier),
                         },
                         .inverted_section => .{
-                            .InvertedSection = .{
+                            .inverted_section = .{
                                 .path = try self.parsePath(identifier),
                                 .children_count = children_count,
                             },
                         },
                         .section => .{
-                            .Section = .{
+                            .section = .{
                                 .path = try self.parsePath(identifier),
                                 .children_count = children_count,
                                 .inner_text = inner_text,
@@ -428,20 +424,20 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                             },
                         },
                         .partial => .{
-                            .Partial = .{
+                            .partial = .{
                                 .key = try self.dupe(identifier),
                                 .indentation = indentation,
                             },
                         },
                         .parent => .{
-                            .Parent = .{
+                            .parent = .{
                                 .key = try self.dupe(identifier),
                                 .children_count = children_count,
                                 .indentation = indentation,
                             },
                         },
                         .block => .{
-                            .Block = .{
+                            .block = .{
                                 .key = try self.dupe(identifier),
                                 .children_count = children_count,
                             },
@@ -454,7 +450,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
     };
 }
 
-const enable_comptime_tests = true;
+const enable_comptime_tests = false;
 const StreamedParser = Parser(.{ .source = .{ .String = .{} }, .output = .Render }, 32);
 const DummyRender = struct {
     pub const Error = error{};
@@ -512,64 +508,64 @@ test "Basic parse" {
 
                     {
                         const element = elements[0];
-                        try testing.expectEqual(Element.Type.StaticText, element);
-                        try testing.expectEqualStrings("  Hello\n", element.StaticText);
+                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqualStrings("  Hello\n", element.static_text);
                     }
 
                     {
                         const element = elements[1];
-                        try testing.expectEqual(Element.Type.Section, element);
-                        try testing.expectEqualStrings("section", element.Section.path[0]);
-                        try testing.expectEqual(@as(u32, 8), element.Section.children_count);
+                        try testing.expectEqual(Element.Type.section, element);
+                        try testing.expectEqualStrings("section", element.section.path[0]);
+                        try testing.expectEqual(@as(u32, 8), element.section.children_count);
                     }
 
                     {
                         const element = elements[2];
-                        try testing.expectEqual(Element.Type.StaticText, element);
-                        try testing.expectEqualStrings("Name: ", element.StaticText);
+                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqualStrings("Name: ", element.static_text);
                     }
 
                     {
                         const element = elements[3];
-                        try testing.expectEqual(Element.Type.Interpolation, element);
-                        try testing.expectEqualStrings("name", element.Interpolation[0]);
+                        try testing.expectEqual(Element.Type.interpolation, element);
+                        try testing.expectEqualStrings("name", element.interpolation[0]);
                     }
 
                     {
                         const element = elements[4];
-                        try testing.expectEqual(Element.Type.StaticText, element);
-                        try testing.expectEqualStrings("\nComments: ", element.StaticText);
+                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqualStrings("\nComments: ", element.static_text);
                     }
 
                     {
                         const element = elements[5];
-                        try testing.expectEqual(Element.Type.UnescapedInterpolation, element);
-                        try testing.expectEqualStrings("comments", element.UnescapedInterpolation[0]);
+                        try testing.expectEqual(Element.Type.unescaped_interpolation, element);
+                        try testing.expectEqualStrings("comments", element.unescaped_interpolation[0]);
                     }
 
                     {
                         const element = elements[6];
-                        try testing.expectEqual(Element.Type.StaticText, element);
-                        try testing.expectEqualStrings("\n", element.StaticText);
+                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqualStrings("\n", element.static_text);
                     }
 
                     {
                         const element = elements[7];
-                        try testing.expectEqual(Element.Type.InvertedSection, element);
-                        try testing.expectEqualStrings("inverted", element.InvertedSection.path[0]);
-                        try testing.expectEqual(@as(u32, 1), element.InvertedSection.children_count);
+                        try testing.expectEqual(Element.Type.inverted_section, element);
+                        try testing.expectEqualStrings("inverted", element.inverted_section.path[0]);
+                        try testing.expectEqual(@as(u32, 1), element.inverted_section.children_count);
                     }
 
                     {
                         const element = elements[8];
-                        try testing.expectEqual(Element.Type.StaticText, element);
-                        try testing.expectEqualStrings("Inverted text", element.StaticText);
+                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqualStrings("Inverted text", element.static_text);
                     }
 
                     {
                         const element = elements[9];
-                        try testing.expectEqual(Element.Type.StaticText, element);
-                        try testing.expectEqualStrings("\n", element.StaticText);
+                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqualStrings("\n", element.static_text);
                     }
                 },
                 1 => {
@@ -577,8 +573,8 @@ test "Basic parse" {
 
                     {
                         const element = elements[0];
-                        try testing.expectEqual(Element.Type.StaticText, element);
-                        try testing.expectEqualStrings("World", element.StaticText);
+                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqualStrings("World", element.static_text);
                     }
                 },
                 else => try testing.expect(false),
@@ -605,10 +601,10 @@ test "Basic parse" {
     try runTheTest();
 
     //Comptime test
-    //if (enable_comptime_tests) comptime {
-    //    @setEvalBranchQuota(9999);
-    //    try runTheTest();
-    //};
+    if (enable_comptime_tests) comptime {
+        @setEvalBranchQuota(9999);
+        try runTheTest();
+    };
 }
 
 test "Scan standAlone tags" {
@@ -643,8 +639,8 @@ test "Scan standAlone tags" {
 
                     {
                         var element = elements[0];
-                        try testing.expectEqual(Element.Type.StaticText, element);
-                        try testing.expectEqualStrings("Hello", element.StaticText);
+                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqualStrings("Hello", element.static_text);
                     }
                 },
                 else => try testing.expect(false),
@@ -671,10 +667,10 @@ test "Scan standAlone tags" {
     try runTheTest();
 
     //Comptime test
-    //if (enable_comptime_tests) comptime {
-    //   @setEvalBranchQuota(9999);
-    //    try runTheTest();
-    //};
+    if (enable_comptime_tests) comptime {
+       @setEvalBranchQuota(9999);
+        try runTheTest();
+    };
 }
 
 test "Scan delimiters Tags" {
@@ -707,9 +703,9 @@ test "Scan delimiters Tags" {
 
                     {
                         var element = elements[0];
-                        try testing.expectEqual(Element.Type.Interpolation, element);
-                        try testing.expectEqualStrings("interpolation", element.Interpolation[0]);
-                        try testing.expectEqualStrings("value", element.Interpolation[1]);
+                        try testing.expectEqual(Element.Type.interpolation, element);
+                        try testing.expectEqualStrings("interpolation", element.interpolation[0]);
+                        try testing.expectEqualStrings("value", element.interpolation[1]);
                     }
                 },
                 else => try testing.expect(false),
@@ -736,10 +732,10 @@ test "Scan delimiters Tags" {
     try runTheTest();
 
     //Comptime test
-    //if (enable_comptime_tests) comptime {
-    //    @setEvalBranchQuota(9999);
-    //    try runTheTest();
-    //};
+    if (enable_comptime_tests) comptime {
+        @setEvalBranchQuota(9999);
+        try runTheTest();
+    };
 }
 
 test "Parse - UnexpectedCloseSection " {

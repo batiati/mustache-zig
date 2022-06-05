@@ -246,7 +246,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                 @enumToInt(PartType.partial),
                 @enumToInt(PartType.parent),
                 @enumToInt(PartType.block),
-                @enumToInt(PartType.no_escape),
+                @enumToInt(PartType.unescaped_interpolation),
                 @enumToInt(PartType.delimiters),
                 @enumToInt(PartType.triple_mustache),
                 => true,

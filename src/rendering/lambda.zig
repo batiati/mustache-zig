@@ -112,8 +112,8 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
             var self = getSelf(ctx);
 
             var template = switch (try mustache.parseText(allocator, template_text, self.delimiters, .{ .copy_strings = false })) {
-                .Success => |value| value,
-                .ParseError => |detail| return detail.parse_error,
+                .success => |value| value,
+                .parse_error => |detail| return detail.parse_error,
             };
             defer template.deinit(allocator);
 
@@ -134,8 +134,8 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
             var self = getSelf(ctx);
 
             var template = switch (try mustache.parseText(allocator, template_text, self.delimiters, .{ .copy_strings = false })) {
-                .Success => |value| value,
-                .ParseError => return,
+                .success => |value| value,
+                .parse_error => return,
             };
             defer template.deinit(allocator);
 

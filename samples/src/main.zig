@@ -44,15 +44,17 @@ pub fn main() anyerror!void {
 /// Cache a template to render many times
 pub fn renderFromCachedTemplate() anyerror!void {
     var gpa = GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    
     const allocator = gpa.allocator();
 
     // Store this template and render many times from it
     const cached_template = switch (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false })) {
-        .ParseError => |detail| {
+        .success => |ret| ret,
+        .parse_error => |detail| {
             std.log.err("Parse error {s} at lin {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
             return;
         },
-        .Success => |ret| ret,
     };
 
     var repeat: u32 = 0;

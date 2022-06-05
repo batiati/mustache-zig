@@ -29,26 +29,26 @@ pub const ParseErrorDetail = struct {
 };
 
 pub const ParseResult = union(enum) {
-    ParseError: ParseErrorDetail,
-    Success: Template,
+    parse_error: ParseErrorDetail,
+    success: Template,
 };
 
 pub const Element = union(Element.Type) {
-    StaticText: []const u8,
-    Interpolation: Path,
-    UnescapedInterpolation: Path,
-    Section: Section,
-    InvertedSection: InvertedSection,
-    Partial: Partial,
-    Parent: Parent,
-    Block: Block,
+    static_text: []const u8,
+    interpolation: Path,
+    unescaped_interpolation: Path,
+    section: Section,
+    inverted_section: InvertedSection,
+    partial: Partial,
+    parent: Parent,
+    block: Block,
 
     pub const Path = []const []const u8;
 
     pub const Type = enum {
 
         /// Static text
-        StaticText,
+        static_text,
 
         ///  Interpolation tags are used to integrate dynamic content into the template.
         ///
@@ -81,8 +81,8 @@ pub const Element = union(Element.Type) {
         ///  interpolation.
         ///
         ///  The Interpolation tags MUST NOT be treated as standalone.
-        Interpolation,
-        UnescapedInterpolation,
+        interpolation,
+        unescaped_interpolation,
 
         ///  Section tags and End Section tags are used in combination to wrap a section
         ///  of the template for iteration
@@ -125,8 +125,8 @@ pub const Element = union(Element.Type) {
         ///  off the context stack.
         ///
         ///  Section and End Section tags SHOULD be treated as standalone when appropriate.
-        Section,
-        InvertedSection,
+        section,
+        inverted_section,
 
         /// Partial tags are used to expand an external template into the current
         /// template.
@@ -142,7 +142,7 @@ pub const Element = union(Element.Type) {
         /// Partial tags SHOULD be treated as standalone when appropriate.
         /// If this tag is used standalone, any whitespace preceding the tag should treated as
         /// indentation, and prepended to each line of the partial before rendering.
-        Partial,
+        partial,
 
         ///  Like partials, Parent tags are used to expand an external template into the
         ///  current template. Unlike partials, Parent tags may contain optional
@@ -162,7 +162,7 @@ pub const Element = union(Element.Type) {
         ///  Parent tags SHOULD be treated as standalone when appropriate.
         ///  If this tag is used standalone, any whitespace preceding the tag should be treated as
         ///  indentation, and prepended to each line of the Parent before rendering.
-        Parent,
+        parent,
 
         /// The Block tags' content MUST be a non-whitespace character sequence NOT
         /// containing the current closing delimiter.
@@ -182,7 +182,7 @@ pub const Element = union(Element.Type) {
         /// content that replaces the default defined in the Parent template.
         ///
         /// This content is the argument passed to the Parent template.
-        Block,
+        block,
     };
 
     pub const Section = struct {
@@ -215,30 +215,30 @@ pub const Element = union(Element.Type) {
 
     pub fn deinit(self: Element, allocator: Allocator, owns_string: bool) void {
         switch (self) {
-            .StaticText => |content| if (owns_string) allocator.free(content),
-            .Interpolation => |path| destroyPath(allocator, owns_string, path),
-            .UnescapedInterpolation => |path| destroyPath(allocator, owns_string, path),
-            .Section => |section| {
+            .static_text => |content| if (owns_string) allocator.free(content),
+            .interpolation => |path| destroyPath(allocator, owns_string, path),
+            .unescaped_interpolation => |path| destroyPath(allocator, owns_string, path),
+            .section => |section| {
                 destroyPath(allocator, owns_string, section.path);
                 if (owns_string) {
                     if (section.inner_text) |inner_text| allocator.free(inner_text);
                 }
             },
-            .InvertedSection => |section| {
+            .inverted_section => |section| {
                 destroyPath(allocator, owns_string, section.path);
             },
-            .Partial => |partial| {
+            .partial => |partial| {
                 if (owns_string) {
                     allocator.free(partial.key);
                     if (partial.indentation) |indentation| allocator.free(indentation);
                 }
             },
 
-            .Parent => |parent| {
+            .parent => |parent| {
                 if (owns_string) allocator.free(parent.key);
             },
 
-            .Block => |block| {
+            .block => |block| {
                 if (owns_string) allocator.free(block.key);
             },
         }
@@ -352,9 +352,9 @@ fn parseSource(
     try template.load(source_content);
 
     switch (template.result) {
-        .Error => |last_error| return ParseResult{ .ParseError = last_error },
-        .Elements => |elements| return ParseResult{ .Success = .{ .elements = elements, .options = &options } },
-        .NotLoaded => unreachable,
+        .elements => |elements| return ParseResult{ .success = .{ .elements = elements, .options = &options } },
+        .parser_error => |last_error| return ParseResult{ .parse_error = last_error },
+        .not_loaded => unreachable,
     }
 }
 
@@ -388,10 +388,10 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
         allocator: Allocator,
         delimiters: Delimiters = .{},
         result: union(enum) {
-            Elements: []const Element,
-            Error: ParseErrorDetail,
-            NotLoaded,
-        } = .NotLoaded,
+            not_loaded,
+            elements: []const Element,
+            parser_error: ParseErrorDetail,
+        } = .not_loaded,
 
         pub fn load(self: *Self, template: []const u8) Parser.LoadError!void {
             var parser = try Parser.init(self.allocator, template, self.delimiters);
@@ -403,9 +403,9 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             var success = try parser.parse(&collector);
 
             self.result = if (success) .{
-                .Elements = collector.buffer,
+                .elements = collector.buffer,
             } else .{
-                .Error = parser.last_error.?,
+                .parser_error = parser.last_error.?,
             };
         }
 
@@ -418,11 +418,11 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
 
         pub fn deinit(self: *Self) void {
             switch (self.result) {
-                .Elements => |elements| {
+                .elements => |elements| {
                     Element.deinitMany(self.allocator, options.copyStrings(), elements);
                     self.allocator.free(elements);
                 },
-                .Error, .NotLoaded => {},
+                .parser_error, .not_loaded => {},
             }
         }
 
@@ -480,8 +480,8 @@ const tests = struct {
 
         try template.load(template_text);
 
-        if (template.result == .Error) {
-            const detail = template.result.Error;
+        if (template.result == .parser_error) {
+            const detail = template.result.parser_error;
             std.log.err("{s} row {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
             return detail.parse_error;
         }
@@ -510,15 +510,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("12345", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("12345", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("67890", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("67890", elements[1].static_text);
         }
 
         //
@@ -534,15 +534,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("12345", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("12345", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("67890", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("67890", elements[1].static_text);
         }
 
         //
@@ -557,15 +557,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("End.", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].static_text);
         }
 
         //
@@ -580,15 +580,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("End.", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].static_text);
         }
 
         //
@@ -599,16 +599,16 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
 
-            try testing.expectEqualStrings("|", elements[1].StaticText);
+            try testing.expectEqualStrings("|", elements[1].static_text);
         }
 
         //
@@ -619,12 +619,12 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 1), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("!\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("!\n", elements[0].static_text);
         }
 
         //
@@ -641,15 +641,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("End.", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].static_text);
         }
 
         //
@@ -666,15 +666,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("End.", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].static_text);
         }
 
         //
@@ -685,15 +685,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("  12 ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("  12 ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("\n", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("\n", elements[1].static_text);
         }
 
         //
@@ -704,15 +704,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("12345 ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("12345 ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings(" 67890", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings(" 67890", elements[1].static_text);
         }
     };
 
@@ -726,18 +726,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("(", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("(", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try expectPath("text", elements[1].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[1]);
+            try expectPath("text", elements[1].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(")", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings(")", elements[2].static_text);
         }
 
         //
@@ -748,18 +748,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("(", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("(", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try expectPath("text", elements[1].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[1]);
+            try expectPath("text", elements[1].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(")", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings(")", elements[2].static_text);
         }
 
         //
@@ -782,43 +782,43 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 10), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("[\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("[\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("section", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 3), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("section", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 3), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("  ", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("  ", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try expectPath("data", elements[3].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[3]);
+            try expectPath("data", elements[3].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings("\n  |data|\n", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[4]);
+            try testing.expectEqualStrings("\n  |data|\n", elements[4].static_text);
 
             // Delimiters changed
 
-            try testing.expectEqual(Element.Type.Section, elements[5]);
-            try expectPath("section", elements[5].Section.path);
-            try testing.expectEqual(@as(usize, 3), elements[5].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[5]);
+            try expectPath("section", elements[5].section.path);
+            try testing.expectEqual(@as(usize, 3), elements[5].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[6]);
-            try testing.expectEqualStrings("  {{data}}\n  ", elements[6].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[6]);
+            try testing.expectEqualStrings("  {{data}}\n  ", elements[6].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[7]);
-            try expectPath("data", elements[7].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[7]);
+            try expectPath("data", elements[7].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[8]);
-            try testing.expectEqualStrings("\n", elements[8].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[8]);
+            try testing.expectEqualStrings("\n", elements[8].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[9]);
-            try testing.expectEqualStrings("]", elements[9].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[9]);
+            try testing.expectEqualStrings("]", elements[9].static_text);
         }
 
         //
@@ -841,43 +841,43 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 10), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("[\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("[\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("section", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 3), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("section", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 3), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("  ", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("  ", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try expectPath("data", elements[3].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[3]);
+            try expectPath("data", elements[3].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings("\n  |data|\n", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[4]);
+            try testing.expectEqualStrings("\n  |data|\n", elements[4].static_text);
 
             // Delimiters changed
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[5]);
-            try expectPath("section", elements[5].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 3), elements[5].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[5]);
+            try expectPath("section", elements[5].inverted_section.path);
+            try testing.expectEqual(@as(usize, 3), elements[5].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[6]);
-            try testing.expectEqualStrings("  {{data}}\n  ", elements[6].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[6]);
+            try testing.expectEqualStrings("  {{data}}\n  ", elements[6].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[7]);
-            try expectPath("data", elements[7].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[7]);
+            try expectPath("data", elements[7].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[8]);
-            try testing.expectEqualStrings("\n", elements[8].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[8]);
+            try testing.expectEqualStrings("\n", elements[8].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[9]);
-            try testing.expectEqualStrings("]", elements[9].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[9]);
+            try testing.expectEqualStrings("]", elements[9].static_text);
         }
 
         //
@@ -888,15 +888,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings(" |", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings(" |", elements[1].static_text);
         }
 
         //
@@ -907,15 +907,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("\n", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("\n", elements[1].static_text);
         }
 
         //
@@ -930,15 +930,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("End.", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].static_text);
         }
 
         //
@@ -953,15 +953,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("Begin.\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("Begin.\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("End.", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("End.", elements[1].static_text);
         }
 
         //
@@ -972,15 +972,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("|", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("|", elements[1].static_text);
         }
 
         //
@@ -991,12 +991,12 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 1), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("=", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("=", elements[0].static_text);
         }
 
         //
@@ -1007,12 +1007,12 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 1), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("=\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("=\n", elements[0].static_text);
         }
 
         //
@@ -1023,15 +1023,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("|", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("|", elements[1].static_text);
         }
     };
 
@@ -1044,12 +1044,12 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 1), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("Hello from {Mustache}!", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("Hello from {Mustache}!", elements[0].static_text);
         }
 
         // Unadorned tags should interpolate content into the template.
@@ -1059,18 +1059,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("Hello, ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("Hello, ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try expectPath("subject", elements[1].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[1]);
+            try expectPath("subject", elements[1].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("!", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("!", elements[2].static_text);
         }
 
         // Basic interpolation should be HTML escaped.
@@ -1080,15 +1080,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("These characters should be HTML escaped: ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("These characters should be HTML escaped: ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try expectPath("forbidden", elements[1].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[1]);
+            try expectPath("forbidden", elements[1].interpolation);
         }
 
         // Triple mustaches should interpolate without HTML escaping.
@@ -1098,15 +1098,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try expectPath("forbidden", elements[1].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[1]);
+            try expectPath("forbidden", elements[1].unescaped_interpolation);
         }
 
         // Ampersand should interpolate without HTML escaping.
@@ -1116,15 +1116,15 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("These characters should not be HTML escaped: ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try expectPath("forbidden", elements[1].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[1]);
+            try expectPath("forbidden", elements[1].unescaped_interpolation);
         }
 
         // Interpolation should not alter surrounding whitespace.
@@ -1134,18 +1134,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try expectPath("string", elements[1].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[1]);
+            try expectPath("string", elements[1].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" |", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings(" |", elements[2].static_text);
         }
 
         // Interpolation should not alter surrounding whitespace.
@@ -1155,18 +1155,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try expectPath("string", elements[1].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[1]);
+            try expectPath("string", elements[1].unescaped_interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" |", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings(" |", elements[2].static_text);
         }
 
         // Interpolation should not alter surrounding whitespace.
@@ -1176,18 +1176,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try expectPath("string", elements[1].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[1]);
+            try expectPath("string", elements[1].unescaped_interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" |", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings(" |", elements[2].static_text);
         }
 
         // Standalone interpolation should not alter surrounding whitespace.
@@ -1197,18 +1197,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("  ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("  ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try expectPath("string", elements[1].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[1]);
+            try expectPath("string", elements[1].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\n", elements[2].static_text);
         }
 
         // Standalone interpolation should not alter surrounding whitespace.
@@ -1218,18 +1218,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("  ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("  ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try expectPath("string", elements[1].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[1]);
+            try expectPath("string", elements[1].unescaped_interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\n", elements[2].static_text);
         }
 
         // Standalone interpolation should not alter surrounding whitespace.
@@ -1239,18 +1239,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("  ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("  ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try expectPath("string", elements[1].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[1]);
+            try expectPath("string", elements[1].unescaped_interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\n", elements[2].static_text);
         }
 
         // Superfluous in-tag whitespace should be ignored.
@@ -1260,18 +1260,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try expectPath("string", elements[1].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[1]);
+            try expectPath("string", elements[1].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].static_text);
         }
 
         // Superfluous in-tag whitespace should be ignored.
@@ -1281,18 +1281,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try expectPath("string", elements[1].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[1]);
+            try expectPath("string", elements[1].unescaped_interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].static_text);
         }
 
         // Superfluous in-tag whitespace should be ignored.
@@ -1302,18 +1302,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[1]);
-            try expectPath("string", elements[1].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[1]);
+            try expectPath("string", elements[1].unescaped_interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].static_text);
         }
     };
 
@@ -1326,22 +1326,22 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("boolean", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("boolean", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\t|\t", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\t|\t", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings(" | \n", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings(" | \n", elements[3].static_text);
         }
 
         // Sections should not alter internal whitespace.
@@ -1351,25 +1351,25 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 5), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("boolean", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 2), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("boolean", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 2), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" ", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings(" ", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("\n ", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("\n ", elements[3].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings(" | \n", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[4]);
+            try testing.expectEqualStrings(" | \n", elements[4].static_text);
         }
 
         // Single-line sections should not alter surrounding whitespace.
@@ -1379,32 +1379,32 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 7), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings(" ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings(" ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("boolean", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("boolean", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("YES", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("YES", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("\n ", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("\n ", elements[3].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[4]);
-            try expectPath("boolean", elements[4].Section.path);
-            try testing.expectEqual(@as(usize, 1), elements[4].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[4]);
+            try expectPath("boolean", elements[4].section.path);
+            try testing.expectEqual(@as(usize, 1), elements[4].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[5]);
-            try testing.expectEqualStrings("GOOD", elements[5].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[5]);
+            try testing.expectEqualStrings("GOOD", elements[5].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[6]);
-            try testing.expectEqualStrings("\n", elements[6].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[6]);
+            try testing.expectEqualStrings("\n", elements[6].static_text);
         }
 
         // Standalone lines should be removed from the template.
@@ -1420,22 +1420,22 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| This Is\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("boolean", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("boolean", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|\n", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("| A Line", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("| A Line", elements[3].static_text);
         }
 
         // Indented standalone lines should be removed from the template.
@@ -1445,19 +1445,19 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("boolean", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 0), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("boolean", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 0), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].static_text);
         }
 
         // Standalone tags should not require a newline to precede them.
@@ -1467,19 +1467,19 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.Section, elements[0]);
-            try expectPath("boolean", elements[0].Section.path);
-            try testing.expectEqual(@as(usize, 1), elements[0].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[0]);
+            try expectPath("boolean", elements[0].section.path);
+            try testing.expectEqual(@as(usize, 1), elements[0].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("#", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("#", elements[1].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n/", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\n/", elements[2].static_text);
         }
 
         // Standalone tags should not require a newline to follow them.
@@ -1489,19 +1489,19 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("#", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("#", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("boolean", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("boolean", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n/\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\n/\n", elements[2].static_text);
         }
 
         // "\r\n" should be considered a newline for standalone tags.
@@ -1517,22 +1517,22 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| This Is\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("boolean", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("boolean", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|\n", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("| A Line", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("| A Line", elements[3].static_text);
         }
 
         // Superfluous in-tag whitespace should be ignored.
@@ -1542,22 +1542,22 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("boolean", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("boolean", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("=", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("=", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("|", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("|", elements[3].static_text);
         }
 
         test "Deeply Nested Contexts" {
@@ -1588,66 +1588,66 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 77), elements.len);
 
-            try testing.expectEqual(Element.Type.Section, elements[0]);
-            try expectPath("a", elements[0].Section.path);
+            try testing.expectEqual(Element.Type.section, elements[0]);
+            try expectPath("a", elements[0].section.path);
 
             {
-                try testing.expectEqual(@as(usize, 76), elements[0].Section.children_count);
+                try testing.expectEqual(@as(usize, 76), elements[0].section.children_count);
 
-                try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-                try expectPath("one", elements[1].Interpolation);
+                try testing.expectEqual(Element.Type.interpolation, elements[1]);
+                try expectPath("one", elements[1].interpolation);
 
-                try testing.expectEqual(Element.Type.StaticText, elements[2]);
-                try testing.expectEqualStrings("\n", elements[2].StaticText);
+                try testing.expectEqual(Element.Type.static_text, elements[2]);
+                try testing.expectEqualStrings("\n", elements[2].static_text);
 
-                try testing.expectEqual(Element.Type.Section, elements[3]);
-                try expectPath("b", elements[3].Section.path);
+                try testing.expectEqual(Element.Type.section, elements[3]);
+                try expectPath("b", elements[3].section.path);
 
                 {
-                    try testing.expectEqual(@as(usize, 71), elements[3].Section.children_count);
+                    try testing.expectEqual(@as(usize, 71), elements[3].section.children_count);
 
-                    try testing.expectEqual(Element.Type.Interpolation, elements[4]);
-                    try expectPath("one", elements[4].Interpolation);
+                    try testing.expectEqual(Element.Type.interpolation, elements[4]);
+                    try expectPath("one", elements[4].interpolation);
 
-                    try testing.expectEqual(Element.Type.Interpolation, elements[5]);
-                    try expectPath("two", elements[5].Interpolation);
+                    try testing.expectEqual(Element.Type.interpolation, elements[5]);
+                    try expectPath("two", elements[5].interpolation);
 
-                    try testing.expectEqual(Element.Type.Interpolation, elements[6]);
-                    try expectPath("one", elements[6].Interpolation);
+                    try testing.expectEqual(Element.Type.interpolation, elements[6]);
+                    try expectPath("one", elements[6].interpolation);
 
-                    try testing.expectEqual(Element.Type.StaticText, elements[7]);
-                    try testing.expectEqualStrings("\n", elements[7].StaticText);
+                    try testing.expectEqual(Element.Type.static_text, elements[7]);
+                    try testing.expectEqualStrings("\n", elements[7].static_text);
 
-                    try testing.expectEqual(Element.Type.Section, elements[8]);
-                    try expectPath("c", elements[8].Section.path);
+                    try testing.expectEqual(Element.Type.section, elements[8]);
+                    try expectPath("c", elements[8].section.path);
 
                     {
-                        try testing.expectEqual(@as(usize, 62), elements[8].Section.children_count);
+                        try testing.expectEqual(@as(usize, 62), elements[8].section.children_count);
                         // Too lazy to do the rest ... 🙃
                     }
 
-                    try testing.expectEqual(Element.Type.Interpolation, elements[71]);
-                    try expectPath("one", elements[71].Interpolation);
+                    try testing.expectEqual(Element.Type.interpolation, elements[71]);
+                    try expectPath("one", elements[71].interpolation);
 
-                    try testing.expectEqual(Element.Type.Interpolation, elements[72]);
-                    try expectPath("two", elements[72].Interpolation);
+                    try testing.expectEqual(Element.Type.interpolation, elements[72]);
+                    try expectPath("two", elements[72].interpolation);
 
-                    try testing.expectEqual(Element.Type.Interpolation, elements[73]);
-                    try expectPath("one", elements[73].Interpolation);
+                    try testing.expectEqual(Element.Type.interpolation, elements[73]);
+                    try expectPath("one", elements[73].interpolation);
 
-                    try testing.expectEqual(Element.Type.StaticText, elements[74]);
-                    try testing.expectEqualStrings("\n", elements[74].StaticText);
+                    try testing.expectEqual(Element.Type.static_text, elements[74]);
+                    try testing.expectEqualStrings("\n", elements[74].static_text);
                 }
 
-                try testing.expectEqual(Element.Type.Interpolation, elements[75]);
-                try expectPath("one", elements[75].Interpolation);
+                try testing.expectEqual(Element.Type.interpolation, elements[75]);
+                try expectPath("one", elements[75].interpolation);
 
-                try testing.expectEqual(Element.Type.StaticText, elements[76]);
-                try testing.expectEqualStrings("\n", elements[76].StaticText);
+                try testing.expectEqual(Element.Type.static_text, elements[76]);
+                try testing.expectEqualStrings("\n", elements[76].static_text);
             }
         }
     };
@@ -1661,22 +1661,22 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("boolean", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("boolean", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\t|\t", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\t|\t", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings(" | \n", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings(" | \n", elements[3].static_text);
         }
 
         // Sections should not alter internal whitespace.
@@ -1686,25 +1686,25 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 5), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings(" | ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings(" | ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("boolean", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 2), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("boolean", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 2), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" ", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings(" ", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("\n ", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("\n ", elements[3].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings(" | \n", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[4]);
+            try testing.expectEqualStrings(" | \n", elements[4].static_text);
         }
 
         // Single-line sections should not alter surrounding whitespace.
@@ -1714,32 +1714,32 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 7), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings(" ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings(" ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("boolean", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("boolean", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("NO", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("NO", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("\n ", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("\n ", elements[3].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[4]);
-            try expectPath("boolean", elements[4].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[4].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[4]);
+            try expectPath("boolean", elements[4].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[4].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[5]);
-            try testing.expectEqualStrings("WAY", elements[5].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[5]);
+            try testing.expectEqualStrings("WAY", elements[5].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[6]);
-            try testing.expectEqualStrings("\n", elements[6].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[6]);
+            try testing.expectEqualStrings("\n", elements[6].static_text);
         }
 
         // Standalone lines should be removed from the template.
@@ -1755,22 +1755,22 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| This Is\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("boolean", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("boolean", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|\n", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("| A Line", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("| A Line", elements[3].static_text);
         }
 
         // Indented standalone lines should be removed from the template.
@@ -1780,19 +1780,19 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("boolean", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 0), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("boolean", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 0), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].static_text);
         }
 
         // Standalone tags should not require a newline to precede them.
@@ -1802,19 +1802,19 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[0]);
-            try expectPath("boolean", elements[0].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[0].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[0]);
+            try expectPath("boolean", elements[0].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[0].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings("^", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings("^", elements[1].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n/", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\n/", elements[2].static_text);
         }
 
         // Standalone tags should not require a newline to follow them.
@@ -1824,19 +1824,19 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("^", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("^", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("boolean", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("boolean", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("\n/\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("\n/\n", elements[2].static_text);
         }
 
         // Standalone indented lines should be removed from the template.
@@ -1852,22 +1852,22 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| This Is\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| This Is\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("boolean", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("boolean", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|\n", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|\n", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("| A Line", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("| A Line", elements[3].static_text);
         }
 
         // Superfluous in-tag whitespace should be ignored.
@@ -1877,22 +1877,22 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[1]);
-            try expectPath("boolean", elements[1].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[1].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[1]);
+            try expectPath("boolean", elements[1].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[1].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("=", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("=", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings("|", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings("|", elements[3].static_text);
         }
     };
 
@@ -1905,19 +1905,19 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("| ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("| ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Partial, elements[1]);
-            try testing.expectEqualStrings("partial", elements[1].Partial.key);
-            try testing.expect(elements[1].Partial.indentation == null);
+            try testing.expectEqual(Element.Type.partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].partial.key);
+            try testing.expect(elements[1].partial.indentation == null);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings(" |", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings(" |", elements[2].static_text);
         }
 
         // Whitespace should be left untouched.
@@ -1927,25 +1927,25 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 5), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("  ", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("  ", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[1]);
-            try expectPath("data", elements[1].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[1]);
+            try expectPath("data", elements[1].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("  ", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("  ", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.Partial, elements[3]);
-            try testing.expectEqualStrings("partial", elements[3].Partial.key);
-            try testing.expect(elements[3].Partial.indentation == null);
+            try testing.expectEqual(Element.Type.partial, elements[3]);
+            try testing.expectEqualStrings("partial", elements[3].partial.key);
+            try testing.expect(elements[3].partial.indentation == null);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings("\n", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[4]);
+            try testing.expectEqualStrings("\n", elements[4].static_text);
         }
 
         // "\r\n" should be considered a newline for standalone tags.
@@ -1955,19 +1955,19 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|\r\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|\r\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Partial, elements[1]);
-            try testing.expectEqualStrings("partial", elements[1].Partial.key);
-            try testing.expect(elements[1].Partial.indentation == null);
+            try testing.expectEqual(Element.Type.partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].partial.key);
+            try testing.expect(elements[1].partial.indentation == null);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].static_text);
         }
 
         // Standalone tags should not require a newline to precede them.
@@ -1977,17 +1977,17 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.Partial, elements[0]);
-            try testing.expectEqualStrings("partial", elements[0].Partial.key);
-            try testing.expect(elements[0].Partial.indentation != null);
-            try testing.expectEqualStrings("  ", elements[0].Partial.indentation.?);
+            try testing.expectEqual(Element.Type.partial, elements[0]);
+            try testing.expectEqualStrings("partial", elements[0].partial.key);
+            try testing.expect(elements[0].partial.indentation != null);
+            try testing.expectEqualStrings("  ", elements[0].partial.indentation.?);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[1]);
-            try testing.expectEqualStrings(">", elements[1].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[1]);
+            try testing.expectEqualStrings(">", elements[1].static_text);
         }
 
         // Standalone tags should not require a newline to follow them.
@@ -1997,17 +1997,17 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings(">\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings(">\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Partial, elements[1]);
-            try testing.expectEqualStrings("partial", elements[1].Partial.key);
-            try testing.expect(elements[1].Partial.indentation != null);
-            try testing.expectEqualStrings("  ", elements[1].Partial.indentation.?);
+            try testing.expectEqual(Element.Type.partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].partial.key);
+            try testing.expect(elements[1].partial.indentation != null);
+            try testing.expectEqualStrings("  ", elements[1].partial.indentation.?);
         }
 
         // Each line of the partial should be indented before rendering.
@@ -2021,20 +2021,20 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("  \\\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("  \\\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Partial, elements[1]);
-            try testing.expectEqualStrings("partial", elements[1].Partial.key);
-            try testing.expect(elements[1].Partial.indentation != null);
-            try testing.expectEqualStrings("   ", elements[1].Partial.indentation.?);
+            try testing.expectEqual(Element.Type.partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].partial.key);
+            try testing.expect(elements[1].partial.indentation != null);
+            try testing.expectEqualStrings("   ", elements[1].partial.indentation.?);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("  /", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("  /", elements[2].static_text);
         }
 
         // Superfluous in-tag whitespace should be ignored.
@@ -2044,18 +2044,18 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 3), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("|", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("|", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Partial, elements[1]);
-            try testing.expectEqualStrings("partial", elements[1].Partial.key);
+            try testing.expectEqual(Element.Type.partial, elements[1]);
+            try testing.expectEqualStrings("partial", elements[1].partial.key);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("|", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("|", elements[2].static_text);
         }
     };
 
@@ -2068,24 +2068,24 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 4), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("<", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("<", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("lambda", elements[1].Section.path);
-            try testing.expect(elements[1].Section.inner_text != null);
-            try testing.expectEqualStrings("{{x}}", elements[1].Section.inner_text.?);
-            try testing.expectEqual(@as(usize, 1), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("lambda", elements[1].section.path);
+            try testing.expect(elements[1].section.inner_text != null);
+            try testing.expectEqualStrings("{{x}}", elements[1].section.inner_text.?);
+            try testing.expectEqual(@as(usize, 1), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[2]);
-            try expectPath("x", elements[2].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[2]);
+            try expectPath("x", elements[2].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[3]);
-            try testing.expectEqualStrings(">", elements[3].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[3]);
+            try testing.expectEqualStrings(">", elements[3].static_text);
         }
 
         // Lambdas used for sections should receive the raw section string.
@@ -2095,34 +2095,34 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            const elements = template.result.Elements;
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 5), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("<", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("<", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
+            try testing.expectEqual(Element.Type.section, elements[1]);
 
-            const section = elements[1].Section;
+            const section = elements[1].section;
             try expectPath("lambda", section.path);
             try testing.expect(section.inner_text != null);
             try testing.expectEqualStrings("{{#lambda2}}{{x}}{{/lambda2}}", section.inner_text.?);
             try testing.expectEqual(@as(usize, 2), section.children_count);
 
-            try testing.expectEqual(Element.Type.Section, elements[2]);
-            const sub_section = elements[2].Section;
+            try testing.expectEqual(Element.Type.section, elements[2]);
+            const sub_section = elements[2].section;
 
             try expectPath("lambda2", sub_section.path);
             try testing.expect(sub_section.inner_text != null);
             try testing.expectEqualStrings("{{x}}", sub_section.inner_text.?);
             try testing.expectEqual(@as(usize, 1), sub_section.children_count);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try expectPath("x", elements[3].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[3]);
+            try expectPath("x", elements[3].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings(">", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[4]);
+            try testing.expectEqualStrings(">", elements[4].static_text);
         }
     };
 
@@ -2142,45 +2142,45 @@ const tests = struct {
             var template = try getTemplate(template_text);
             defer template.deinit();
 
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
+            try testing.expect(template.result == .elements);
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 11), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("  Hello\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("section", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 8), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("section", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 8), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("Name: ", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("Name: ", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try expectPath("name", elements[3].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[3]);
+            try expectPath("name", elements[3].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings("\nComments: ", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[4]);
+            try testing.expectEqualStrings("\nComments: ", elements[4].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[5]);
-            try expectPath("comments", elements[5].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[5]);
+            try expectPath("comments", elements[5].unescaped_interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[6]);
-            try testing.expectEqualStrings("\n", elements[6].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[6]);
+            try testing.expectEqualStrings("\n", elements[6].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[7]);
-            try expectPath("inverted", elements[7].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[7].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[7]);
+            try expectPath("inverted", elements[7].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[7].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[8]);
-            try testing.expectEqualStrings("Inverted text", elements[8].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[8]);
+            try testing.expectEqualStrings("Inverted text", elements[8].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[9]);
-            try testing.expectEqualStrings("\n", elements[9].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[9]);
+            try testing.expectEqualStrings("\n", elements[9].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[10]);
-            try testing.expectEqualStrings("World", elements[10].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[10]);
+            try testing.expectEqualStrings("World", elements[10].static_text);
         }
 
         test "Basic DOM File test" {
@@ -2224,45 +2224,45 @@ const tests = struct {
 
             try template.load(absolute_file_path);
 
-            try testing.expect(template.result == .Elements);
-            const elements = template.result.Elements;
+            try testing.expect(template.result == .elements);
+            const elements = template.result.elements;
 
             try testing.expectEqual(@as(usize, 11), elements.len);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[0]);
-            try testing.expectEqualStrings("  Hello\n", elements[0].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[0]);
+            try testing.expectEqualStrings("  Hello\n", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.Section, elements[1]);
-            try expectPath("section", elements[1].Section.path);
-            try testing.expectEqual(@as(usize, 8), elements[1].Section.children_count);
+            try testing.expectEqual(Element.Type.section, elements[1]);
+            try expectPath("section", elements[1].section.path);
+            try testing.expectEqual(@as(usize, 8), elements[1].section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[2]);
-            try testing.expectEqualStrings("Name: ", elements[2].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[2]);
+            try testing.expectEqualStrings("Name: ", elements[2].static_text);
 
-            try testing.expectEqual(Element.Type.Interpolation, elements[3]);
-            try expectPath("name", elements[3].Interpolation);
+            try testing.expectEqual(Element.Type.interpolation, elements[3]);
+            try expectPath("name", elements[3].interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[4]);
-            try testing.expectEqualStrings("\nComments: ", elements[4].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[4]);
+            try testing.expectEqualStrings("\nComments: ", elements[4].static_text);
 
-            try testing.expectEqual(Element.Type.UnescapedInterpolation, elements[5]);
-            try expectPath("comments", elements[5].UnescapedInterpolation);
+            try testing.expectEqual(Element.Type.unescaped_interpolation, elements[5]);
+            try expectPath("comments", elements[5].unescaped_interpolation);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[6]);
-            try testing.expectEqualStrings("\n", elements[6].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[6]);
+            try testing.expectEqualStrings("\n", elements[6].static_text);
 
-            try testing.expectEqual(Element.Type.InvertedSection, elements[7]);
-            try expectPath("inverted", elements[7].InvertedSection.path);
-            try testing.expectEqual(@as(usize, 1), elements[7].InvertedSection.children_count);
+            try testing.expectEqual(Element.Type.inverted_section, elements[7]);
+            try expectPath("inverted", elements[7].inverted_section.path);
+            try testing.expectEqual(@as(usize, 1), elements[7].inverted_section.children_count);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[8]);
-            try testing.expectEqualStrings("Inverted text", elements[8].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[8]);
+            try testing.expectEqualStrings("Inverted text", elements[8].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[9]);
-            try testing.expectEqualStrings("\n", elements[9].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[9]);
+            try testing.expectEqualStrings("\n", elements[9].static_text);
 
-            try testing.expectEqual(Element.Type.StaticText, elements[10]);
-            try testing.expectEqualStrings("World", elements[10].StaticText);
+            try testing.expectEqual(Element.Type.static_text, elements[10]);
+            try testing.expectEqualStrings("World", elements[10].static_text);
         }
 
         test "Large DOM File test" {
@@ -2350,14 +2350,14 @@ const tests = struct {
                 fn checkStrings(elements: []const Element) void {
                     for (elements) |element| {
                         switch (element) {
-                            .StaticText => |item| scan(item),
-                            .Interpolation => |item| scanPath(item),
-                            .UnescapedInterpolation => |item| scanPath(item),
-                            .Section => |item| scanPath(item.path),
-                            .InvertedSection => |item| scanPath(item.path),
-                            .Partial => |item| scan(item.key),
-                            .Parent => |item| scan(item.key),
-                            .Block => |item| scan(item.key),
+                            .static_text => |item| scan(item),
+                            .interpolation => |item| scanPath(item),
+                            .unescaped_interpolation => |item| scanPath(item),
+                            .section => |item| scanPath(item.path),
+                            .inverted_section => |item| scanPath(item.path),
+                            .partial => |item| scan(item.key),
+                            .parent => |item| scan(item.key),
+                            .block => |item| scan(item.key),
                         }
                     }
                 }
@@ -2463,10 +2463,10 @@ const tests = struct {
         test "parseText API" {
             var result = try parseText(testing.allocator, "{{hello}}world", .{}, .{ .copy_strings = true });
             switch (result) {
-                .ParseError => {
+                .parse_error => {
                     try testing.expect(false);
                 },
-                .Success => |template| {
+                .success => |template| {
                     template.deinit(testing.allocator);
                 },
             }
@@ -2486,10 +2486,10 @@ const tests = struct {
 
             var result = try parseFile(testing.allocator, file_name, .{}, .{});
             switch (result) {
-                .ParseError => {
+                .parse_error => {
                     try testing.expect(false);
                 },
-                .Success => |template| {
+                .success => |template| {
                     template.deinit(testing.allocator);
                 },
             }

@@ -24,7 +24,7 @@ pub const PartType = enum(u8) {
     partial = '>',
     parent = '<',
     block = '$',
-    no_escape = '&',
+    unescaped_interpolation = '&',
     delimiters = '=',
     triple_mustache = '{',
 
@@ -32,7 +32,7 @@ pub const PartType = enum(u8) {
         return switch (part_type) {
             .static_text,
             .interpolation,
-            .no_escape,
+            .unescaped_interpolation,
             .triple_mustache,
             => false,
             else => true,
