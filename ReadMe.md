@@ -10,7 +10,8 @@
 
 # ! Under development !
 
-Needs zig `0.10.0-dev` to build.
+- Needs zig `0.10.0-dev` to build.
+- Windows support is broken at the moment
 
 ## Features
 
@@ -33,6 +34,8 @@ Needs zig `0.10.0-dev` to build.
 
 Render from strings, files and pre-loaded templates.
 See the [source code](https://github.com/batiati/mustache-zig/blob/master/samples/src/main.zig) for more details.
+
+### Runtime parser
 
 ```Zig
 
@@ -75,11 +78,45 @@ pub fn main() !void {
 
 ```
 
+### Comptime parser
+
+```Zig
+
+const std = @import("std");
+const mustache = @import("mustache");
+
+pub fn main() !void {
+
+    const template_text = "It's a comptime loaded template, with a {{value}}";
+    const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
+    
+    var data = .{
+        .value = "runtime value"
+    };
+
+    const allocator = std.testing.allocator;
+    const result = try mustache.allocRender(comptime_template, data);
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings(
+        "It's a comptime loaded template, with a runtime value", 
+        result,
+    );
+}
+
+```
+
+
+
 ## Benchmarks.
+
+There are [some benchmark tests](benchmark/src/ramhorns_bench.zig) inspired by the excellent [Ramhorns](https://github.com/maciejhirsz/ramhorns)'s benchmarks, comparing the performance of most popular Rust template engines.
+
+(...)
 
 Mustache templates are well known for HTML templating, but it's useful to render any kind of dynamic document, and potentially load templates from untrusted or user-defined sources.
 
-So, it's important to be able to deal with multi-megabyte inputs without eating all your RAM.
+So, it's also important to be able to deal with multi-megabyte inputs without eating all your RAM.
 
 ```Zig
 
