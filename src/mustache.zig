@@ -16,6 +16,7 @@ pub const Template = template.Template;
 
 pub const parseText = template.parseText;
 pub const parseFile = template.parseFile;
+pub const parseComptime = template.parseComptime;
 
 pub const render = rendering.render;
 pub const renderWithOptions = rendering.renderWithOptions;

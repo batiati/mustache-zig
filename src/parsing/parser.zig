@@ -390,14 +390,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                     const indentation = if (node.getIndentation()) |node_indentation| try self.dupe(node_indentation) else null;
                     errdefer if (copy_string) if (indentation) |indentation_value| allocator.free(indentation_value);
 
-                    const inner_text: ?[]const u8 = inner_text: {
-                        if (allow_lambdas) {
-                            if (node.inner_text.content) |node_inner_text| {
-                                break :inner_text try self.dupe(node_inner_text);
-                            }
-                        }
-                        break :inner_text null;
-                    };
+                    const inner_text = if (node.getInnerText()) |inner_text_value| try self.dupe(inner_text_value) else null;
                     errdefer if (copy_string) if (inner_text) |inner_text_value| allocator.free(inner_text_value);
 
                     const children_count = node.children_count;
@@ -450,7 +443,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
     };
 }
 
-const enable_comptime_tests = false;
+const enable_comptime_tests = true;
 const StreamedParser = Parser(.{ .source = .{ .String = .{} }, .output = .Render }, 32);
 const DummyRender = struct {
     pub const Error = error{};
@@ -668,7 +661,7 @@ test "Scan standAlone tags" {
 
     //Comptime test
     if (enable_comptime_tests) comptime {
-       @setEvalBranchQuota(9999);
+        @setEvalBranchQuota(9999);
         try runTheTest();
     };
 }

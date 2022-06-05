@@ -258,10 +258,23 @@ pub const Element = union(Element.Type) {
                     path[index] = if (_copy_strings) try _allocator.dupe(u8, part) else part;
                     return path;
                 } else {
-                    return if (index == 0)
-                        null
-                    else
-                        try _allocator.alloc([]const u8, index);
+                    if (index == 0) {
+                        return null;
+                    } else if (isComptime()) {
+
+                        // Creates a static buffer only if running at comptime
+                        // This "if" avoid rendering this code at runtime
+                        if (comptime !isComptime()) {
+                            unreachable;
+                        } else {
+                            const len = 32;
+                            assert(len >= index);
+                            var buffer: [len][]const u8 = [_][]const u8{&.{}} ** len;
+                            return buffer[0..index];
+                        }
+                    } else {
+                        return try _allocator.alloc([]const u8, index);
+                    }
                 }
             }
         }.action;
@@ -278,10 +291,12 @@ pub const Element = union(Element.Type) {
     }
 
     pub inline fn destroyPath(allocator: Allocator, owns_string: bool, path: Path) void {
-        if (path.len > 0) {
-            if (owns_string)
-                for (path) |part| allocator.free(part);
-            allocator.free(path);
+        if (!isComptime()) {
+            if (path.len > 0) {
+                if (owns_string)
+                    for (path) |part| allocator.free(part);
+                allocator.free(path);
+            }
         }
     }
 };
@@ -311,6 +326,25 @@ pub fn parseText(
 ) Allocator.Error!ParseResult {
     const source = TemplateSource{ .String = .{ .copy_strings = options.copy_strings } };
     return try parseSource(source, options.features, allocator, template_text, default_delimiters);
+}
+
+/// Parses a comptime string a `Template`
+pub fn parseComptime(
+    comptime template_text: []const u8,
+    comptime default_delimiters: Delimiters,
+    comptime features: mustache.options.Features,
+) Template {
+    comptime {
+        @setEvalBranchQuota(999999);
+        const source = TemplateSource{ .String = .{ .copy_strings = false } };
+        const options: mustache.options.ParseTextOptions = .{ .copy_strings = false, .features = features };
+        const parse_result = parseSource(source, options.features, undefined, template_text, default_delimiters) catch unreachable;
+
+        return switch (parse_result) {
+            .success => |template| template,
+            .parse_error => @compileError("parse error"),
+        };
+    }
 }
 
 /// Parses a file and returns an union containing either a `ParseError` or a `Template`
@@ -385,6 +419,27 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             }
         };
 
+        const ComptimeCollector = struct {
+            pub const Error = error{};
+
+            buffer: []Element = &.{},
+
+            pub inline fn allocBuffer(ctx: *@This(), size: usize) Error![]Element {
+                _ = ctx;
+                var buffer: [128]Element = [_]Element{undefined} ** 128;
+                return buffer[0..size];
+            }
+
+            pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
+                _ = ctx;
+                _ = buffer;
+            }
+
+            pub inline fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
+                ctx.buffer = elements;
+            }
+        };
+
         allocator: Allocator,
         delimiters: Delimiters = .{},
         result: union(enum) {
@@ -397,16 +452,31 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             var parser = try Parser.init(self.allocator, template, self.delimiters);
             defer parser.deinit();
 
-            var collector = Collector{
-                .allocator = self.allocator,
-            };
-            var success = try parser.parse(&collector);
+            if (isComptime()) {
+                if (comptime !isComptime()) {
+                    unreachable;
+                } else {
+                    var collector = ComptimeCollector{};
+                    var success = try parser.parse(&collector);
 
-            self.result = if (success) .{
-                .elements = collector.buffer,
-            } else .{
-                .parser_error = parser.last_error.?,
-            };
+                    self.result = if (success) .{
+                        .elements = collector.buffer,
+                    } else .{
+                        .parser_error = parser.last_error.?,
+                    };
+                }
+            } else {
+                var collector = Collector{
+                    .allocator = self.allocator,
+                };
+                var success = try parser.parse(&collector);
+
+                self.result = if (success) .{
+                    .elements = collector.buffer,
+                } else .{
+                    .parser_error = parser.last_error.?,
+                };
+            }
         }
 
         pub fn collectElements(self: *Self, template_text: []const u8, render: anytype) ErrorSet(Parser, @TypeOf(render))!void {
@@ -417,12 +487,14 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
         }
 
         pub fn deinit(self: *Self) void {
-            switch (self.result) {
-                .elements => |elements| {
-                    Element.deinitMany(self.allocator, options.copyStrings(), elements);
-                    self.allocator.free(elements);
-                },
-                .parser_error, .not_loaded => {},
+            if (!isComptime()) {
+                switch (self.result) {
+                    .elements => |elements| {
+                        Element.deinitMany(self.allocator, options.copyStrings(), elements);
+                        self.allocator.free(elements);
+                    },
+                    .parser_error, .not_loaded => {},
+                }
             }
         }
 
@@ -447,6 +519,15 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
     };
 }
 
+/// We need to known if it is comptime in order to use an allocator or a static buffer
+/// This function should be replaced by @isComptime builtin
+/// https://discord.com/channels/605571803288698900/605572581046747136/902307648333045801
+inline fn isComptime() bool {
+    var b = false;
+    const u = if (b) @as(u32, 0) else @as(u8, 0);
+    return @TypeOf(u) == u8;
+}
+
 test {
     _ = tests;
     _ = parsing;
@@ -466,7 +547,7 @@ const tests = struct {
     }
 
     const options = TemplateOptions{
-        .source = .{ .String = .{} },
+        .source = .{ .String = .{ .copy_strings = false } },
         .output = .Parse,
     };
 
@@ -505,20 +586,29 @@ const tests = struct {
         //
         // Comment blocks should be removed from the template.
         test "Inline" {
-            const template_text = "12345{{! Comment Block! }}67890";
+            const doTheTest = struct {
+                pub fn action() !void {
+                    const template_text = "12345{{! Comment Block! }}67890";
 
-            var template = try getTemplate(template_text);
-            defer template.deinit();
+                    var template = try getTemplate(template_text);
+                    defer template.deinit();
 
-            const elements = template.result.elements;
+                    const elements = template.result.elements;
 
-            try testing.expectEqual(@as(usize, 2), elements.len);
+                    try testing.expectEqual(@as(usize, 2), elements.len);
 
-            try testing.expectEqual(Element.Type.static_text, elements[0]);
-            try testing.expectEqualStrings("12345", elements[0].static_text);
+                    try testing.expectEqual(Element.Type.static_text, elements[0]);
+                    try testing.expectEqualStrings("12345", elements[0].static_text);
 
-            try testing.expectEqual(Element.Type.static_text, elements[1]);
-            try testing.expectEqualStrings("67890", elements[1].static_text);
+                    try testing.expectEqual(Element.Type.static_text, elements[1]);
+                    try testing.expectEqualStrings("67890", elements[1].static_text);
+                }
+            }.action;
+
+            try doTheTest();
+            comptime {
+                try doTheTest();
+            }
         }
 
         //

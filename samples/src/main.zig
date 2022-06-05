@@ -37,6 +37,7 @@ var ctx = .{
 
 pub fn main() anyerror!void {
     try renderFromString();
+    try renderComptimeTemplate();
     try renderFromCachedTemplate();
     try renderFromFile();
 }
@@ -45,7 +46,7 @@ pub fn main() anyerror!void {
 pub fn renderFromCachedTemplate() anyerror!void {
     var gpa = GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    
+
     const allocator = gpa.allocator();
 
     // Store this template and render many times from it
@@ -77,6 +78,15 @@ pub fn renderFromString() anyerror!void {
 
     // Direct render to save memory
     try mustache.renderText(allocator, template_text, ctx, out.writer());
+}
+
+/// Render a template parsed at comptime
+pub fn renderComptimeTemplate() anyerror!void {
+    var out = std.io.getStdOut();
+
+    // Comptime-parsed template
+    const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
+    try mustache.render(comptime_template, ctx, out.writer());
 }
 
 /// Render a template from a file path

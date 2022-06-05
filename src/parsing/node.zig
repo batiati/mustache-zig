@@ -112,6 +112,15 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
                 null;
         }
 
+        pub fn getInnerText(self: *const Self) ?[]const u8 {
+            if (allow_lambdas) {
+                if (self.inner_text.content) |node_inner_text| {
+                    return node_inner_text;
+                }
+            }
+            return null;
+        }
+
         fn trimPreviousNodesRight(nodes: *List, index: u32) bool {
             if (comptime !has_trimming) return false;
 
