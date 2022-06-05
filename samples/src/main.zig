@@ -42,7 +42,32 @@ pub fn main() anyerror!void {
     try renderFromFile();
 }
 
-/// Cache a template to render many times
+/// Render a template from a string
+pub fn renderFromString() anyerror!void {
+    var gpa = GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    const allocator = gpa.allocator();
+    var out = std.io.getStdOut();
+
+    // Direct render to save memory
+    try mustache.renderText(allocator, template_text, ctx, out.writer());
+}
+
+/// Parses a template at comptime to render many times at runtime, no allocations needed
+pub fn renderComptimeTemplate() anyerror!void {
+    var out = std.io.getStdOut();
+
+    // Comptime-parsed template
+    const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
+
+    var repeat: u32 = 0;
+    while (repeat < 10) : (repeat += 1) {
+        try mustache.render(comptime_template, ctx, out.writer());
+    }
+}
+
+/// Caches a template to render many times
 pub fn renderFromCachedTemplate() anyerror!void {
     var gpa = GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -66,27 +91,6 @@ pub fn renderFromCachedTemplate() anyerror!void {
         var out = std.io.getStdOut();
         try out.writeAll(result);
     }
-}
-
-/// Render a template from a string
-pub fn renderFromString() anyerror!void {
-    var gpa = GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-
-    const allocator = gpa.allocator();
-    var out = std.io.getStdOut();
-
-    // Direct render to save memory
-    try mustache.renderText(allocator, template_text, ctx, out.writer());
-}
-
-/// Render a template parsed at comptime
-pub fn renderComptimeTemplate() anyerror!void {
-    var out = std.io.getStdOut();
-
-    // Comptime-parsed template
-    const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
-    try mustache.render(comptime_template, ctx, out.writer());
 }
 
 /// Render a template from a file path

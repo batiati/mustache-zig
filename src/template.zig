@@ -342,7 +342,10 @@ pub fn parseComptime(
 
         return switch (parse_result) {
             .success => |template| template,
-            .parse_error => @compileError("parse error"),
+            .parse_error => |detail| {
+                const message = std.fmt.comptimePrint("Parse error {s} at lin {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
+                @compileError(message);
+            },
         };
     }
 }
