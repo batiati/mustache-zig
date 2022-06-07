@@ -59,6 +59,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
         current_pos: Pos = .{},
         delimiter_max_size: u32 = 0,
         delimiters: Delimiters = undefined,
+        nodes: *const Node.List = undefined,
 
         stream: switch (options.source) {
             .Stream => struct {
@@ -70,23 +71,23 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
         } = undefined,
 
         bookmark: if (allow_lambdas) struct {
-            stack: ?*IndexBookmark = null,
+            node_index: ?u32 = null,
             last_starting_mark: u32 = 0,
         } else void = if (allow_lambdas) .{} else {},
 
         /// Should be the template content if source == .String
         /// or the absolute path if source == .File
         pub fn init(allocator: Allocator, template: []const u8) if (options.source == .String) Allocator.Error!Self else FileReader(options).Error!Self {
-            switch (options.source) {
-                .String => return Self{
+            return switch (options.source) {
+                .String => Self{
                     .content = template,
                 },
-                .Stream => return Self{
+                .Stream => Self{
                     .stream = .{
                         .reader = try FileReader(options).initFromPath(allocator, template),
                     },
                 },
-            }
+            };
         }
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
@@ -114,7 +115,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
                         // block_index: initial index of the current TextBlock, the minimum part needed
                         // bookmark.last_starting_mark: index of the last starting mark '{{', used to determine the inner_text between two tags
-                        const last_index = if (self.bookmark.stack == null) self.block_index else std.math.min(self.block_index, self.bookmark.last_starting_mark);
+                        const last_index = if (self.bookmark.node_index == null) self.block_index else std.math.min(self.block_index, self.bookmark.last_starting_mark);
 
                         if (self.stream.preserve_bookmark) |preserve| {
 
@@ -153,8 +154,8 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                     self.block_index -= adjust.off_set;
 
                     if (allow_lambdas) {
-                        if (self.bookmark.stack != null) {
-                            adjustBookmarkOffset(self.bookmark.stack, adjust.off_set);
+                        if (self.bookmark.node_index != null) {
+                            self.adjustBookmarkOffset(self.bookmark.node_index, adjust.off_set);
                             self.bookmark.last_starting_mark -= adjust.off_set;
                         }
 
@@ -414,11 +415,11 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             if (allow_lambdas) {
                 assert(node.inner_text.bookmark == null);
                 node.inner_text.bookmark = IndexBookmark{
-                    .prev = self.bookmark.stack,
-                    .index = self.index,
+                    .prev_node_index = self.bookmark.node_index,
+                    .text_index = self.index,
                 };
 
-                self.bookmark.stack = &node.inner_text.bookmark.?;
+                self.bookmark.node_index = node.index;
                 if (options.source == .Stream) {
                     if (self.stream.preserve_bookmark) |preserve| {
                         assert(preserve <= self.index);
@@ -429,33 +430,38 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             }
         }
 
-        pub fn endBookmark(self: *Self) Allocator.Error!?[]const u8 {
+        pub fn endBookmark(self: *Self, list: *Node.List) Allocator.Error!?[]const u8 {
             if (allow_lambdas) {
-                if (self.bookmark.stack) |bookmark| {
+                if (self.bookmark.node_index) |node_index| {
+                    const current = &list.items[node_index];
+                    const bookmark = if (current.inner_text.bookmark) |*value| value else unreachable;
+
                     defer {
-                        self.bookmark.stack = bookmark.prev;
-                        if (options.source == .Stream and bookmark.prev == null) {
+                        self.bookmark.node_index = bookmark.prev_node_index;
+                        if (options.source == .Stream and bookmark.prev_node_index == null) {
                             self.stream.preserve_bookmark = null;
                         }
                     }
 
-                    assert(bookmark.index < self.content.len);
-                    assert(bookmark.index <= self.bookmark.last_starting_mark);
+                    assert(bookmark.text_index < self.content.len);
+                    assert(bookmark.text_index <= self.bookmark.last_starting_mark);
                     assert(self.bookmark.last_starting_mark < self.content.len);
 
-                    return self.content[bookmark.index..self.bookmark.last_starting_mark];
+                    return self.content[bookmark.text_index..self.bookmark.last_starting_mark];
                 }
             }
 
             return null;
         }
 
-        fn adjustBookmarkOffset(bookmark: ?*IndexBookmark, off_set: u32) void {
+        fn adjustBookmarkOffset(self: *Self, node_index: ?u32, off_set: u32) void {
             if (allow_lambdas) {
-                if (bookmark) |current| {
-                    assert(current.index >= off_set);
-                    current.index -= off_set;
-                    adjustBookmarkOffset(current.prev, off_set);
+                if (node_index) |index| {
+                    var current = &self.nodes.items[index];
+                    var bookmark = if (current.inner_text.bookmark) |*value| value else unreachable;
+                    assert(bookmark.text_index >= off_set);
+                    bookmark.text_index -= off_set;
+                    self.adjustBookmarkOffset(bookmark.prev_node_index, off_set);
                 }
             }
         }
@@ -466,7 +472,7 @@ const testing_options = TemplateOptions{
     .source = .{ .String = .{} },
     .output = .Render,
 };
-const TestingNode = parsing.Node(testing_options, 32);
+const TestingNode = parsing.Node(testing_options);
 const TestingTextScanner = parsing.TextScanner(TestingNode, testing_options);
 const TestingTrimmingIndex = parsing.TrimmingIndex(testing_options);
 
@@ -589,6 +595,9 @@ test "bookmarks" {
     const content = "{{#section1}}begin_content1{{#section2}}content2{{/section2}}end_content1{{/section1}}";
     const allocator = testing.allocator;
 
+    var nodes: TestingNode.List = .{};
+    defer nodes.deinit(allocator);
+
     var reader = try TestingTextScanner.init(allocator, content);
     defer reader.deinit(allocator);
 
@@ -598,8 +607,8 @@ test "bookmarks" {
     try expectTag(.section, "section1", token_1, 1, 1);
     defer token_1.?.unRef(allocator);
 
-    var node_1 = TestingNode{ .index = 0, .identifier = undefined, .text_part = token_1.? };
-    try reader.beginBookmark(&node_1);
+    try nodes.append(allocator, TestingNode{ .index = 0, .identifier = undefined, .text_part = token_1.? });
+    try reader.beginBookmark(&nodes.items[0]);
 
     var token_2 = try reader.next(allocator);
     try expectTag(.static_text, "begin_content1", token_2, 1, 14);
@@ -609,8 +618,8 @@ test "bookmarks" {
     try expectTag(.section, "section2", token_3, 1, 28);
     defer token_3.?.unRef(allocator);
 
-    var node_3 = TestingNode{ .index = 0, .identifier = undefined, .text_part = token_3.? };
-    try reader.beginBookmark(&node_3);
+    try nodes.append(allocator, TestingNode{ .index = 1, .identifier = undefined, .text_part = token_3.? });
+    try reader.beginBookmark(&nodes.items[1]);
 
     var token_4 = try reader.next(allocator);
     try expectTag(.static_text, "content2", token_4, 1, 41);
@@ -620,7 +629,7 @@ test "bookmarks" {
     try expectTag(.close_section, "section2", token_5, 1, 49);
     defer token_5.?.unRef(allocator);
 
-    if (try reader.endBookmark()) |bookmark_1| {
+    if (try reader.endBookmark(&nodes)) |bookmark_1| {
         try testing.expectEqualStrings("content2", bookmark_1);
     } else {
         try testing.expect(false);
@@ -634,7 +643,7 @@ test "bookmarks" {
     try expectTag(.close_section, "section1", token_7, 1, 74);
     defer token_7.?.unRef(allocator);
 
-    if (try reader.endBookmark()) |bookmark_2| {
+    if (try reader.endBookmark(&nodes)) |bookmark_2| {
         try testing.expectEqualStrings("begin_content1{{#section2}}content2{{/section2}}end_content1", bookmark_2);
     } else {
         try testing.expect(false);

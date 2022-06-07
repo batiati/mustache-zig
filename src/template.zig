@@ -8,6 +8,7 @@ const assert = std.debug.assert;
 const mustache = @import("mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
 const TemplateSource = mustache.options.TemplateSource;
+const TemplateLoadMode = mustache.options.TemplateLoadMode;
 const Features = mustache.options.Features;
 
 const parsing = @import("parsing/parsing.zig");
@@ -325,7 +326,14 @@ pub fn parseText(
     comptime options: mustache.options.ParseTextOptions,
 ) Allocator.Error!ParseResult {
     const source = TemplateSource{ .String = .{ .copy_strings = options.copy_strings } };
-    return try parseSource(source, options.features, allocator, template_text, default_delimiters);
+    return try parseSource(
+        source,
+        options.features,
+        allocator,
+        template_text,
+        default_delimiters,
+        .runtime_loaded,
+    );
 }
 
 /// Parses a comptime string a `Template`
@@ -338,7 +346,14 @@ pub fn parseComptime(
         @setEvalBranchQuota(999999);
         const source = TemplateSource{ .String = .{ .copy_strings = false } };
         const options: mustache.options.ParseTextOptions = .{ .copy_strings = false, .features = features };
-        const parse_result = parseSource(source, options.features, undefined, template_text, default_delimiters) catch unreachable;
+        const parse_result = parseSource(
+            source,
+            options.features,
+            undefined,
+            template_text,
+            default_delimiters,
+            .comptime_loaded,
+        ) catch unreachable;
 
         return switch (parse_result) {
             .success => |template| template,
@@ -364,7 +379,14 @@ pub fn parseFile(
     comptime options: mustache.options.ParseFileOptions,
 ) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseResult {
     const source = TemplateSource{ .Stream = .{ .read_buffer_size = options.read_buffer_size } };
-    return try parseSource(source, options.features, allocator, template_absolute_path, default_delimiters);
+    return try parseSource(
+        source,
+        options.features,
+        allocator,
+        template_absolute_path,
+        default_delimiters,
+        .runtime_loaded,
+    );
 }
 
 fn parseSource(
@@ -373,11 +395,13 @@ fn parseSource(
     allocator: Allocator,
     source_content: []const u8,
     delimiters: Delimiters,
+    comptime load_mode: TemplateLoadMode,
 ) !ParseResult {
     const options = TemplateOptions{
         .source = source,
         .output = .Parse,
         .features = features,
+        .load_mode = load_mode,
     };
 
     var template = TemplateLoader(options){
@@ -399,7 +423,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
     return struct {
         const Self = @This();
 
-        const Parser = parsing.Parser(options, 32);
+        const Parser = parsing.Parser(options);
         const Node = Parser.Node;
 
         const Collector = struct {
@@ -549,28 +573,37 @@ const tests = struct {
         _ = api;
     }
 
-    const options = TemplateOptions{
-        .source = .{ .String = .{ .copy_strings = false } },
-        .output = .Parse,
-    };
+    fn TesterTemplateLoader(comptime load_mode: TemplateLoadMode) type {
+        const options = TemplateOptions{
+            .source = .{ .String = .{ .copy_strings = false } },
+            .output = .Parse,
+            .load_mode = load_mode,
+        };
 
-    pub fn getTemplate(template_text: []const u8) !TemplateLoader(options) {
+        return TemplateLoader(options);
+    }
+
+    pub fn getTemplate(template_text: []const u8, comptime load_mode: TemplateLoadMode) !TesterTemplateLoader(load_mode) {
         const allocator = testing.allocator;
 
-        var template = TemplateLoader(options){
+        var template_loader = TesterTemplateLoader(load_mode){
             .allocator = allocator,
         };
-        errdefer template.deinit();
+        errdefer template_loader.deinit();
 
-        try template.load(template_text);
+        try template_loader.load(template_text);
 
-        if (template.result == .parser_error) {
-            const detail = template.result.parser_error;
-            std.log.err("{s} row {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
+        if (template_loader.result == .parser_error) {
+            const detail = template_loader.result.parser_error;
+
+            if (load_mode == .runtime_loaded) {
+                std.log.err("{s} row {}, col {}", .{ @errorName(detail.parse_error), detail.lin, detail.col });
+            }
+
             return detail.parse_error;
         }
 
-        return template;
+        return template_loader;
     }
 
     pub fn expectPath(expected: []const u8, path: Element.Path) !void {
@@ -590,10 +623,10 @@ const tests = struct {
         // Comment blocks should be removed from the template.
         test "Inline" {
             const doTheTest = struct {
-                pub fn action() !void {
+                pub fn action(comptime load_mode: TemplateLoadMode) !void {
                     const template_text = "12345{{! Comment Block! }}67890";
 
-                    var template = try getTemplate(template_text);
+                    var template = try getTemplate(template_text, load_mode);
                     defer template.deinit();
 
                     const elements = template.result.elements;
@@ -608,9 +641,9 @@ const tests = struct {
                 }
             }.action;
 
-            try doTheTest();
+            try doTheTest(.runtime_loaded);
             comptime {
-                try doTheTest();
+                try doTheTest(.comptime_loaded);
             }
         }
 
@@ -624,7 +657,7 @@ const tests = struct {
                 \\}}67890
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -647,7 +680,7 @@ const tests = struct {
                 \\End.
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -670,7 +703,7 @@ const tests = struct {
                 \\End.
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -689,7 +722,7 @@ const tests = struct {
         test "Standalone Line Endings" {
             const template_text = "|\r\n{{! Standalone Comment }}\r\n|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -709,7 +742,7 @@ const tests = struct {
         test "Standalone Without Previous Line" {
             const template_text = "!\n  {{! I'm Still Standalone }}";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -731,7 +764,7 @@ const tests = struct {
                 \\End.
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -756,7 +789,7 @@ const tests = struct {
                 \\End.
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -775,7 +808,7 @@ const tests = struct {
         test "Indented Inline" {
             const template_text = "  12 {{! 34 }}\n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -794,7 +827,7 @@ const tests = struct {
         test "Surrounding Whitespace" {
             const template_text = "12345 {{! Comment Block! }} 67890";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -816,7 +849,7 @@ const tests = struct {
         test "Pair Behavior" {
             const template_text = "{{=<% %>=}}(<%text%>)";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -838,7 +871,7 @@ const tests = struct {
         test "Special Characters" {
             const template_text = "({{=[ ]=}}[text])";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -872,7 +905,7 @@ const tests = struct {
                 \\]
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -931,7 +964,7 @@ const tests = struct {
                 \\]
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -978,7 +1011,7 @@ const tests = struct {
         test "Surrounding Whitespace" {
             const template_text = "| {{=@ @=}} |";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -997,7 +1030,7 @@ const tests = struct {
         test "Outlying Whitespace (Inline)" {
             const template_text = " | {{=@ @=}}\n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1020,7 +1053,7 @@ const tests = struct {
                 \\End.
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1043,7 +1076,7 @@ const tests = struct {
                 \\End.
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1062,7 +1095,7 @@ const tests = struct {
         test "Standalone Line Endings" {
             const template_text = "|\r\n{{= @ @ =}}\r\n|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1081,7 +1114,7 @@ const tests = struct {
         test "Standalone Without Previous Line" {
             const template_text = "  {{=@ @=}}\n=";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1097,7 +1130,7 @@ const tests = struct {
         test "Standalone Without Newline" {
             const template_text = "=\n  {{=@ @=}}";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1113,7 +1146,7 @@ const tests = struct {
         test "Pair with Padding" {
             const template_text = "|{{= @   @ =}}|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1134,7 +1167,7 @@ const tests = struct {
         test "No Interpolation" {
             const template_text = "Hello from {Mustache}!";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1149,7 +1182,7 @@ const tests = struct {
         test "Basic Interpolation" {
             const template_text = "Hello, {{subject}}!";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1170,7 +1203,7 @@ const tests = struct {
         test "HTML Escaping" {
             const template_text = "These characters should be HTML escaped: {{forbidden}}";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1188,7 +1221,7 @@ const tests = struct {
         test "Triple Mustache" {
             const template_text = "These characters should not be HTML escaped: {{{forbidden}}}";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1206,7 +1239,7 @@ const tests = struct {
         test "Ampersand" {
             const template_text = "These characters should not be HTML escaped: {{&forbidden}}";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1224,7 +1257,7 @@ const tests = struct {
         test "Interpolation - Surrounding Whitespace" {
             const template_text = "| {{string}} |";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1245,7 +1278,7 @@ const tests = struct {
         test "Triple Mustache - Surrounding Whitespace" {
             const template_text = "| {{{string}}} |";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1266,7 +1299,7 @@ const tests = struct {
         test "Ampersand - Surrounding Whitespace" {
             const template_text = "| {{&string}} |";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1287,7 +1320,7 @@ const tests = struct {
         test "Interpolation - Standalone" {
             const template_text = "  {{string}}\n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1308,7 +1341,7 @@ const tests = struct {
         test "Triple Mustache - Standalone" {
             const template_text = "  {{{string}}}\n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1329,7 +1362,7 @@ const tests = struct {
         test "Ampersand - Standalone" {
             const template_text = "  {{&string}}\n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1350,7 +1383,7 @@ const tests = struct {
         test "Interpolation With Padding" {
             const template_text = "|{{ string }}|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1371,7 +1404,7 @@ const tests = struct {
         test "Triple Mustache With Padding" {
             const template_text = "|{{{ string }}}|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1392,7 +1425,7 @@ const tests = struct {
         test "Ampersand With Padding" {
             const template_text = "|{{& string }}|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1416,7 +1449,7 @@ const tests = struct {
         test "Surrounding Whitespace" {
             const template_text = " | {{#boolean}}\t|\t{{/boolean}} | \n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1441,7 +1474,7 @@ const tests = struct {
         test "Internal Whitespace" {
             const template_text = " | {{#boolean}} {{! Important Whitespace }}\n {{/boolean}} | \n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1469,7 +1502,7 @@ const tests = struct {
         test "Indented Inline Sections" {
             const template_text = " {{#boolean}}YES{{/boolean}}\n {{#boolean}}GOOD{{/boolean}}\n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1510,7 +1543,7 @@ const tests = struct {
                 \\| A Line
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1535,7 +1568,7 @@ const tests = struct {
         test "Indented Standalone Lines" {
             const template_text = "|\r\n{{#boolean}}\r\n{{/boolean}}\r\n|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1557,7 +1590,7 @@ const tests = struct {
         test "Standalone Without Previous Line" {
             const template_text = "  {{#boolean}}\n#{{/boolean}}\n/";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1579,7 +1612,7 @@ const tests = struct {
         test "Standalone Without Newline" {
             const template_text = "#{{#boolean}}\n/\n  {{/boolean}}";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1607,7 +1640,7 @@ const tests = struct {
                 \\| A Line
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1632,7 +1665,7 @@ const tests = struct {
         test "Padding" {
             const template_text = "|{{# boolean }}={{/ boolean }}|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1678,7 +1711,7 @@ const tests = struct {
                 \\{{/a}}
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1751,7 +1784,7 @@ const tests = struct {
         test "Surrounding Whitespace" {
             const template_text = " | {{^boolean}}\t|\t{{/boolean}} | \n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1776,7 +1809,7 @@ const tests = struct {
         test "Internal Whitespace" {
             const template_text = " | {{^boolean}} {{! Important Whitespace }}\n {{/boolean}} | \n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1804,7 +1837,7 @@ const tests = struct {
         test "Indented Inline Sections" {
             const template_text = " {{^boolean}}NO{{/boolean}}\n {{^boolean}}WAY{{/boolean}}\n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1845,7 +1878,7 @@ const tests = struct {
                 \\| A Line
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1870,7 +1903,7 @@ const tests = struct {
         test "Indented Standalone Lines" {
             const template_text = "|\r\n{{^boolean}}\r\n{{/boolean}}\r\n|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1892,7 +1925,7 @@ const tests = struct {
         test "Standalone Without Previous Line" {
             const template_text = "  {{^boolean}}\n^{{/boolean}}\n/";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1914,7 +1947,7 @@ const tests = struct {
         test "Standalone Without Newline" {
             const template_text = "^{{^boolean}}\n/\n  {{/boolean}}";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1942,7 +1975,7 @@ const tests = struct {
                 \\| A Line
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1967,7 +2000,7 @@ const tests = struct {
         test "Padding" {
             const template_text = "|{{^ boolean }}={{/ boolean }}|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -1995,7 +2028,7 @@ const tests = struct {
         test "Surrounding Whitespace" {
             const template_text = "| {{>partial}} |";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2017,7 +2050,7 @@ const tests = struct {
         test "Inline Indentation" {
             const template_text = "  {{data}}  {{> partial}}\n";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2045,7 +2078,7 @@ const tests = struct {
         test "Standalone Line Endings" {
             const template_text = "|\r\n{{>partial}}\r\n|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2067,7 +2100,7 @@ const tests = struct {
         test "Standalone Without Previous Line" {
             const template_text = "  {{>partial}}\n>";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2087,7 +2120,7 @@ const tests = struct {
         test "Standalone Without Newline" {
             const template_text = ">\n  {{>partial}}";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2111,7 +2144,7 @@ const tests = struct {
                 \\  /
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2134,7 +2167,7 @@ const tests = struct {
         test "Padding" {
             const template_text = "|{{> partial }}|";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2158,7 +2191,7 @@ const tests = struct {
         test "Sections" {
             const template_text = "<{{#lambda}}{{x}}{{/lambda}}>";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2185,7 +2218,7 @@ const tests = struct {
         test "Nested Sections" {
             const template_text = "<{{#lambda}}{{#lambda2}}{{x}}{{/lambda2}}{{/lambda}}>";
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             const elements = template.result.elements;
@@ -2232,7 +2265,7 @@ const tests = struct {
                 \\World
             ;
 
-            var template = try getTemplate(template_text);
+            var template = try getTemplate(template_text, .runtime_loaded);
             defer template.deinit();
 
             try testing.expect(template.result == .elements);

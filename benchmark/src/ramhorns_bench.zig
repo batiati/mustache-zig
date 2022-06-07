@@ -52,9 +52,10 @@ const features: mustache.options.Features = if (full)
 
 pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype) !void {
     const template_text = "<title>{{title}}</title><h1>{{ title }}</h1><div>{{{body}}}</div>";
-    const fmt_template = "<title>{s}</title><h1>{s}</h1><div>{s}</div>";
+    const fmt_template = "<title>{[title]s}</title><h1>{[title]s}</h1><div>{[body]s}</div>";
 
-    var data = .{
+    const Data = struct { title: []const u8, body: []const u8 };
+    var data: Data = .{
         .title = "Hello, Mustache!",
         .body = "This is a really simple test of the rendering!",
     };
@@ -68,7 +69,7 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype
         allocator,
         mode,
         fmt_template,
-        .{ data.title, data.title, data.body },
+        data,
         writer,
     }, null);
     _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, mode, template, data, writer }, reference);
@@ -113,7 +114,8 @@ pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anyty
         .{ "footer.html", footer_partial_text },
     };
 
-    var data = .{
+    const Data = struct { title: []const u8, body: []const u8 };
+    var data: Data = .{
         .title = "Hello, Mustache!",
         .body = "This is a really simple test of the rendering!",
     };

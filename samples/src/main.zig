@@ -40,6 +40,7 @@ pub fn main() anyerror!void {
     try renderComptimeTemplate();
     try renderFromCachedTemplate();
     try renderFromFile();
+    try renderComptimePartialTemplate();
 }
 
 /// Render a template from a string
@@ -127,4 +128,27 @@ pub fn renderFromFile() anyerror!void {
 
     // Rendering this large template with only 16KB of RAM
     try mustache.renderFile(allocator, path_to_template, ctx, out.writer());
+}
+
+/// Parses a template at comptime to render many times at runtime, no allocations needed
+pub fn renderComptimePartialTemplate() anyerror!void {
+    var out = std.io.getStdOut();
+
+    // Comptime-parsed template
+    const comptime_template = comptime mustache.parseComptime("hello {{>partial}}, your luck number is {{value}}\n", .{}, .{});
+    // Comptime tuple with a comptime partial template
+    const comptime_partials = .{ "partial", comptime mustache.parseComptime("from {{name}}", .{}, .{}) };
+
+    const Data = struct {
+        name: []const u8,
+        value: u32,
+    };
+
+    // Runtime value
+    var data: Data = .{ .name = "mustache", .value = 42 };
+
+    var repeat: u32 = 0;
+    while (repeat < 10) : (repeat += 1) {
+        try mustache.renderPartials(comptime_template, comptime_partials, data, out.writer());
+    }
 }

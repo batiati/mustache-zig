@@ -16,6 +16,10 @@ pub const TemplateOptions = struct {
     /// Defaults to full-spec compatible.
     features: Features = .{},
 
+    /// Template load mode
+    /// Can be "runtime" or "comptime"
+    load_mode: TemplateLoadMode = .runtime_loaded,
+
     pub fn isRefCounted(self: @This()) bool {
         return self.source == .Stream;
     }
@@ -29,6 +33,11 @@ pub const TemplateOptions = struct {
             },
         };
     }
+};
+
+pub const TemplateLoadMode = enum {
+    runtime_loaded,
+    comptime_loaded,
 };
 
 pub const TemplateSource = union(enum) {

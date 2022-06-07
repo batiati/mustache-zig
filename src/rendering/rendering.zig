@@ -463,6 +463,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             .source = .{ .String = .{ .copy_strings = false } },
                             .output = .Render,
                             .features = text_options.features,
+                            .load_mode = .runtime_loaded,
                         };
 
                         var template_loader = TemplateLoader(template_options){
@@ -476,6 +477,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                             .source = .{ .Stream = .{ .read_buffer_size = file_options.read_buffer_size } },
                             .output = .Render,
                             .features = file_options.features,
+                            .load_mode = .runtime_loaded,
                         };
 
                         var template_loader = TemplateLoader(render_file_options){

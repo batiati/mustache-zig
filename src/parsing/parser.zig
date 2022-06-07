@@ -8,6 +8,7 @@ const ParseError = mustache.ParseError;
 const ParseErrorDetail = mustache.ParseErrorDetail;
 
 const TemplateOptions = mustache.options.TemplateOptions;
+const TemplateLoadMode = mustache.options.TemplateLoadMode;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -21,15 +22,16 @@ const ref_counter = @import("ref_counter.zig");
 
 const parsePath = @import("../template.zig").parsePath;
 
-pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: usize) type {
+pub fn Parser(comptime options: TemplateOptions) type {
     const allow_lambdas = options.features.lambdas == .Enabled;
     const copy_string = options.copyStrings();
+    const is_comptime = options.load_mode == .comptime_loaded;
 
     return struct {
         pub const LoadError = Allocator.Error || if (options.source == .Stream) std.fs.File.ReadError || std.fs.File.OpenError else error{};
         pub const AbortError = error{ParserAbortedError};
 
-        pub const Node = parsing.Node(options, prealoc_item_count);
+        pub const Node = parsing.Node(options);
 
         const TextScanner = parsing.TextScanner(Node, options);
         const TextPart = Node.TextPart;
@@ -54,9 +56,6 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
         /// General purpose allocator
         gpa: Allocator,
 
-        /// Produced nodes
-        nodes: Node.List = undefined,
-
         /// Stores the last error ocurred parsing the content
         last_error: ?ParseErrorDetail = null,
 
@@ -65,8 +64,9 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
 
         /// Parser's inner state
         inner_state: struct {
+            nodes: Node.List = undefined,
             text_scanner: TextScanner,
-            last_static_text: ?*Node = null,
+            last_static_text_node: ?u32 = null,
         },
 
         pub fn init(gpa: Allocator, template: []const u8, delimiters: Delimiters) if (options.source == .String) Allocator.Error!Self else FileReader(options).Error!Self {
@@ -84,8 +84,25 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
         }
 
         pub fn parse(self: *Self, render: anytype) (LoadError || RenderError(@TypeOf(render)))!bool {
-            self.nodes = .{};
-            defer self.nodes.deinit(self.gpa);
+            self.inner_state.nodes = Node.List{};
+            var nodes = &self.inner_state.nodes;
+
+            self.inner_state.text_scanner.nodes = nodes;
+
+            if (is_comptime) {
+                // Initializes a static buffer for comptime templates
+                var buffer: [256]Node = undefined;
+                nodes.items.ptr = &buffer;
+                nodes.items.len = 0;
+                nodes.capacity = buffer.len;
+            } else {
+                // Initializes with a small buffer
+                // It gives a better performance for tiny templates and serves as hint for next resizes.
+                const initial_capacity = 16;
+                try nodes.ensureTotalCapacityPrecise(self.gpa, initial_capacity);
+            }
+
+            defer if (!is_comptime) nodes.deinit(self.gpa);
 
             self.beginLevel(0, self.default_delimiters, render) catch |err| switch (err) {
                 AbortError.ParserAbortedError => return false,
@@ -101,7 +118,8 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
         fn beginLevel(self: *Self, level: u32, delimiters: Delimiters, render: anytype) (AbortError || LoadError || RenderError(@TypeOf(render)))!void {
             var current_delimiters = delimiters;
 
-            const initial_index = self.nodes.len;
+            var nodes = &self.inner_state.nodes;
+            const initial_index = nodes.items.len;
 
             if (self.inner_state.text_scanner.delimiter_max_size == 0) {
                 self.inner_state.text_scanner.setDelimiters(current_delimiters) catch |err| {
@@ -145,7 +163,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                             return self.abort(ParseError.UnexpectedCloseSection, text_part);
                         }
 
-                        var open_node: *Node = self.nodes.at(initial_index - 1);
+                        var open_node: *Node = &nodes.items[initial_index - 1];
                         const open_identifier = open_node.identifier orelse return self.abort(ParseError.UnexpectedCloseSection, text_part);
                         const close_identifier = (try self.parseIdentifier(text_part)) orelse unreachable;
 
@@ -153,10 +171,10 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                             return self.abort(ParseError.ClosingTagMismatch, text_part);
                         }
 
-                        open_node.children_count = @intCast(u32, self.nodes.len - initial_index);
+                        open_node.children_count = @intCast(u32, nodes.items.len - initial_index);
 
                         if (allow_lambdas and open_node.text_part.part_type == .section) {
-                            if (try self.inner_state.text_scanner.endBookmark()) |bookmark| {
+                            if (try self.inner_state.text_scanner.endBookmark(nodes)) |bookmark| {
                                 open_node.inner_text.content = bookmark;
                             }
                         }
@@ -169,29 +187,34 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                 }
 
                 // Adding
-                var current_node = current_node: {
-                    const index = @intCast(u32, self.nodes.len);
-                    var ptr = try self.nodes.addOne(self.gpa);
-                    ptr.* = Node{
+                var current_node: *Node = current_node: {
+                    const index = @intCast(u32, nodes.items.len);
+                    const node = Node{
                         .index = index,
                         .identifier = try self.parseIdentifier(text_part),
                         .text_part = text_part.*,
                         .delimiters = current_delimiters,
                     };
 
-                    break :current_node ptr;
+                    if (is_comptime) {
+                        nodes.appendAssumeCapacity(node);
+                    } else {
+                        try nodes.append(self.gpa, node);
+                    }
+
+                    break :current_node &nodes.items[index];
                 };
 
                 switch (current_node.text_part.part_type) {
                     .static_text => {
-                        current_node.trimStandAlone(&self.nodes);
+                        current_node.trimStandAlone(nodes);
                         if (current_node.text_part.isEmpty()) {
                             current_node.text_part.unRef(self.gpa);
-                            _ = self.nodes.pop();
+                            _ = nodes.pop();
                             continue;
                         }
 
-                        self.inner_state.last_static_text = current_node;
+                        self.inner_state.last_static_text_node = current_node.index;
 
                         // When options.output = .Render,
                         // A stand-alone line in the root level indicates that the previous produced nodes can be rendered
@@ -201,16 +224,15 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                                 self.canProducePartialNodes())
                             {
                                 // Remove the last node
-                                const last_node_value = self.nodes.pop().?;
+                                const last_node_value = nodes.pop();
 
                                 // Render all nodes produced until now
                                 try self.produceNodes(render);
 
                                 // Clean all nodes and reinsert the last one for the next iteration,
-                                self.nodes.shrinkRetainingCapacity(0);
+                                nodes.clearRetainingCapacity();
 
-                                current_node = try self.nodes.addOne(self.gpa);
-                                current_node.* = Node{
+                                const node = Node{
                                     .index = 0,
                                     .identifier = last_node_value.identifier,
                                     .text_part = last_node_value.text_part,
@@ -218,7 +240,11 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                                     .inner_text = last_node_value.inner_text,
                                     .delimiters = last_node_value.delimiters,
                                 };
-                                self.inner_state.last_static_text = current_node;
+
+                                nodes.appendAssumeCapacity(node);
+                                current_node = &nodes.items[0];
+
+                                self.inner_state.last_static_text_node = current_node.index;
                             }
                         }
                     },
@@ -248,28 +274,31 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
                 return self.abort(ParseError.UnexpectedEof, null);
             }
 
-            if (self.inner_state.last_static_text) |last_static_text| {
-                last_static_text.trimLast(self.gpa, &self.nodes);
+            if (self.inner_state.last_static_text_node) |last_static_text_node_index| {
+                var last_static_text_node: *Node = &nodes.items[last_static_text_node_index];
+                last_static_text_node.trimLast(self.gpa, nodes);
             }
 
             try self.produceNodes(render);
         }
 
         fn checkIfLastNodeCanBeStandAlone(self: *Self, part_type: PartType) void {
-            if (self.nodes.len > 0) {
-                var last_node = self.nodes.at(self.nodes.len - 1);
+            var nodes = &self.inner_state.nodes;
+            if (nodes.items.len > 0) {
+                var last_node: *Node = &nodes.items[nodes.items.len - 1];
                 last_node.text_part.is_stand_alone = part_type.canBeStandAlone();
             }
         }
 
         fn canProducePartialNodes(self: *const Self) bool {
             if (options.output == .Render) {
+                var nodes = &self.inner_state.nodes;
                 const min_nodes = 2;
-                if (self.nodes.len > min_nodes) {
+                if (nodes.items.len > min_nodes) {
                     var index: usize = 0;
-                    const final_index = self.nodes.len - min_nodes;
+                    const final_index = nodes.items.len - min_nodes;
                     while (index < final_index) : (index += 1) {
-                        const node = self.nodes.at(index);
+                        const node: *const Node = &nodes.items[index];
                         if (!node.text_part.isEmpty()) {
                             return true;
                         }
@@ -332,12 +361,13 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
         }
 
         fn produceNodes(self: *Self, render: anytype) !void {
-            if (self.nodes.len == 0) return;
+            var nodes = &self.inner_state.nodes;
+            if (nodes.items.len == 0) return;
 
             defer if (options.isRefCounted()) self.unRefNodes();
 
             var index: usize = 0;
-            var buffer = try render.allocBuffer(self.nodes.len);
+            var buffer = try render.allocBuffer(nodes.items.len);
 
             defer if (comptime options.output == .Render) render.freeBuffer(buffer);
             defer if (comptime options.output == .Render) Element.deinitMany(self.gpa, copy_string, buffer[0..index]);
@@ -345,8 +375,7 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
             errdefer if (comptime options.output == .Parse) render.freeBuffer(buffer);
             errdefer if (comptime options.output == .Parse) Element.deinitMany(self.gpa, copy_string, buffer[0..index]);
 
-            var iterator = self.nodes.iterator(0);
-            while (iterator.next()) |node| {
+            for (nodes.items) |*node| {
                 if (!node.text_part.isEmpty()) {
                     buffer[index] = try self.createElement(node);
                     index += 1;
@@ -358,8 +387,8 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
 
         fn unRefNodes(self: *Self) void {
             if (options.isRefCounted()) {
-                var iterator = self.nodes.iterator(0);
-                while (iterator.next()) |node| {
+                var nodes = &self.inner_state.nodes;
+                for (nodes.items) |*node| {
                     node.unRef(self.gpa);
                 }
             }
@@ -444,7 +473,10 @@ pub fn Parser(comptime options: TemplateOptions, comptime prealoc_item_count: us
 }
 
 const enable_comptime_tests = true;
-const StreamedParser = Parser(.{ .source = .{ .String = .{} }, .output = .Render }, 32);
+fn TesterParser(comptime load_mode: TemplateLoadMode) type {
+    return Parser(.{ .source = .{ .String = .{} }, .output = .Render, .load_mode = load_mode });
+}
+
 const DummyRender = struct {
     pub const Error = error{};
 
@@ -576,11 +608,11 @@ test "Basic parse" {
     };
 
     const runTheTest = struct {
-        pub fn action() !void {
+        pub fn action(comptime load_mode: TemplateLoadMode) !void {
             const allocator = testing.allocator;
 
             var test_render = TestRender{};
-            var parser = try StreamedParser.init(allocator, template_text, .{});
+            var parser = try TesterParser(load_mode).init(allocator, template_text, .{});
             defer parser.deinit();
 
             const success = try parser.parse(&test_render);
@@ -591,12 +623,12 @@ test "Basic parse" {
     }.action;
 
     //Runtime test
-    try runTheTest();
+    try runTheTest(.runtime_loaded);
 
     //Comptime test
     if (enable_comptime_tests) comptime {
         @setEvalBranchQuota(9999);
-        try runTheTest();
+        try runTheTest(.comptime_loaded);
     };
 }
 
@@ -642,11 +674,11 @@ test "Scan standAlone tags" {
     };
 
     const runTheTest = struct {
-        pub fn action() !void {
+        pub fn action(comptime load_mode: TemplateLoadMode) !void {
             const allocator = testing.allocator;
 
             var test_render = TestRender{};
-            var parser = try StreamedParser.init(allocator, template_text, .{});
+            var parser = try TesterParser(load_mode).init(allocator, template_text, .{});
             defer parser.deinit();
 
             const success = try parser.parse(&test_render);
@@ -657,12 +689,12 @@ test "Scan standAlone tags" {
     }.action;
 
     //Runtime test
-    try runTheTest();
+    try runTheTest(.runtime_loaded);
 
     //Comptime test
     if (enable_comptime_tests) comptime {
         @setEvalBranchQuota(9999);
-        try runTheTest();
+        try runTheTest(.comptime_loaded);
     };
 }
 
@@ -707,11 +739,11 @@ test "Scan delimiters Tags" {
     };
 
     const runTheTest = struct {
-        pub fn action() !void {
+        pub fn action(comptime load_mode: TemplateLoadMode) !void {
             const allocator = testing.allocator;
 
             var test_render = TestRender{};
-            var parser = try StreamedParser.init(allocator, template_text, .{});
+            var parser = try TesterParser(load_mode).init(allocator, template_text, .{});
             defer parser.deinit();
 
             const success = try parser.parse(&test_render);
@@ -722,12 +754,12 @@ test "Scan delimiters Tags" {
     }.action;
 
     //Runtime test
-    try runTheTest();
+    try runTheTest(.runtime_loaded);
 
     //Comptime test
     if (enable_comptime_tests) comptime {
         @setEvalBranchQuota(9999);
-        try runTheTest();
+        try runTheTest(.comptime_loaded);
     };
 }
 
@@ -739,7 +771,9 @@ test "Parse - UnexpectedCloseSection " {
 
     const allocator = testing.allocator;
 
-    var parser = try StreamedParser.init(allocator, template_text, .{});
+    // Cannot test parser errors at comptime because they generate compile errors.Allocator
+    // This test can only run at runtime
+    var parser = try TesterParser(.runtime_loaded).init(allocator, template_text, .{});
     defer parser.deinit();
 
     var render = DummyRender{};
@@ -762,7 +796,9 @@ test "Parse - Invalid delimiter" {
 
     const allocator = testing.allocator;
 
-    var parser = try StreamedParser.init(allocator, template_text, .{});
+    // Cannot test parser errors at comptime because they generate compile errors.Allocator
+    // This test can only run at runtime
+    var parser = try TesterParser(.runtime_loaded).init(allocator, template_text, .{});
     defer parser.deinit();
 
     var render = DummyRender{};
@@ -785,7 +821,9 @@ test "Parse - Invalid identifier" {
 
     const allocator = testing.allocator;
 
-    var parser = try StreamedParser.init(allocator, template_text, .{});
+    // Cannot test parser errors at comptime because they generate compile errors.Allocator
+    // This test can only run at runtime
+    var parser = try TesterParser(.runtime_loaded).init(allocator, template_text, .{});
     defer parser.deinit();
 
     var render = DummyRender{};
@@ -808,7 +846,9 @@ test "Parse - ClosingTagMismatch " {
 
     const allocator = testing.allocator;
 
-    var parser = try StreamedParser.init(allocator, template_text, .{});
+    // Cannot test parser errors at comptime because they generate compile errors.Allocator
+    // This test can only run at runtime
+    var parser = try TesterParser(.runtime_loaded).init(allocator, template_text, .{});
     defer parser.deinit();
 
     var render = DummyRender{};

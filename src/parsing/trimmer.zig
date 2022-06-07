@@ -143,7 +143,7 @@ const testing_options = TemplateOptions{
     .source = .{ .String = .{} },
     .output = .Render,
 };
-const Node = parsing.Node(testing_options, 32);
+const Node = parsing.Node(testing_options);
 const TestingTextScanner = parsing.TextScanner(Node, testing_options);
 const TestingTrimmingIndex = parsing.TrimmingIndex(testing_options);
 

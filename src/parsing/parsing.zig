@@ -55,8 +55,8 @@ pub fn TrimmingIndex(comptime options: TemplateOptions) type {
 }
 
 pub const IndexBookmark = struct {
-    prev: ?*@This(),
-    index: u32,
+    prev_node_index: ?u32,
+    text_index: u32,
 };
 
 pub const Node = @import("node.zig").Node;

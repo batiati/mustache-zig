@@ -14,7 +14,7 @@ const parsing = @import("parsing.zig");
 const Delimiters = parsing.Delimiters;
 const IndexBookmark = parsing.IndexBookmark;
 
-pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usize) type {
+pub fn Node(comptime options: TemplateOptions) type {
     const RefCounter = ref_counter.RefCounter(options);
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
     const allow_lambdas = options.features.lambdas == .Enabled;
@@ -22,7 +22,7 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
     return struct {
         const Self = @This();
 
-        pub const List = std.SegmentedList(Self, prealoc_item_count);
+        pub const List = std.ArrayListUnmanaged(Self);
         pub const TextPart = parsing.TextPart(options);
 
         index: u32 = 0,
@@ -69,18 +69,18 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
 
         pub fn trimLast(self: *Self, allocator: Allocator, nodes: *List) void {
             if (comptime !has_trimming) return;
-            if (nodes.len == 0) return;
+            if (nodes.items.len == 0) return;
 
             var text_part = &self.text_part;
             if (text_part.part_type == .static_text) {
                 if (!text_part.is_stand_alone) {
-                    var index = nodes.len - 1;
+                    var index = nodes.items.len - 1;
                     if (self.index == index) return;
 
                     assert(self.index < index);
 
                     while (self.index < index) : (index -= 1) {
-                        const node = nodes.at(index);
+                        const node = &nodes.items[index];
 
                         if (!node.text_part.is_stand_alone) {
                             return;
@@ -89,11 +89,11 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
                 }
 
                 if (text_part.trimRight()) |*indentation| {
-                    if (self.index == nodes.len - 1) {
+                    if (self.index == nodes.items.len - 1) {
                         // The last tag can't produce any meaningful indentation, so we discard it
                         indentation.ref_counter.free(allocator);
                     } else {
-                        var next_node = nodes.at(self.index + 1);
+                        var next_node = &nodes.items[self.index + 1];
                         next_node.text_part.indentation = indentation.*;
                     }
                 }
@@ -125,9 +125,9 @@ pub fn Node(comptime options: TemplateOptions, comptime prealoc_item_count: usiz
             if (comptime !has_trimming) return false;
 
             if (index > 0) {
-                var current_node = nodes.at(index);
+                var current_node = &nodes.items[index];
                 const prev_index = index - 1;
-                var node = nodes.at(prev_index);
+                var node = &nodes.items[prev_index];
                 var text_part = &node.text_part;
 
                 if (text_part.part_type == .static_text) {
