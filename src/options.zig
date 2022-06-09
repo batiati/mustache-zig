@@ -35,9 +35,12 @@ pub const TemplateOptions = struct {
     }
 };
 
-pub const TemplateLoadMode = enum {
+pub const TemplateLoadMode = union(enum) {
     runtime_loaded,
-    comptime_loaded,
+    comptime_loaded: struct {
+        template_text: []const u8,
+        default_delimiters: Delimiters,
+    },
 };
 
 pub const TemplateSource = union(enum) {

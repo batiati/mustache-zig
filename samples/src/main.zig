@@ -135,17 +135,25 @@ pub fn renderComptimePartialTemplate() anyerror!void {
     var out = std.io.getStdOut();
 
     // Comptime-parsed template
-    const comptime_template = comptime mustache.parseComptime("hello {{>partial}}, your luck number is {{value}}\n", .{}, .{});
+    const comptime_template = comptime mustache.parseComptime(
+        \\{{=[ ]=}}
+        \\📜 hello [>partial], your luck number is [sub_value.value]
+        \\--------------------------------------
+        \\
+    , .{}, .{});
+
     // Comptime tuple with a comptime partial template
     const comptime_partials = .{ "partial", comptime mustache.parseComptime("from {{name}}", .{}, .{}) };
 
     const Data = struct {
         name: []const u8,
-        value: u32,
+        sub_value: struct {
+            value: u32,
+        },
     };
 
     // Runtime value
-    var data: Data = .{ .name = "mustache", .value = 42 };
+    var data: Data = .{ .name = "mustache", .sub_value = .{ .value = 42 } };
 
     var repeat: u32 = 0;
     while (repeat < 10) : (repeat += 1) {

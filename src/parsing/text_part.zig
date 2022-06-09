@@ -124,5 +124,26 @@ pub fn TextPart(comptime options: TemplateOptions) type {
                 },
             }
         }
+
+        pub fn parseDelimiters(self: *const Self) ?Delimiters {
+
+            // Delimiters are the only case of match closing tags {{= and =}}
+            // Validate if the content ends with the proper "=" symbol before parsing the delimiters
+            var content = self.content.slice;
+            const last_index = content.len - 1;
+            if (content[last_index] != @enumToInt(PartType.delimiters)) return null;
+
+            content = content[0..last_index];
+            var iterator = std.mem.tokenize(u8, content, " \t");
+
+            const starting_delimiter = iterator.next() orelse return null;
+            const ending_delimiter = iterator.next() orelse return null;
+            if (iterator.next() != null) return null;
+
+            return Delimiters{
+                .starting_delimiter = starting_delimiter,
+                .ending_delimiter = ending_delimiter,
+            };
+        }
     };
 }

@@ -36,6 +36,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
         const TextScanner = parsing.TextScanner(Node, options);
         const TextPart = Node.TextPart;
         const RefCounter = ref_counter.RefCounter(options);
+        const comptime_count = if (is_comptime) TextScanner.ComptimeCounter.count() else {};
 
         fn RenderError(comptime TRender: type) type {
             switch (@typeInfo(TRender)) {
@@ -90,8 +91,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
             self.inner_state.text_scanner.nodes = nodes;
 
             if (is_comptime) {
-                // Initializes a static buffer for comptime templates
-                var buffer: [256]Node = undefined;
+                var buffer: [comptime_count.nodes]Node = undefined;
                 nodes.items.ptr = &buffer;
                 nodes.items.len = 0;
                 nodes.capacity = buffer.len;
@@ -102,7 +102,11 @@ pub fn Parser(comptime options: TemplateOptions) type {
                 try nodes.ensureTotalCapacityPrecise(self.gpa, initial_capacity);
             }
 
-            defer if (!is_comptime) nodes.deinit(self.gpa);
+            defer if (is_comptime) {
+                nodes.clearRetainingCapacity();
+            } else {
+                nodes.deinit(self.gpa);
+            };
 
             self.beginLevel(0, self.default_delimiters, render) catch |err| switch (err) {
                 AbortError.ParserAbortedError => return false,
@@ -145,7 +149,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                     .delimiters => {
                         defer if (options.isRefCounted()) text_part.unRef(self.gpa);
 
-                        current_delimiters = try self.parseDelimiters(text_part);
+                        current_delimiters = text_part.parseDelimiters() orelse return self.abort(ParseError.InvalidDelimiters, text_part);
 
                         self.inner_state.text_scanner.setDelimiters(current_delimiters) catch |err| {
                             return self.abort(err, text_part);
@@ -309,27 +313,6 @@ pub fn Parser(comptime options: TemplateOptions) type {
             return false;
         }
 
-        fn parseDelimiters(self: *Self, text_part: *const TextPart) AbortError!Delimiters {
-
-            // Delimiters are the only case of match closing tags {{= and =}}
-            // Validate if the content ends with the proper "=" symbol before parsing the delimiters
-            var content = text_part.content.slice;
-            const last_index = content.len - 1;
-            if (content[last_index] != @enumToInt(PartType.delimiters)) return self.abort(ParseError.InvalidDelimiters, text_part);
-
-            content = content[0..last_index];
-            var iterator = std.mem.tokenize(u8, content, " \t");
-
-            const starting_delimiter = iterator.next() orelse return self.abort(ParseError.InvalidDelimiters, text_part);
-            const ending_delimiter = iterator.next() orelse return self.abort(ParseError.InvalidDelimiters, text_part);
-            if (iterator.next() != null) return self.abort(ParseError.InvalidDelimiters, text_part);
-
-            return Delimiters{
-                .starting_delimiter = starting_delimiter,
-                .ending_delimiter = ending_delimiter,
-            };
-        }
-
         fn parseIdentifier(self: *Self, text_part: *const TextPart) AbortError!?[]const u8 {
             switch (text_part.part_type) {
                 .comments,
@@ -366,23 +349,33 @@ pub fn Parser(comptime options: TemplateOptions) type {
 
             defer if (options.isRefCounted()) self.unRefNodes();
 
-            var index: usize = 0;
-            var buffer = try render.allocBuffer(nodes.items.len);
+            var list: std.ArrayListUnmanaged(Element) = .{};
 
-            defer if (comptime options.output == .Render) render.freeBuffer(buffer);
-            defer if (comptime options.output == .Render) Element.deinitMany(self.gpa, copy_string, buffer[0..index]);
+            if (options.load_mode == .runtime_loaded) {
+                try list.ensureTotalCapacityPrecise(self.gpa, nodes.items.len);
+            } else {
+                var buffer: [comptime_count.nodes]Element = undefined;
+                list.items.ptr = &buffer;
+                list.items.len = 0;
+                list.capacity = buffer.len;
+            }
 
-            errdefer if (comptime options.output == .Parse) render.freeBuffer(buffer);
-            errdefer if (comptime options.output == .Parse) Element.deinitMany(self.gpa, copy_string, buffer[0..index]);
+            defer if (options.load_mode == .runtime_loaded) {
+
+                // Clean up any elements left,
+                // Both in case of error during the creation, or in case of output == .Render
+                Element.deinitMany(self.gpa, copy_string, list.items);
+                list.deinit(self.gpa);
+            };
 
             for (nodes.items) |*node| {
                 if (!node.text_part.isEmpty()) {
-                    buffer[index] = try self.createElement(node);
-                    index += 1;
+                    list.appendAssumeCapacity(try self.createElement(node));
                 }
             }
 
-            try render.render(buffer[0..index]);
+            const elements = if (options.output == .Render or options.load_mode == .comptime_loaded) list.items else list.toOwnedSlice(self.gpa);
+            try render.render(elements);
         }
 
         fn unRefNodes(self: *Self) void {
@@ -402,8 +395,44 @@ pub fn Parser(comptime options: TemplateOptions) type {
             }
         }
 
-        inline fn parsePath(self: *Self, identifier: []const u8) Allocator.Error!Element.Path {
-            return try Element.createPath(self.gpa, copy_string, identifier);
+        fn parsePath(self: *Self, identifier: []const u8) Allocator.Error!Element.Path {
+            const action = struct {
+                pub fn action(ctx: *Self, iterator: *std.mem.TokenIterator(u8), index: usize) Allocator.Error!?[][]const u8 {
+                    if (iterator.next()) |part| {
+                        var path = (try action(ctx, iterator, index + 1)) orelse unreachable;
+                        path[index] = try ctx.dupe(part);
+                        return path;
+                    } else {
+                        if (comptime options.load_mode == .comptime_loaded) {
+                            if (index == 0) {
+                                return null;
+                            } else {
+                                // Creates a static buffer only if running at comptime
+                                const buffer_len = comptime_count.path;
+                                assert(buffer_len >= index);
+                                var buffer: [buffer_len][]const u8 = undefined;
+                                return buffer[0..index];
+                            }
+                        } else {
+                            if (index == 0) {
+                                return null;
+                            } else {
+                                return try ctx.gpa.alloc([]const u8, index);
+                            }
+                        }
+                    }
+                }
+            }.action;
+
+            const empty: Element.Path = &[0][]const u8{};
+
+            if (identifier.len == 0) {
+                return empty;
+            } else {
+                const path_separator = ".";
+                var iterator = std.mem.tokenize(u8, identifier, path_separator);
+                return (try action(self, &iterator, 0)) orelse empty;
+            }
         }
 
         fn createElement(self: *Self, node: *const Node) (AbortError || Allocator.Error)!Element {
@@ -480,17 +509,6 @@ fn TesterParser(comptime load_mode: TemplateLoadMode) type {
 const DummyRender = struct {
     pub const Error = error{};
 
-    buffer: [128]Element = undefined,
-
-    pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
-        return ctx.buffer[0..size];
-    }
-
-    pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
-        _ = ctx;
-        _ = buffer;
-    }
-
     pub fn render(ctx: *@This(), elements: []Element) Error!void {
         _ = ctx;
         _ = elements;
@@ -513,16 +531,6 @@ test "Basic parse" {
         pub const Error = error{ TestUnexpectedResult, TestExpectedEqual };
 
         calls: u32 = 0,
-        buffer: [128]Element = undefined,
-
-        pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
-            return ctx.buffer[0..size];
-        }
-
-        pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
-            _ = ctx;
-            _ = buffer;
-        }
 
         pub fn render(ctx: *@This(), elements: []Element) Error!void {
             defer ctx.calls += 1;
@@ -628,7 +636,12 @@ test "Basic parse" {
     //Comptime test
     if (enable_comptime_tests) comptime {
         @setEvalBranchQuota(9999);
-        try runTheTest(.comptime_loaded);
+        try runTheTest(.{
+            .comptime_loaded = .{
+                .template_text = template_text,
+                .default_delimiters = .{},
+            },
+        });
     };
 }
 
@@ -644,16 +657,6 @@ test "Scan standAlone tags" {
         pub const Error = error{ TestUnexpectedResult, TestExpectedEqual };
 
         calls: u32 = 0,
-        buffer: [128]Element = undefined,
-
-        pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
-            return ctx.buffer[0..size];
-        }
-
-        pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
-            _ = ctx;
-            _ = buffer;
-        }
 
         pub fn render(ctx: *@This(), elements: []Element) Error!void {
             defer ctx.calls += 1;
@@ -694,13 +697,18 @@ test "Scan standAlone tags" {
     //Comptime test
     if (enable_comptime_tests) comptime {
         @setEvalBranchQuota(9999);
-        try runTheTest(.comptime_loaded);
+        try runTheTest(.{
+            .comptime_loaded = .{
+                .template_text = template_text,
+                .default_delimiters = .{},
+            },
+        });
     };
 }
 
 test "Scan delimiters Tags" {
     const template_text =
-        \\{{=[ ]=}}           
+        \\{{=[ ]=}}
         \\[interpolation.value]
     ;
 
@@ -708,16 +716,6 @@ test "Scan delimiters Tags" {
         pub const Error = error{ TestUnexpectedResult, TestExpectedEqual };
 
         calls: u32 = 0,
-        buffer: [128]Element = undefined,
-
-        pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
-            return ctx.buffer[0..size];
-        }
-
-        pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
-            _ = ctx;
-            _ = buffer;
-        }
 
         pub fn render(ctx: *@This(), elements: []Element) Error!void {
             defer ctx.calls += 1;
@@ -758,8 +756,13 @@ test "Scan delimiters Tags" {
 
     //Comptime test
     if (enable_comptime_tests) comptime {
-        @setEvalBranchQuota(9999);
-        try runTheTest(.comptime_loaded);
+        @setEvalBranchQuota(99999);
+        try runTheTest(.{
+            .comptime_loaded = .{
+                .template_text = template_text,
+                .default_delimiters = .{},
+            },
+        });
     };
 }
 

@@ -10,6 +10,7 @@ const assert = std.debug.assert;
 const mustache = @import("../mustache.zig");
 const ParseError = mustache.ParseError;
 const TemplateOptions = mustache.options.TemplateOptions;
+const TemplateLoadMode = mustache.options.TemplateLoadMode;
 
 const ref_counter = @import("ref_counter.zig");
 
@@ -74,6 +75,60 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             node_index: ?u32 = null,
             last_starting_mark: u32 = 0,
         } else void = if (allow_lambdas) .{} else {},
+
+        pub const ComptimeCounter = struct {
+
+            /// Quantity of nodes present on the template text
+            nodes: usize = 0,
+
+            /// Max path lengh present on the template text
+            path: usize = 0,
+
+            pub fn count() @This() {
+                comptime {
+                    const comptime_loaded = switch (options.load_mode) {
+                        .comptime_loaded => |payload| payload,
+                        .runtime_loaded => @compileError("Cannot count a runtime loaded template"),
+                    };
+
+                    @setEvalBranchQuota(999999);
+                    const allocator: Allocator = undefined;
+                    var scanner = Self.init(allocator, comptime_loaded.template_text) catch unreachable;
+                    scanner.setDelimiters(comptime_loaded.default_delimiters) catch {
+                        // TODO
+                        unreachable;
+                    };
+
+                    var ret: @This() = .{};
+                    while (scanner.next(allocator) catch unreachable) |*part| {
+                        ret.nodes += 1;
+
+                        const len: usize = switch (part.part_type) {
+                            .interpolation,
+                            .section,
+                            .inverted_section,
+                            .unescaped_interpolation,
+                            .triple_mustache,
+                            => std.mem.count(u8, part.content.slice, ".") + 1,
+                            .delimiters => {
+                                const delimiter = part.parseDelimiters() orelse continue;
+                                scanner.setDelimiters(delimiter) catch {
+                                    // TODO
+                                    unreachable;
+                                };
+
+                                continue;
+                            },
+                            else => continue,
+                        };
+
+                        if (len > ret.path) ret.path = len;
+                    }
+
+                    return ret;
+                }
+            }
+        };
 
         /// Should be the template content if source == .String
         /// or the absolute path if source == .File

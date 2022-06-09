@@ -292,12 +292,10 @@ pub const Element = union(Element.Type) {
     }
 
     pub inline fn destroyPath(allocator: Allocator, owns_string: bool, path: Path) void {
-        if (!isComptime()) {
-            if (path.len > 0) {
-                if (owns_string)
-                    for (path) |part| allocator.free(part);
-                allocator.free(path);
-            }
+        if (path.len > 0) {
+            if (owns_string)
+                for (path) |part| allocator.free(part);
+            allocator.free(path);
         }
     }
 };
@@ -352,7 +350,12 @@ pub fn parseComptime(
             undefined,
             template_text,
             default_delimiters,
-            .comptime_loaded,
+            .{
+                .comptime_loaded = .{
+                    .template_text = template_text,
+                    .default_delimiters = default_delimiters,
+                },
+            },
         ) catch unreachable;
 
         return switch (parse_result) {
@@ -427,43 +430,12 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
         const Node = Parser.Node;
 
         const Collector = struct {
-            pub const Error = Allocator.Error;
-
-            allocator: Allocator,
-            buffer: []Element = &.{},
-
-            pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
-                ctx.buffer = try ctx.allocator.alloc(Element, size);
-                return ctx.buffer;
-            }
-
-            pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
-                ctx.allocator.free(buffer);
-            }
-
-            pub inline fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
-                ctx.buffer = ctx.allocator.shrink(ctx.buffer, elements.len);
-            }
-        };
-
-        const ComptimeCollector = struct {
             pub const Error = error{};
 
-            buffer: []Element = &.{},
+            elements: []Element = &.{},
 
-            pub inline fn allocBuffer(ctx: *@This(), size: usize) Error![]Element {
-                _ = ctx;
-                var buffer: [128]Element = [_]Element{undefined} ** 128;
-                return buffer[0..size];
-            }
-
-            pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
-                _ = ctx;
-                _ = buffer;
-            }
-
-            pub inline fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
-                ctx.buffer = elements;
+            pub inline fn render(ctx: *@This(), elements: []Element) Error!void {
+                ctx.elements = elements;
             }
         };
 
@@ -479,31 +451,14 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             var parser = try Parser.init(self.allocator, template, self.delimiters);
             defer parser.deinit();
 
-            if (isComptime()) {
-                if (comptime !isComptime()) {
-                    unreachable;
-                } else {
-                    var collector = ComptimeCollector{};
-                    var success = try parser.parse(&collector);
+            var collector = Collector{};
+            var success = try parser.parse(&collector);
 
-                    self.result = if (success) .{
-                        .elements = collector.buffer,
-                    } else .{
-                        .parser_error = parser.last_error.?,
-                    };
-                }
-            } else {
-                var collector = Collector{
-                    .allocator = self.allocator,
-                };
-                var success = try parser.parse(&collector);
-
-                self.result = if (success) .{
-                    .elements = collector.buffer,
-                } else .{
-                    .parser_error = parser.last_error.?,
-                };
-            }
+            self.result = if (success) .{
+                .elements = collector.elements,
+            } else .{
+                .parser_error = parser.last_error.?,
+            };
         }
 
         pub fn collectElements(self: *Self, template_text: []const u8, render: anytype) ErrorSet(Parser, @TypeOf(render))!void {
@@ -514,7 +469,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
         }
 
         pub fn deinit(self: *Self) void {
-            if (!isComptime()) {
+            if (options.load_mode == .runtime_loaded) {
                 switch (self.result) {
                     .elements => |elements| {
                         Element.deinitMany(self.allocator, options.copyStrings(), elements);
@@ -622,10 +577,10 @@ const tests = struct {
         //
         // Comment blocks should be removed from the template.
         test "Inline" {
-            const doTheTest = struct {
-                pub fn action(comptime load_mode: TemplateLoadMode) !void {
-                    const template_text = "12345{{! Comment Block! }}67890";
+            const template_text = "12345{{! Comment Block! }}67890";
 
+            const runTheTest = struct {
+                pub fn action(comptime load_mode: TemplateLoadMode) !void {
                     var template = try getTemplate(template_text, load_mode);
                     defer template.deinit();
 
@@ -641,9 +596,14 @@ const tests = struct {
                 }
             }.action;
 
-            try doTheTest(.runtime_loaded);
+            try runTheTest(.runtime_loaded);
             comptime {
-                try doTheTest(.comptime_loaded);
+                try runTheTest(.{
+                    .comptime_loaded = .{
+                        .template_text = template_text,
+                        .default_delimiters = .{},
+                    },
+                });
             }
         }
 
@@ -2451,21 +2411,11 @@ const tests = struct {
 
             // A dummy render, just count the produced elements
             const DummyRender = struct {
-                pub const Error = Allocator.Error;
+                pub const Error = error{};
 
                 count: usize = 0,
-                buffer: [128]Element = undefined,
 
-                pub inline fn allocBuffer(ctx: *@This(), size: usize) Allocator.Error![]Element {
-                    return ctx.buffer[0..size];
-                }
-
-                pub inline fn freeBuffer(ctx: *@This(), buffer: []Element) void {
-                    _ = ctx;
-                    _ = buffer;
-                }
-
-                pub fn render(ctx: *@This(), elements: []Element) Allocator.Error!void {
+                pub fn render(ctx: *@This(), elements: []Element) Error!void {
                     ctx.count += elements.len;
                     checkStrings(elements);
                 }

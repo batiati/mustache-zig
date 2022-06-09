@@ -10,7 +10,6 @@
 
 # ! Under development !
 
-- Needs zig `0.10.0-dev` to build.
 - Windows support is broken at the moment
 
 ## Features
