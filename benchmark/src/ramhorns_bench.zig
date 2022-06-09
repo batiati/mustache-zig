@@ -9,48 +9,59 @@ const Allocator = std.mem.Allocator;
 const mustache = @import("mustache");
 const TIMES = if (builtin.mode == .Debug) 10_000 else 1_000_000;
 
+// Run tests on full featured mustache specs, or minimum settings for the use case
+const full = true;
+const features: mustache.options.Features = if (full) .{} else .{
+    .preseve_line_breaks_and_indentation = false,
+    .lambdas = .Disabled,
+};
+
 const Mode = enum {
-    Counter,
-    String,
+    Buffer,
+    Alloc,
     Writer,
 };
 
 pub fn main() anyerror!void {
-    var file = try std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only });
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    var file = try tmp_dir.dir.createFile("test.mustache", .{ .truncate = true });
     defer file.close();
+
+    var file_writer = std.io.bufferedWriter(file.writer());
+    var buffer: [1024]u8 = undefined;
 
     if (builtin.mode == .Debug) {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         defer _ = gpa.deinit();
 
         const allocator = gpa.allocator();
-        try simpleTemplate(allocator, .Counter, std.io.null_writer);
-        try simpleTemplate(allocator, .String, std.io.null_writer);
-        try simpleTemplate(allocator, .Writer, file.writer());
-        try partialTemplates(allocator, .Counter, std.io.null_writer);
-        try partialTemplates(allocator, .String, std.io.null_writer);
+        try simpleTemplate(allocator, &buffer, .Buffer, std.io.null_writer);
+        try simpleTemplate(allocator, &buffer, .Alloc, std.io.null_writer);
+
+        try simpleTemplate(allocator, &buffer, .Writer, file_writer);
+        try file_writer.flush();
+
+        try partialTemplates(allocator, &buffer, .Buffer, std.io.null_writer);
+        try partialTemplates(allocator, &buffer, .Alloc, std.io.null_writer);
         try parseTemplates(allocator);
     } else {
         const allocator = std.heap.raw_c_allocator;
 
-        try simpleTemplate(allocator, .Counter, std.io.null_writer);
-        try simpleTemplate(allocator, .String, std.io.null_writer);
-        try simpleTemplate(allocator, .Writer, file.writer());
-        try partialTemplates(allocator, .Counter, std.io.null_writer);
-        try partialTemplates(allocator, .String, std.io.null_writer);
+        try simpleTemplate(allocator, &buffer, .Buffer, std.io.null_writer);
+        try simpleTemplate(allocator, &buffer, .Alloc, std.io.null_writer);
+
+        try simpleTemplate(allocator, &buffer, .Writer, file_writer);
+        try file_writer.flush();
+
+        try partialTemplates(allocator, &buffer, .Buffer, std.io.null_writer);
+        try partialTemplates(allocator, &buffer, .Alloc, std.io.null_writer);
         try parseTemplates(allocator);
     }
 }
 
-// Run tests on full featured mustache specs, or minimum settings for the use case
-const full = true;
-const features: mustache.options.Features = if (full)
-.{} else .{
-    .preseve_line_breaks_and_indentation = false,
-    .lambdas = .Disabled,
-};
-
-pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype) !void {
+pub fn simpleTemplate(allocator: Allocator, buffer: []u8, comptime mode: Mode, writer: anytype) !void {
     const template_text = "<title>{{title}}</title><h1>{{ title }}</h1><div>{{{body}}}</div>";
     const fmt_template = "<title>{[title]s}</title><h1>{[title]s}</h1><div>{[body]s}</div>";
 
@@ -67,17 +78,18 @@ pub fn simpleTemplate(allocator: Allocator, comptime mode: Mode, writer: anytype
     std.debug.print("----------------------------------\n", .{});
     const reference = try repeat("Reference: Zig fmt", zigFmt, .{
         allocator,
+        buffer,
         mode,
         fmt_template,
         data,
         writer,
     }, null);
-    _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, mode, template, data, writer }, reference);
-    _ = try repeat("Mustache not parsed", notParsed, .{ allocator, mode, template_text, data, writer }, reference);
+    _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, buffer, mode, template, data, writer }, reference);
+    if (mode != .Buffer) _ = try repeat("Mustache not parsed", notParsed, .{ allocator, buffer, mode, template_text, data, writer }, reference);
     std.debug.print("\n\n", .{});
 }
 
-pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anytype) !void {
+pub fn partialTemplates(allocator: Allocator, buffer: []u8, comptime mode: Mode, writer: anytype) !void {
     const template_text =
         \\{{>head.html}}
         \\<body>
@@ -122,8 +134,8 @@ pub fn partialTemplates(allocator: Allocator, comptime mode: Mode, writer: anyty
 
     std.debug.print("Mode {s}\n", .{@tagName(mode)});
     std.debug.print("----------------------------------\n", .{});
-    _ = try repeat("Mustache pre-parsed partials", preParsedPartials, .{ allocator, mode, template, partial_templates, data, writer }, null);
-    _ = try repeat("Mustache not parsed partials", notParsedPartials, .{ allocator, mode, template_text, partial_templates_text, data, writer }, null);
+    _ = try repeat("Mustache pre-parsed partials", preParsedPartials, .{ allocator, buffer, mode, template, partial_templates, data, writer }, null);
+    if (mode != .Buffer) _ = try repeat("Mustache not parsed partials", notParsedPartials, .{ allocator, buffer, mode, template_text, partial_templates_text, data, writer }, null);
     std.debug.print("\n\n", .{});
 }
 
@@ -162,14 +174,18 @@ fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize, referen
     std.debug.print("\n", .{});
 }
 
-fn zigFmt(allocator: Allocator, mode: Mode, comptime fmt_template: []const u8, data: anytype, writer: anytype) !usize {
+fn zigFmt(allocator: Allocator, buffer: []u8, mode: Mode, comptime fmt_template: []const u8, data: anytype, writer: anytype) !usize {
     switch (mode) {
-        .Counter, .Writer => {
+        .Buffer => {
+            const ret = try std.fmt.bufPrint(buffer, fmt_template, data);
+            return ret.len;
+        },
+        .Writer => {
             var counter = std.io.countingWriter(writer);
             try std.fmt.format(counter.writer(), fmt_template, data);
             return counter.bytes_written;
         },
-        .String => {
+        .Alloc => {
             const ret = try std.fmt.allocPrint(allocator, fmt_template, data);
             defer allocator.free(ret);
             return ret.len;
@@ -177,14 +193,18 @@ fn zigFmt(allocator: Allocator, mode: Mode, comptime fmt_template: []const u8, d
     }
 }
 
-fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data: anytype, writer: anytype) !usize {
+fn preParsed(allocator: Allocator, buffer: []u8, mode: Mode, template: mustache.Template, data: anytype, writer: anytype) !usize {
     switch (mode) {
-        .Counter, .Writer => {
+        .Buffer => {
+            const ret = try mustache.bufRender(buffer, template, data);
+            return ret.len;
+        },
+        .Writer => {
             var counter = std.io.countingWriter(writer);
             try mustache.render(template, data, counter.writer());
             return counter.bytes_written;
         },
-        .String => {
+        .Alloc => {
             const ret = try mustache.allocRender(allocator, template, data);
             defer allocator.free(ret);
             return ret.len;
@@ -192,14 +212,18 @@ fn preParsed(allocator: Allocator, mode: Mode, template: mustache.Template, data
     }
 }
 
-fn preParsedPartials(allocator: Allocator, mode: Mode, template: mustache.Template, partial_templates: anytype, data: anytype, writer: anytype) !usize {
+fn preParsedPartials(allocator: Allocator, buffer: []u8, mode: Mode, template: mustache.Template, partial_templates: anytype, data: anytype, writer: anytype) !usize {
     switch (mode) {
-        .Counter, .Writer => {
+        .Buffer => {
+            var ret = try mustache.bufRenderPartials(buffer, template, partial_templates, data);
+            return ret.len;
+        },
+        .Writer => {
             var counter = std.io.countingWriter(writer);
             try mustache.renderPartials(template, partial_templates, data, counter.writer());
             return counter.bytes_written;
         },
-        .String => {
+        .Alloc => {
             const ret = try mustache.allocRenderPartials(allocator, template, partial_templates, data);
             defer allocator.free(ret);
             return ret.len;
@@ -207,14 +231,18 @@ fn preParsedPartials(allocator: Allocator, mode: Mode, template: mustache.Templa
     }
 }
 
-fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: anytype, writer: anytype) !usize {
+fn notParsed(allocator: Allocator, buffer: []u8, mode: Mode, template_text: []const u8, data: anytype, writer: anytype) !usize {
     switch (mode) {
-        .Counter, .Writer => {
+        .Buffer => {
+            _ = buffer;
+            return 0;
+        },
+        .Writer => {
             var counter = std.io.countingWriter(writer);
             try mustache.renderTextPartialsWithOptions(allocator, template_text, {}, data, counter.writer(), .{ .features = features });
             return counter.bytes_written;
         },
-        .String => {
+        .Alloc => {
             const ret = try mustache.allocRenderTextPartialsWithOptions(allocator, template_text, {}, data, .{ .features = features });
             defer allocator.free(ret);
             return ret.len;
@@ -222,14 +250,18 @@ fn notParsed(allocator: Allocator, mode: Mode, template_text: []const u8, data: 
     }
 }
 
-fn notParsedPartials(allocator: Allocator, mode: Mode, template_text: []const u8, partial_templates: anytype, data: anytype, writer: anytype) !usize {
+fn notParsedPartials(allocator: Allocator, buffer: []u8, mode: Mode, template_text: []const u8, partial_templates: anytype, data: anytype, writer: anytype) !usize {
     switch (mode) {
-        .Counter, .Writer => {
+        .Buffer => {
+            _ = buffer;
+            return 0;
+        },
+        .Writer => {
             var counter = std.io.countingWriter(writer);
             try mustache.renderTextPartialsWithOptions(allocator, template_text, partial_templates, data, counter.writer(), .{ .features = features });
             return counter.bytes_written;
         },
-        .String => {
+        .Alloc => {
             const ret = try mustache.allocRenderTextPartialsWithOptions(allocator, template_text, partial_templates, data, .{ .features = features });
             defer allocator.free(ret);
             return ret.len;
