@@ -3,6 +3,8 @@ const Delimiters = mustache.Delimiters;
 
 const builtin = @import("builtin");
 
+pub const comptime_tests_enabled = true;
+
 /// General options for processing a mustache template
 pub const TemplateOptions = struct {
 

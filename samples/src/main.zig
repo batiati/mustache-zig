@@ -137,7 +137,7 @@ pub fn renderComptimePartialTemplate() anyerror!void {
     // Comptime-parsed template
     const comptime_template = comptime mustache.parseComptime(
         \\{{=[ ]=}}
-        \\📜 hello [>partial], your luck number is [sub_value.value]
+        \\📜 hello [>partial], your lucky number is [sub_value.value]
         \\--------------------------------------
         \\
     , .{}, .{});

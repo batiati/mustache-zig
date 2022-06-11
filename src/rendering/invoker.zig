@@ -1206,13 +1206,14 @@ const tests = struct {
     };
 
     const dummy_options = RenderOptions{ .Template = .{} };
-    const Writer = @TypeOf(std.io.null_writer);
+    const DummyParser = @import("../parsing/parser.zig").Parser(.{ .source = .{ .String = .{ .copy_strings = false } }, .output = .Render, .load_mode = .runtime_loaded });
+    const DummyWriter = @TypeOf(std.io.null_writer);
     const DummyPartialsMap = map.PartialsMap(void, dummy_options);
-    const RenderEngine = rendering.RenderEngine(Writer, DummyPartialsMap, dummy_options);
-    const FooInvoker = RenderEngine.Invoker;
-    const FooCaller = FooInvoker.PathInvoker(error{}, bool, fooAction);
+    const DummyRenderEngine = rendering.RenderEngine(DummyWriter, DummyPartialsMap, dummy_options);
+    const DummyInvoker = DummyRenderEngine.Invoker;
+    const DummyCaller = DummyInvoker.PathInvoker(error{}, bool, dummyAction);
 
-    fn fooAction(comptime TExpected: type, value: anytype) error{}!bool {
+    fn dummyAction(comptime TExpected: type, value: anytype) error{}!bool {
         const TValue = @TypeOf(value);
         const expected = comptime (TExpected == TValue) or (trait.isSingleItemPtr(TValue) and meta.Child(TValue) == TExpected);
         if (!expected) {
@@ -1225,32 +1226,35 @@ const tests = struct {
         return expected;
     }
 
-    fn fooSeek(comptime TExpected: type, data: anytype, identifier: []const u8, index: ?usize) !FooCaller.Result {
-        var path = try Element.createPath(testing.allocator, false, identifier);
+    fn dummySeek(comptime TExpected: type, data: anytype, identifier: []const u8, index: ?usize) !DummyCaller.Result {
+        var parser = try DummyParser.init(testing.allocator, "", .{});
+        defer parser.deinit();
+
+        var path = try parser.parsePath(identifier);
         defer Element.destroyPath(testing.allocator, false, path);
 
-        return try FooCaller.call(TExpected, &data, path, index);
+        return try DummyCaller.call(TExpected, &data, path, index);
     }
 
     fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
-        const value = try fooSeek(TExpected, data, path, null);
+        const value = try dummySeek(TExpected, data, path, null);
         try testing.expect(value == .Field);
         try testing.expect(value.Field == true);
     }
 
     fn expectNotFound(data: anytype, path: []const u8) !void {
-        const value = try fooSeek(void, data, path, null);
+        const value = try dummySeek(void, data, path, null);
         try testing.expect(value != .Field);
     }
 
     fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
-        const value = try fooSeek(TExpected, data, path, index);
+        const value = try dummySeek(TExpected, data, path, index);
         try testing.expect(value == .Field);
         try testing.expect(value.Field == true);
     }
 
     fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
-        const value = try fooSeek(void, data, path, index);
+        const value = try dummySeek(void, data, path, index);
         try testing.expect(value != .Field);
     }
 

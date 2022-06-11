@@ -251,50 +251,11 @@ pub const Element = union(Element.Type) {
         }
     }
 
-    pub fn createPath(allocator: Allocator, copy_strings: bool, identifier: []const u8) Allocator.Error!Path {
-        const action = struct {
-            pub fn action(_allocator: Allocator, _copy_strings: bool, iterator: *std.mem.TokenIterator(u8), index: usize) Allocator.Error!?[][]const u8 {
-                if (iterator.next()) |part| {
-                    var path = (try action(_allocator, _copy_strings, iterator, index + 1)) orelse unreachable;
-                    path[index] = if (_copy_strings) try _allocator.dupe(u8, part) else part;
-                    return path;
-                } else {
-                    if (index == 0) {
-                        return null;
-                    } else if (isComptime()) {
-
-                        // Creates a static buffer only if running at comptime
-                        // This "if" avoid rendering this code at runtime
-                        if (comptime !isComptime()) {
-                            unreachable;
-                        } else {
-                            const len = 32;
-                            assert(len >= index);
-                            var buffer: [len][]const u8 = [_][]const u8{&.{}} ** len;
-                            return buffer[0..index];
-                        }
-                    } else {
-                        return try _allocator.alloc([]const u8, index);
-                    }
-                }
-            }
-        }.action;
-
-        const empty: Path = &[0][]const u8{};
-
-        if (identifier.len == 0) {
-            return empty;
-        } else {
-            const path_separator = ".";
-            var iterator = std.mem.tokenize(u8, identifier, path_separator);
-            return (try action(allocator, copy_strings, &iterator, 0)) orelse empty;
-        }
-    }
-
     pub inline fn destroyPath(allocator: Allocator, owns_string: bool, path: Path) void {
         if (path.len > 0) {
-            if (owns_string)
+            if (owns_string) {
                 for (path) |part| allocator.free(part);
+            }
             allocator.free(path);
         }
     }
@@ -305,8 +266,10 @@ pub const Template = struct {
     options: *const TemplateOptions,
 
     pub fn deinit(self: Template, allocator: Allocator) void {
-        Element.deinitMany(allocator, self.options.copyStrings(), self.elements);
-        allocator.free(self.elements);
+        if (self.options.load_mode == .runtime_loaded) {
+            Element.deinitMany(allocator, self.options.copyStrings(), self.elements);
+            allocator.free(self.elements);
+        }
     }
 };
 
@@ -343,11 +306,11 @@ pub fn parseComptime(
     comptime {
         @setEvalBranchQuota(999999);
         const source = TemplateSource{ .String = .{ .copy_strings = false } };
-        const options: mustache.options.ParseTextOptions = .{ .copy_strings = false, .features = features };
+        const unused: Allocator = undefined;
         const parse_result = parseSource(
             source,
-            options.features,
-            undefined,
+            features,
+            unused,
             template_text,
             default_delimiters,
             .{
@@ -501,15 +464,6 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
     };
 }
 
-/// We need to known if it is comptime in order to use an allocator or a static buffer
-/// This function should be replaced by @isComptime builtin
-/// https://discord.com/channels/605571803288698900/605572581046747136/902307648333045801
-inline fn isComptime() bool {
-    var b = false;
-    const u = if (b) @as(u32, 0) else @as(u8, 0);
-    return @TypeOf(u) == u8;
-}
-
 test {
     _ = tests;
     _ = parsing;
@@ -562,9 +516,12 @@ const tests = struct {
     }
 
     pub fn expectPath(expected: []const u8, path: Element.Path) !void {
-        const allocator = testing.allocator;
-        const expected_path = try Element.createPath(allocator, false, expected);
-        defer Element.destroyPath(allocator, false, expected_path);
+        const TestParser = TesterTemplateLoader(.runtime_loaded).Parser;
+        var parser = try TestParser.init(testing.allocator, "", .{});
+        defer parser.deinit();
+
+        const expected_path = try parser.parsePath(expected);
+        defer Element.destroyPath(testing.allocator, false, expected_path);
 
         try testing.expectEqual(expected_path.len, path.len);
         for (expected_path) |expected_part, i| {
@@ -2460,82 +2417,6 @@ const tests = struct {
     };
 
     const api = struct {
-        test "Path" {
-            const allocator = testing.allocator;
-
-            {
-                var empty_1 = try Element.createPath(allocator, false, "");
-                defer Element.destroyPath(allocator, false, empty_1);
-
-                try testing.expectEqual(@as(usize, 0), empty_1.len);
-            }
-
-            {
-                var empty_2 = try Element.createPath(allocator, false, ".");
-                defer Element.destroyPath(allocator, false, empty_2);
-
-                try testing.expectEqual(@as(usize, 0), empty_2.len);
-            }
-
-            {
-                var empty_3 = try Element.createPath(allocator, false, "..");
-                defer Element.destroyPath(allocator, false, empty_3);
-
-                try testing.expectEqual(@as(usize, 0), empty_3.len);
-            }
-
-            {
-                var single1 = try Element.createPath(allocator, false, "a");
-                defer Element.destroyPath(allocator, false, single1);
-
-                try testing.expectEqual(@as(usize, 1), single1.len);
-                try testing.expectEqualStrings("a", single1[0]);
-            }
-
-            {
-                var single2 = try Element.createPath(allocator, false, ".a");
-                defer Element.destroyPath(allocator, false, single2);
-
-                try testing.expectEqual(@as(usize, 1), single2.len);
-                try testing.expectEqualStrings("a", single2[0]);
-            }
-
-            {
-                var single3 = try Element.createPath(allocator, false, ".a.");
-                defer Element.destroyPath(allocator, false, single3);
-
-                try testing.expectEqual(@as(usize, 1), single3.len);
-                try testing.expectEqualStrings("a", single3[0]);
-            }
-
-            {
-                var double1 = try Element.createPath(allocator, false, "a.b");
-                defer Element.destroyPath(allocator, false, double1);
-
-                try testing.expectEqual(@as(usize, 2), double1.len);
-                try testing.expectEqualStrings("a", double1[0]);
-                try testing.expectEqualStrings("b", double1[1]);
-            }
-
-            {
-                var double2 = try Element.createPath(allocator, false, ".a.b");
-                defer Element.destroyPath(allocator, false, double2);
-
-                try testing.expectEqual(@as(usize, 2), double2.len);
-                try testing.expectEqualStrings("a", double2[0]);
-                try testing.expectEqualStrings("b", double2[1]);
-            }
-
-            {
-                var double3 = try Element.createPath(allocator, false, ".a.b.");
-                defer Element.destroyPath(allocator, false, double3);
-
-                try testing.expectEqual(@as(usize, 2), double3.len);
-                try testing.expectEqualStrings("a", double3[0]);
-                try testing.expectEqualStrings("b", double3[1]);
-            }
-        }
-
         test "parseText API" {
             var result = try parseText(testing.allocator, "{{hello}}world", .{}, .{ .copy_strings = true });
             switch (result) {

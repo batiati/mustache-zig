@@ -20,8 +20,6 @@ const FileReader = parsing.FileReader;
 
 const ref_counter = @import("ref_counter.zig");
 
-const parsePath = @import("../template.zig").parsePath;
-
 pub fn Parser(comptime options: TemplateOptions) type {
     const allow_lambdas = options.features.lambdas == .Enabled;
     const copy_string = options.copyStrings();
@@ -395,7 +393,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
             }
         }
 
-        fn parsePath(self: *Self, identifier: []const u8) Allocator.Error!Element.Path {
+        pub fn parsePath(self: *Self, identifier: []const u8) Allocator.Error!Element.Path {
             const action = struct {
                 pub fn action(ctx: *Self, iterator: *std.mem.TokenIterator(u8), index: usize) Allocator.Error!?[][]const u8 {
                     if (iterator.next()) |part| {
@@ -501,7 +499,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
     };
 }
 
-const enable_comptime_tests = true;
+const comptime_tests_enabled = mustache.options.comptime_tests_enabled;
 fn TesterParser(comptime load_mode: TemplateLoadMode) type {
     return Parser(.{ .source = .{ .String = .{} }, .output = .Render, .load_mode = load_mode });
 }
@@ -634,7 +632,7 @@ test "Basic parse" {
     try runTheTest(.runtime_loaded);
 
     //Comptime test
-    if (enable_comptime_tests) comptime {
+    if (comptime_tests_enabled) comptime {
         @setEvalBranchQuota(9999);
         try runTheTest(.{
             .comptime_loaded = .{
@@ -695,7 +693,7 @@ test "Scan standAlone tags" {
     try runTheTest(.runtime_loaded);
 
     //Comptime test
-    if (enable_comptime_tests) comptime {
+    if (comptime_tests_enabled) comptime {
         @setEvalBranchQuota(9999);
         try runTheTest(.{
             .comptime_loaded = .{
@@ -755,7 +753,7 @@ test "Scan delimiters Tags" {
     try runTheTest(.runtime_loaded);
 
     //Comptime test
-    if (enable_comptime_tests) comptime {
+    if (comptime_tests_enabled) comptime {
         @setEvalBranchQuota(99999);
         try runTheTest(.{
             .comptime_loaded = .{

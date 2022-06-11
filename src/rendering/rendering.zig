@@ -3941,13 +3941,15 @@ const tests = struct {
         }
     };
 
-    fn expectRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
+    fn expectRender(comptime template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
         try expectCachedRender(template_text, data, expected);
+        try expectComptimeRender(template_text, data, expected);
         try expectStreamedRender(template_text, data, expected);
     }
 
-    fn expectRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {
+    fn expectRenderPartials(comptime template_text: []const u8, comptime partials: anytype, data: anytype, expected: []const u8) anyerror!void {
         try expectCachedRenderPartials(template_text, partials, data, expected);
+        try expectComptimeRenderPartials(template_text, partials, data, expected);
         try expectStreamedRenderPartials(template_text, partials, data, expected);
     }
 
@@ -3974,6 +3976,19 @@ const tests = struct {
         var result = try allocRender(allocator, cached_template, data);
         defer allocator.free(result);
         try testing.expectEqualStrings(expected, result);
+    }
+
+    fn expectComptimeRender(comptime template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
+        if (mustache.options.comptime_tests_enabled) {
+            const allocator = testing.allocator;
+
+            // Comptime template render
+            var comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
+
+            var result = try allocRender(allocator, comptime_template, data);
+            defer allocator.free(result);
+            try testing.expectEqualStrings(expected, result);
+        }
     }
 
     fn expectCachedRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {
@@ -4003,6 +4018,29 @@ const tests = struct {
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
+    }
+
+    fn expectComptimeRenderPartials(comptime template_text: []const u8, comptime partials: anytype, data: anytype, expected: []const u8) anyerror!void {
+        if (mustache.options.comptime_tests_enabled) {
+            const allocator = testing.allocator;
+            // Cached template render
+            var comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
+
+            const PartialTuple = std.meta.Tuple(&[_]type{ []const u8, Template });
+            comptime var comptime_partials: [partials.len]PartialTuple = undefined;
+
+            comptime {
+                inline for (partials) |item, index| {
+                    var partial_template = mustache.parseComptime(item[1], .{}, .{});
+                    comptime_partials[index] = .{ item[0], partial_template };
+                }
+            }
+
+            var result = try allocRenderPartials(allocator, comptime_template, comptime_partials, data);
+            defer allocator.free(result);
+
+            try testing.expectEqualStrings(expected, result);
+        }
     }
 
     fn expectStreamedRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {

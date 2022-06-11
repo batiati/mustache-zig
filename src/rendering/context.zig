@@ -479,8 +479,17 @@ const struct_tests = struct {
     }
 
     const dummy_options = RenderOptions{ .Text = .{} };
+
     const DummyPartialsMap = map.PartialsMap(void, dummy_options);
+    const DummyParser = @import("../parsing/parser.zig").Parser(.{ .source = .{ .String = .{ .copy_strings = false } }, .output = .Render, .load_mode = .runtime_loaded });
     const dummy_map = DummyPartialsMap.init({});
+
+    fn expectPath(allocator: Allocator, path: []const u8) !Element.Path {
+        var parser = try DummyParser.init(allocator, "", .{});
+        defer parser.deinit();
+
+        return try parser.parsePath(path);
+    }
 
     fn interpolate(writer: anytype, data: anytype, path: []const u8) anyerror!void {
         const Data = @TypeOf(data);
@@ -508,7 +517,7 @@ const struct_tests = struct {
             .template_options = {},
         };
 
-        var path = try Element.createPath(testing.allocator, false, identifier);
+        var path = try expectPath(testing.allocator, identifier);
         defer Element.destroyPath(testing.allocator, false, path);
 
         switch (try ctx.interpolate(&data_render, path, escape)) {
@@ -1086,7 +1095,7 @@ const struct_tests = struct {
         // Address
 
         var address_ctx = address_ctx: {
-            const path = try Element.createPath(allocator, false, "address");
+            const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
             switch (person_ctx.get(path)) {
@@ -1108,7 +1117,7 @@ const struct_tests = struct {
         // Street
 
         var street_ctx = street_ctx: {
-            const path = try Element.createPath(allocator, false, "street");
+            const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
             switch (address_ctx.get(path)) {
@@ -1159,7 +1168,7 @@ const struct_tests = struct {
         // Indication
 
         var indication_ctx = indication_ctx: {
-            const path = try Element.createPath(allocator, false, "indication");
+            const path = try expectPath(allocator, "indication");
             defer Element.destroyPath(allocator, false, path);
 
             switch (person_ctx.get(path)) {
@@ -1181,7 +1190,7 @@ const struct_tests = struct {
         // Address
 
         var address_ctx = address_ctx: {
-            const path = try Element.createPath(allocator, false, "address");
+            const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
             switch (indication_ctx.get(path)) {
@@ -1203,7 +1212,7 @@ const struct_tests = struct {
         // Street
 
         var street_ctx = street_ctx: {
-            const path = try Element.createPath(allocator, false, "street");
+            const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
             switch (address_ctx.get(path)) {
@@ -1241,7 +1250,7 @@ const struct_tests = struct {
         var person_ctx = getContext(Writer, &person, DummyPartialsMap, dummy_options);
 
         const address_ctx = address_ctx: {
-            const path = try Element.createPath(allocator, false, "address");
+            const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
             // Person.address
@@ -1255,7 +1264,7 @@ const struct_tests = struct {
         };
 
         {
-            const path = try Element.createPath(allocator, false, "wrong_address");
+            const path = try expectPath(allocator, "wrong_address");
             defer Element.destroyPath(allocator, false, path);
 
             var wrong_address = person_ctx.get(path);
@@ -1263,7 +1272,7 @@ const struct_tests = struct {
         }
 
         const street_ctx = street_ctx: {
-            const path = try Element.createPath(allocator, false, "street");
+            const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
             // Person.address.street
@@ -1277,7 +1286,7 @@ const struct_tests = struct {
         };
 
         {
-            const path = try Element.createPath(allocator, false, "wrong_street");
+            const path = try expectPath(allocator, "wrong_street");
             defer Element.destroyPath(allocator, false, path);
 
             var wrong_street = address_ctx.get(path);
@@ -1285,7 +1294,7 @@ const struct_tests = struct {
         }
 
         {
-            const path = try Element.createPath(allocator, false, "len");
+            const path = try expectPath(allocator, "len");
             defer Element.destroyPath(allocator, false, path);
             // Person.address.street.len
             var street_len_ctx = switch (street_ctx.get(path)) {
@@ -1299,7 +1308,7 @@ const struct_tests = struct {
         }
 
         {
-            const path = try Element.createPath(allocator, false, "wrong_len");
+            const path = try expectPath(allocator, "wrong_len");
             defer Element.destroyPath(allocator, false, path);
 
             var wrong_len = street_ctx.get(path);
@@ -1320,7 +1329,7 @@ const struct_tests = struct {
         // Person
         var ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
 
-        const path = try Element.createPath(allocator, false, "items");
+        const path = try expectPath(allocator, "items");
         defer Element.destroyPath(allocator, false, path);
 
         var iterator = switch (ctx.iterator(path)) {
@@ -1367,7 +1376,7 @@ const struct_tests = struct {
 
         {
             // iterator over true
-            const path = try Element.createPath(allocator, false, "active");
+            const path = try expectPath(allocator, "active");
             defer Element.destroyPath(allocator, false, path);
 
             var iterator = switch (ctx.iterator(path)) {
@@ -1387,7 +1396,7 @@ const struct_tests = struct {
 
         {
             // iterator over false
-            const path = try Element.createPath(allocator, false, "indication.active");
+            const path = try expectPath(allocator, "indication.active");
             defer Element.destroyPath(allocator, false, path);
 
             var iterator = switch (ctx.iterator(path)) {
@@ -1415,7 +1424,7 @@ const struct_tests = struct {
 
         {
             // iterator over true
-            const path = try Element.createPath(allocator, false, "additional_information");
+            const path = try expectPath(allocator, "additional_information");
             defer Element.destroyPath(allocator, false, path);
 
             var iterator = switch (ctx.iterator(path)) {
@@ -1435,7 +1444,7 @@ const struct_tests = struct {
 
         {
             // iterator over false
-            const path = try Element.createPath(allocator, false, "indication.additional_information");
+            const path = try expectPath(allocator, "indication.additional_information");
             defer Element.destroyPath(allocator, false, path);
 
             var iterator = switch (ctx.iterator(path)) {
