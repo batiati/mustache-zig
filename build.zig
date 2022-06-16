@@ -9,10 +9,15 @@ pub fn build(b: *std.build.Builder) void {
         lib.install();
     }
 
+    var comptime_tests = b.addOptions();
+    const comptime_tests_enabled = b.option(bool, "comptime-tests", "Run comptime tests") orelse true;
+    comptime_tests.addOption(bool, "comptime_tests_enabled", comptime_tests_enabled);
+
     {
         const main_tests = b.addTest("src/mustache.zig");
         main_tests.setBuildMode(mode);
 
+        main_tests.addOptions("build_comptime_tests", comptime_tests);
         const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
 
         if (coverage) {
@@ -34,6 +39,8 @@ pub fn build(b: *std.build.Builder) void {
     {
         const test_exe = b.addTestExe("tests", "src/mustache.zig");
         test_exe.setBuildMode(mode);
+        test_exe.addOptions("build_comptime_tests", comptime_tests);
+
         const test_exe_install = b.addInstallArtifact(test_exe);
 
         const test_build = b.step("build_tests", "Build library tests");

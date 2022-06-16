@@ -499,7 +499,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
     };
 }
 
-const comptime_tests_enabled = mustache.options.comptime_tests_enabled;
+const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
 fn TesterParser(comptime load_mode: TemplateLoadMode) type {
     return Parser(.{ .source = .{ .String = .{} }, .output = .Render, .load_mode = load_mode });
 }

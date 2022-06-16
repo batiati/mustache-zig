@@ -2418,36 +2418,63 @@ const tests = struct {
 
     const api = struct {
         test "parseText API" {
-            var result = try parseText(testing.allocator, "{{hello}}world", .{}, .{ .copy_strings = true });
+            var result = result: {
+                var template_text = try testing.allocator.dupe(u8, "{{hello}}world");
+                defer testing.allocator.free(template_text);
+
+                break :result try parseText(testing.allocator, template_text, .{}, .{ .copy_strings = true });
+            };
+
             switch (result) {
                 .parse_error => {
                     try testing.expect(false);
                 },
                 .success => |template| {
-                    template.deinit(testing.allocator);
+                    defer template.deinit(testing.allocator);
+                    try testing.expectEqual(@as(usize, 2), template.elements.len);
+                    try testing.expectEqual(Element.Type.interpolation, template.elements[0]);
+                    try testing.expectEqual(Element.Type.static_text, template.elements[1]);
+                    try testing.expectEqualStrings("hello", template.elements[0].interpolation[0]);
+                    try testing.expectEqualStrings("world", template.elements[1].static_text);
                 },
             }
         }
 
+        test "parseComptime API" {
+            const template = mustache.parseComptime("{{hello}}world", .{}, .{});
+            try testing.expectEqual(@as(usize, 2), template.elements.len);
+            try testing.expectEqual(Element.Type.interpolation, template.elements[0]);
+            try testing.expectEqual(Element.Type.static_text, template.elements[1]);
+            try testing.expectEqualStrings("hello", template.elements[0].interpolation[0]);
+            try testing.expectEqualStrings("world", template.elements[1].static_text);
+        }
+
         test "parseFile API" {
-            var file_name = file_name: {
-                var tmp = testing.tmpDir(.{});
-                var file = try tmp.dir.createFile("parseFile.mustache", .{ .truncate = true });
-                defer file.close();
+            var result = result: {
+                var file_name = file_name: {
+                    var tmp = testing.tmpDir(.{});
+                    var file = try tmp.dir.createFile("parseFile.mustache", .{ .truncate = true });
+                    defer file.close();
 
-                try file.writeAll("{{hello}}world");
+                    try file.writeAll("{{hello}}world");
 
-                break :file_name try tmp.dir.realpathAlloc(testing.allocator, "parseFile.mustache");
+                    break :file_name try tmp.dir.realpathAlloc(testing.allocator, "parseFile.mustache");
+                };
+                defer testing.allocator.free(file_name);
+                break :result try parseFile(testing.allocator, file_name, .{}, .{});
             };
-            defer testing.allocator.free(file_name);
 
-            var result = try parseFile(testing.allocator, file_name, .{}, .{});
             switch (result) {
                 .parse_error => {
                     try testing.expect(false);
                 },
                 .success => |template| {
-                    template.deinit(testing.allocator);
+                    defer template.deinit(testing.allocator);
+                    try testing.expectEqual(@as(usize, 2), template.elements.len);
+                    try testing.expectEqual(Element.Type.interpolation, template.elements[0]);
+                    try testing.expectEqual(Element.Type.static_text, template.elements[1]);
+                    try testing.expectEqualStrings("hello", template.elements[0].interpolation[0]);
+                    try testing.expectEqualStrings("world", template.elements[1].static_text);
                 },
             }
         }

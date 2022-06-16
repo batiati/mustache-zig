@@ -34,5 +34,5 @@ ENV CODECOV_TOKEN=''
 
 CMD git clone "$REPO" repo && \
     cd repo && \
-    zig build test -Dtest-coverage && \
+    zig build test -Dtest-coverage -Dcomptime-tests=false && \
     codecov

@@ -1046,6 +1046,8 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
     };
 }
 
+const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
+
 test {
     _ = context;
     _ = map;
@@ -3979,7 +3981,7 @@ const tests = struct {
     }
 
     fn expectComptimeRender(comptime template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
-        if (mustache.options.comptime_tests_enabled) {
+        if (comptime_tests_enabled) {
             const allocator = testing.allocator;
 
             // Comptime template render
@@ -4021,7 +4023,7 @@ const tests = struct {
     }
 
     fn expectComptimeRenderPartials(comptime template_text: []const u8, comptime partials: anytype, data: anytype, expected: []const u8) anyerror!void {
-        if (mustache.options.comptime_tests_enabled) {
+        if (comptime_tests_enabled) {
             const allocator = testing.allocator;
             // Cached template render
             var comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
