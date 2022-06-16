@@ -44,10 +44,10 @@ pub fn TextPart(comptime options: TemplateOptions) type {
         } = .{},
 
         pub inline fn unRef(self: *Self, allocator: Allocator) void {
-            self.content.ref_counter.free(allocator);
+            self.content.ref_counter.unRef(allocator);
 
             if (self.indentation) |*indentation| {
-                indentation.ref_counter.free(allocator);
+                indentation.ref_counter.unRef(allocator);
             }
         }
 

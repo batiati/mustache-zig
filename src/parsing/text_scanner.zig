@@ -18,12 +18,12 @@ const parsing = @import("parsing.zig");
 const PartType = parsing.PartType;
 const DelimiterType = parsing.DelimiterType;
 const Delimiters = parsing.Delimiters;
-const FileReader = parsing.FileReader;
 const IndexBookmark = parsing.IndexBookmark;
 
 pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type {
     const RefCounter = ref_counter.RefCounter(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
+    const FileReader = parsing.FileReader(options);
 
     const allow_lambdas = options.features.lambdas == .Enabled;
 
@@ -52,7 +52,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             };
         };
 
-        content: []const u8 = &.{},
+        content: []const u8,
         index: u32 = 0,
         block_index: u32 = 0,
         state: State = .{ .matching_open = 0 },
@@ -64,7 +64,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
         stream: switch (options.source) {
             .Stream => struct {
-                reader: *FileReader(options),
+                reader: FileReader,
                 ref_counter: RefCounter = .{},
                 preserve_bookmark: ?u32 = null,
             },
@@ -93,7 +93,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
                     @setEvalBranchQuota(999999);
                     const allocator: Allocator = undefined;
-                    var scanner = Self.init(allocator, comptime_loaded.template_text) catch unreachable;
+                    var scanner = Self.init(comptime_loaded.template_text) catch unreachable;
                     scanner.setDelimiters(comptime_loaded.default_delimiters) catch {
                         // TODO
                         unreachable;
@@ -132,23 +132,24 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
         /// Should be the template content if source == .String
         /// or the absolute path if source == .File
-        pub fn init(allocator: Allocator, template: []const u8) if (options.source == .String) Allocator.Error!Self else FileReader(options).Error!Self {
+        pub fn init(template: []const u8) if (options.source == .String) error{}!Self else FileReader.OpenError!Self {
             return switch (options.source) {
                 .String => Self{
                     .content = template,
                 },
                 .Stream => Self{
+                    .content = &.{},
                     .stream = .{
-                        .reader = try FileReader(options).initFromPath(allocator, template),
+                        .reader = try FileReader.init(template),
                     },
                 },
             };
         }
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            if (options.source == .Stream) {
-                self.stream.ref_counter.free(allocator);
-                self.stream.reader.deinit(allocator);
+            if (comptime options.source == .Stream) {
+                self.stream.ref_counter.unRef(allocator);
+                self.stream.reader.deinit();
             }
         }
 
@@ -161,7 +162,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
         }
 
         fn requestContent(self: *Self, allocator: Allocator) !void {
-            if (options.source == .Stream) {
+            if (comptime options.source == .Stream) {
                 if (!self.stream.reader.finished()) {
 
                     //
@@ -199,9 +200,9 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                     const prepend = self.content[adjust.off_set..];
 
                     const read = try self.stream.reader.read(allocator, prepend);
-                    errdefer read.ref_counter.free(allocator);
+                    errdefer read.ref_counter.unRef(allocator);
 
-                    self.stream.ref_counter.free(allocator);
+                    self.stream.ref_counter.unRef(allocator);
                     self.stream.ref_counter = read.ref_counter;
 
                     self.content = read.slice;
@@ -228,7 +229,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             while (self.index < self.content.len or
                 (options.source == .Stream and !self.stream.reader.finished())) : (self.index += 1)
             {
-                if (options.source == .Stream) {
+                if (comptime options.source == .Stream) {
                     // Request a new slice if near to the end
                     const look_ahead = self.index + self.delimiter_max_size + 1;
                     if (look_ahead >= self.content.len) {
@@ -293,7 +294,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             }
         }
 
-        inline fn produceOpen(self: *Self, trimmer: Trimmer, char: u8) ?TextPart {
+        fn produceOpen(self: *Self, trimmer: Trimmer, char: u8) ?TextPart {
             const skip_current = switch (char) {
                 @enumToInt(PartType.comments),
                 @enumToInt(PartType.section),
@@ -367,7 +368,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             } else null;
         }
 
-        inline fn produceClose(self: *Self, trimmer: Trimmer, char: u8) TextPart {
+        fn produceClose(self: *Self, trimmer: Trimmer, char: u8) TextPart {
             const triple_mustache_close = '}';
             const Mark = struct { block_index: u32, skip_current: bool };
 
@@ -415,7 +416,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             };
         }
 
-        inline fn produceEos(self: *Self, trimmer: Trimmer) ?TextPart {
+        fn produceEos(self: *Self, trimmer: Trimmer) ?TextPart {
             defer self.state = .eos;
 
             switch (self.state) {
@@ -539,7 +540,7 @@ test "basic tests" {
 
     const allocator = testing.allocator;
 
-    var reader = try TestingTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
@@ -577,7 +578,7 @@ test "custom tags" {
 
     const allocator = testing.allocator;
 
-    var reader = try TestingTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
@@ -611,7 +612,7 @@ test "EOF" {
 
     const allocator = testing.allocator;
 
-    var reader = try TestingTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});
@@ -629,7 +630,7 @@ test "EOF custom tags" {
 
     const allocator = testing.allocator;
 
-    var reader = try TestingTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{ .starting_delimiter = "[", .ending_delimiter = "]" });
@@ -653,7 +654,7 @@ test "bookmarks" {
     var nodes: TestingNode.List = .{};
     defer nodes.deinit(allocator);
 
-    var reader = try TestingTextScanner.init(allocator, content);
+    var reader = try TestingTextScanner.init(content);
     defer reader.deinit(allocator);
 
     try reader.setDelimiters(.{});

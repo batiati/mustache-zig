@@ -24,12 +24,13 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
             const LeftLFState = union(enum) { Scanning, NotFound, Found: u32 };
             const RightLFState = union(enum) { Waiting, NotFound, Found: u32 };
 
-            // Line break and whitespace characters
-            const CR = '\r';
-            const LF = '\n';
-            const TAB = '\t';
-            const SPACE = ' ';
-            const NULL = '\x00';
+            const Chars = struct {
+                pub const cr = '\r';
+                pub const lf = '\n';
+                pub const tab = '\t';
+                pub const space = ' ';
+                pub const null_char = '\x00';
+            };
 
             text_scanner: *const TextScanner,
             has_pending_cr: bool = false,
@@ -46,13 +47,13 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
                 const index = self.text_scanner.index;
                 const char = self.text_scanner.content[index];
 
-                if (char != LF) {
-                    self.has_pending_cr = (char == CR);
+                if (char != Chars.lf) {
+                    self.has_pending_cr = (char == Chars.cr);
                 }
 
                 switch (char) {
-                    CR, SPACE, TAB, NULL => {},
-                    LF => {
+                    Chars.cr, Chars.space, Chars.tab, Chars.null_char => {},
+                    Chars.lf => {
                         assert(index >= self.text_scanner.block_index);
                         const lf_index = @intCast(u32, index - self.text_scanner.block_index);
 
@@ -150,9 +151,9 @@ const TestingTrimmingIndex = parsing.TrimmingIndex(testing_options);
 test "Line breaks" {
     const allocator = testing.allocator;
 
-    //                                                           2      7
-    //                                                           ↓      ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "  \nABC\n  ");
+    //                                                2      7
+    //                                                ↓      ↓
+    var text_scanner = try TestingTextScanner.init("  \nABC\n  ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -173,9 +174,9 @@ test "Line breaks" {
 test "Line breaks \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                             3        9
-    //                                                             ↓        ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "  \r\nABC\r\n  ");
+    //                                                  3        9
+    //                                                  ↓        ↓
+    var text_scanner = try TestingTextScanner.init("  \r\nABC\r\n  ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -196,9 +197,9 @@ test "Line breaks \\r\\n" {
 test "Multiple line breaks" {
     const allocator = testing.allocator;
 
-    //                                                           2           11
-    //                                                           ↓           ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "  \nABC\nABC\n  ");
+    //                                                2           11
+    //                                                ↓           ↓
+    var text_scanner = try TestingTextScanner.init("  \nABC\nABC\n  ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -230,9 +231,9 @@ test "Multiple line breaks" {
 test "Multiple line breaks \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                             3               14
-    //                                                             ↓               ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "  \r\nABC\r\nABC\r\n  ");
+    //                                                  3               14
+    //                                                  ↓               ↓
+    var text_scanner = try TestingTextScanner.init("  \r\nABC\r\nABC\r\n  ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -263,9 +264,9 @@ test "Multiple line breaks \\r\\n" {
 
 test "Whitespace text trimming" {
     const allocator = testing.allocator;
-    //                                                           2 3
-    //                                                           ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "  \n  ");
+    //                                                2 3
+    //                                                ↓ ↓
+    var text_scanner = try TestingTextScanner.init("  \n  ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -297,9 +298,9 @@ test "Whitespace text trimming" {
 test "Whitespace text trimming \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                             3 4
-    //                                                             ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "  \r\n  ");
+    //                                                  3 4
+    //                                                  ↓ ↓
+    var text_scanner = try TestingTextScanner.init("  \r\n  ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -321,9 +322,9 @@ test "Whitespace text trimming \\r\\n" {
 test "Tabs text trimming" {
     const allocator = testing.allocator;
 
-    //                                                           2   3
-    //                                                           ↓   ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "\t\t\n\t\t");
+    //                                                2   3
+    //                                                ↓   ↓
+    var text_scanner = try TestingTextScanner.init("\t\t\n\t\t");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -345,9 +346,9 @@ test "Tabs text trimming" {
 test "Whitespace left trimming" {
     const allocator = testing.allocator;
 
-    //                                                           2 EOF
-    //                                                           ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "  \n");
+    //                                                2 EOF
+    //                                                ↓ ↓
+    var text_scanner = try TestingTextScanner.init("  \n");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -369,9 +370,9 @@ test "Whitespace left trimming" {
 test "Whitespace left trimming \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                             3 EOF
-    //                                                             ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "  \r\n");
+    //                                                  3 EOF
+    //                                                  ↓ ↓
+    var text_scanner = try TestingTextScanner.init("  \r\n");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -393,9 +394,9 @@ test "Whitespace left trimming \\r\\n" {
 test "Tabs left trimming" {
     const allocator = testing.allocator;
 
-    //                                                             2 EOF
-    //                                                             ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "\t\t\n");
+    //                                                  2 EOF
+    //                                                  ↓ ↓
+    var text_scanner = try TestingTextScanner.init("\t\t\n");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -417,9 +418,9 @@ test "Tabs left trimming" {
 test "Whitespace right trimming" {
     const allocator = testing.allocator;
 
-    //                                                         0 1
-    //                                                         ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "\n  ");
+    //                                              0 1
+    //                                              ↓ ↓
+    var text_scanner = try TestingTextScanner.init("\n  ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -441,9 +442,9 @@ test "Whitespace right trimming" {
 test "Whitespace right trimming \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                          1 2
-    //                                                          ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "\r\n  ");
+    //                                               1 2
+    //                                               ↓ ↓
+    var text_scanner = try TestingTextScanner.init("\r\n  ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -465,9 +466,9 @@ test "Whitespace right trimming \\r\\n" {
 test "Tabs right trimming" {
     const allocator = testing.allocator;
 
-    //                                                         0 1
-    //                                                         ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "\n\t\t");
+    //                                              0 1
+    //                                              ↓ ↓
+    var text_scanner = try TestingTextScanner.init("\n\t\t");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -489,9 +490,9 @@ test "Tabs right trimming" {
 test "Single line break" {
     const allocator = testing.allocator;
 
-    //                                                         0 EOF
-    //                                                         ↓ ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "\n");
+    //                                              0 EOF
+    //                                              ↓ ↓
+    var text_scanner = try TestingTextScanner.init("\n");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -513,9 +514,9 @@ test "Single line break" {
 test "Single line break \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                         0   EOF
-    //                                                         ↓   ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "\r\n");
+    //                                              0   EOF
+    //                                              ↓   ↓
+    var text_scanner = try TestingTextScanner.init("\r\n");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -536,7 +537,7 @@ test "Single line break \\r\\n" {
 test "No trimming" {
     const allocator = testing.allocator;
 
-    var text_scanner = try TestingTextScanner.init(allocator, "   ABC\nABC   ");
+    var text_scanner = try TestingTextScanner.init("   ABC\nABC   ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -553,9 +554,9 @@ test "No trimming" {
 test "No trimming, no whitespace" {
     const allocator = testing.allocator;
 
-    //                                                            EOF
-    //                                                            ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "|\n");
+    //                                                 EOF
+    //                                                 ↓
+    var text_scanner = try TestingTextScanner.init("|\n");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -576,9 +577,9 @@ test "No trimming, no whitespace" {
 test "No trimming, no whitespace \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                              EOF
-    //                                                              ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "|\r\n");
+    //                                                   EOF
+    //                                                   ↓
+    var text_scanner = try TestingTextScanner.init("|\r\n");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -599,7 +600,7 @@ test "No trimming, no whitespace \\r\\n" {
 test "No trimming \\r\\n" {
     const allocator = testing.allocator;
 
-    var text_scanner = try TestingTextScanner.init(allocator, "   ABC\r\nABC   ");
+    var text_scanner = try TestingTextScanner.init("   ABC\r\nABC   ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -618,7 +619,7 @@ test "No whitespace" {
 
     //
     //
-    var text_scanner = try TestingTextScanner.init(allocator, "ABC");
+    var text_scanner = try TestingTextScanner.init("ABC");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -635,9 +636,9 @@ test "No whitespace" {
 test "Trimming left only" {
     const allocator = testing.allocator;
 
-    //                                                            3
-    //                                                            ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "   \nABC   ");
+    //                                                 3
+    //                                                 ↓
+    var text_scanner = try TestingTextScanner.init("   \nABC   ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -656,9 +657,9 @@ test "Trimming left only" {
 test "Trimming left only \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                              4
-    //                                                              ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "   \r\nABC   ");
+    //                                                   4
+    //                                                   ↓
+    var text_scanner = try TestingTextScanner.init("   \r\nABC   ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -677,9 +678,9 @@ test "Trimming left only \\r\\n" {
 test "Trimming right only" {
     const allocator = testing.allocator;
 
-    //                                                                7
-    //                                                                ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "   ABC\n   ");
+    //                                                     7
+    //                                                     ↓
+    var text_scanner = try TestingTextScanner.init("   ABC\n   ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -699,9 +700,9 @@ test "Trimming right only" {
 test "Trimming right only \\r\\n" {
     const allocator = testing.allocator;
 
-    //                                                                  8
-    //                                                                  ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "   ABC\r\n   ");
+    //                                                       8
+    //                                                       ↓
+    var text_scanner = try TestingTextScanner.init("   ABC\r\n   ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -721,9 +722,9 @@ test "Trimming right only \\r\\n" {
 test "Only whitespace" {
     const allocator = testing.allocator;
 
-    //                                                        0
-    //                                                        ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "   ");
+    //                                             0
+    //                                             ↓
+    var text_scanner = try TestingTextScanner.init("   ");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});
@@ -744,9 +745,9 @@ test "Only whitespace" {
 test "Only tabs" {
     const allocator = testing.allocator;
 
-    //                                                         0
-    //                                                         ↓
-    var text_scanner = try TestingTextScanner.init(allocator, "\t\t\t");
+    //                                              0
+    //                                              ↓
+    var text_scanner = try TestingTextScanner.init("\t\t\t");
     defer text_scanner.deinit(allocator);
 
     try text_scanner.setDelimiters(.{});

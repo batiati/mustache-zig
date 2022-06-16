@@ -31,7 +31,7 @@ const RefCounterImpl = struct {
 
     state: ?*State = null,
 
-    pub fn init(allocator: Allocator, buffer: []const u8) Allocator.Error!Self {
+    pub fn create(allocator: Allocator, buffer: []const u8) Allocator.Error!Self {
         var state = try allocator.create(State);
         state.* = .{
             .counter = 1,
@@ -51,7 +51,7 @@ const RefCounterImpl = struct {
         }
     }
 
-    pub fn free(self: *Self, allocator: Allocator) void {
+    pub fn unRef(self: *Self, allocator: Allocator) void {
         if (self.state) |state| {
             assert(state.counter != 0);
             self.state = null;
@@ -80,7 +80,7 @@ const NoOpRefCounter = struct {
         return null_ref;
     }
 
-    pub inline fn free(self: Self, allocator: Allocator) void {
+    pub inline fn unRef(self: Self, allocator: Allocator) void {
         _ = self;
         _ = allocator;
     }
@@ -97,7 +97,7 @@ test "ref and free" {
     // No defer here, should be freed by the ref_counter
     const some_text = try allocator.dupe(u8, "some text");
 
-    var counter_1 = try RefCounter(testing_options).init(allocator, some_text);
+    var counter_1 = try RefCounter(testing_options).create(allocator, some_text);
     var counter_2 = counter_1.ref();
     var counter_3 = counter_2.ref();
 
@@ -110,7 +110,7 @@ test "ref and free" {
     try testing.expect(counter_3.state != null);
     try testing.expect(counter_3.state.?.counter == 3);
 
-    counter_1.free(allocator);
+    counter_1.unRef(allocator);
 
     try testing.expect(counter_1.state == null);
 
@@ -120,7 +120,7 @@ test "ref and free" {
     try testing.expect(counter_3.state != null);
     try testing.expect(counter_3.state.?.counter == 2);
 
-    counter_2.free(allocator);
+    counter_2.unRef(allocator);
 
     try testing.expect(counter_1.state == null);
     try testing.expect(counter_2.state == null);
@@ -128,7 +128,7 @@ test "ref and free" {
     try testing.expect(counter_3.state != null);
     try testing.expect(counter_3.state.?.counter == 1);
 
-    counter_3.free(allocator);
+    counter_3.unRef(allocator);
 
     try testing.expect(counter_1.state == null);
     try testing.expect(counter_2.state == null);

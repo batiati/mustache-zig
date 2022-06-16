@@ -24,27 +24,17 @@ pub fn FileReader(comptime options: TemplateOptions) type {
     return struct {
         const Self = @This();
 
-        const OpenError = std.fs.File.OpenError;
-        const ReadError = std.fs.File.ReadError;
-        const FileError = OpenError || ReadError;
-
-        pub const Error = Allocator.Error || FileError;
+        pub const OpenError = std.fs.File.OpenError;
+        pub const Error = Allocator.Error || std.fs.File.ReadError;
 
         file: File,
         eof: bool = false,
 
-        pub fn initFromPath(allocator: Allocator, absolute_path: []const u8) Error!*Self {
+        pub fn init(absolute_path: []const u8) OpenError!Self {
             var file = try std.fs.openFileAbsolute(absolute_path, .{});
-            return Self.init(allocator, file);
-        }
-
-        pub fn init(allocator: Allocator, file: File) Allocator.Error!*Self {
-            var self = try allocator.create(Self);
-            self.* = .{
+            return Self{
                 .file = file,
             };
-
-            return self;
         }
 
         pub fn read(self: *Self, allocator: Allocator, prepend: []const u8) Error!RefCountedSlice {
@@ -69,25 +59,24 @@ pub fn FileReader(comptime options: TemplateOptions) type {
 
             return RefCountedSlice{
                 .slice = buffer,
-                .ref_counter = try RefCounter.init(allocator, buffer),
+                .ref_counter = try RefCounter.create(allocator, buffer),
             };
         }
 
-        pub fn deinit(self: *Self, allocator: Allocator) void {
+        pub fn deinit(self: *Self) void {
             self.file.close();
-            allocator.destroy(self);
         }
 
-        pub fn finished(self: *Self) bool {
+        pub inline fn finished(self: *Self) bool {
             return self.eof;
         }
     };
 }
 
-test "StreamReader.Slices" {
+test "FileReader.Slices" {
     const allocator = testing.allocator;
 
-    // Test the StreamReader slicing mechanism
+    // Test the FileReader slicing mechanism
     // In a real use case, the read_buffer_len is much larger than the amount needed to produce a token
     // So we can parse many tokens on a single read, and read a new slice containing only the last unparsed bytes
     //
@@ -105,7 +94,7 @@ test "StreamReader.Slices" {
     const path = try std.fs.selfExeDirPathAlloc(allocator);
     defer allocator.free(path);
 
-    const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "stream_reader_slices.tmp" });
+    const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "file_reader_slices.tmp" });
     defer allocator.free(absolute_file_path);
 
     var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
@@ -113,8 +102,8 @@ test "StreamReader.Slices" {
     file.close();
     defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
 
-    var reader = try SlicedReader.initFromPath(allocator, absolute_file_path);
-    defer reader.deinit(allocator);
+    var reader = try SlicedReader.init(absolute_file_path);
+    defer reader.deinit();
 
     var slice: []const u8 = &.{};
     try testing.expectEqualStrings("", slice);
@@ -122,7 +111,7 @@ test "StreamReader.Slices" {
     // First read
     // We got a slice with "read_buffer_len" size to parse
     var result_1 = try reader.read(allocator, slice);
-    defer result_1.ref_counter.free(allocator);
+    defer result_1.ref_counter.unRef(allocator);
     slice = result_1.slice;
 
     try testing.expectEqual(false, reader.finished());
@@ -134,7 +123,7 @@ test "StreamReader.Slices" {
     // We need more data, the previous slice was parsed until the block_index = 2,
     // so we expect the next read to return the remaining bytes plus new 5 bytes read
     var result_2 = try reader.read(allocator, slice[2..]);
-    defer result_2.ref_counter.free(allocator);
+    defer result_2.ref_counter.unRef(allocator);
     slice = result_2.slice;
 
     try testing.expectEqual(false, reader.finished());
@@ -144,7 +133,7 @@ test "StreamReader.Slices" {
     // We parsed a next token '}}' at block_index = 6,
     // so we need another slice
     var result_3 = try reader.read(allocator, slice[6..]);
-    defer result_3.ref_counter.free(allocator);
+    defer result_3.ref_counter.unRef(allocator);
     slice = result_3.slice;
 
     try testing.expectEqual(false, reader.finished());
@@ -153,7 +142,7 @@ test "StreamReader.Slices" {
     // Last read,
     // Nothing was parsed,
     var result_4 = try reader.read(allocator, slice);
-    defer result_4.ref_counter.free(allocator);
+    defer result_4.ref_counter.unRef(allocator);
     slice = result_4.slice;
 
     try testing.expectEqual(true, reader.finished());
@@ -161,7 +150,7 @@ test "StreamReader.Slices" {
 
     // After that, EOF
     var result_5 = try reader.read(allocator, slice);
-    defer result_5.ref_counter.free(allocator);
+    defer result_5.ref_counter.unRef(allocator);
     slice = result_5.slice;
 
     try testing.expectEqual(true, reader.finished());

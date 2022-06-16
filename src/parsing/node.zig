@@ -39,10 +39,10 @@ pub fn Node(comptime options: TemplateOptions) type {
         } else void = if (allow_lambdas) .{} else {},
 
         pub fn unRef(self: *Self, allocator: Allocator) void {
-            if (options.isRefCounted()) {
+            if (comptime options.isRefCounted()) {
                 self.text_part.unRef(allocator);
                 if (allow_lambdas) {
-                    self.inner_text.ref_counter.free(allocator);
+                    self.inner_text.ref_counter.unRef(allocator);
                 }
             }
         }
@@ -91,7 +91,7 @@ pub fn Node(comptime options: TemplateOptions) type {
                 if (text_part.trimRight()) |*indentation| {
                     if (self.index == nodes.items.len - 1) {
                         // The last tag can't produce any meaningful indentation, so we discard it
-                        indentation.ref_counter.free(allocator);
+                        indentation.ref_counter.unRef(allocator);
                     } else {
                         var next_node = &nodes.items[self.index + 1];
                         next_node.text_part.indentation = indentation.*;
@@ -113,11 +113,12 @@ pub fn Node(comptime options: TemplateOptions) type {
         }
 
         pub fn getInnerText(self: *const Self) ?[]const u8 {
-            if (allow_lambdas) {
+            if (comptime allow_lambdas) {
                 if (self.inner_text.content) |node_inner_text| {
                     return node_inner_text;
                 }
             }
+
             return null;
         }
 

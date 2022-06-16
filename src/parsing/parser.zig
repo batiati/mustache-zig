@@ -16,7 +16,6 @@ const testing = std.testing;
 const parsing = @import("parsing.zig");
 const Delimiters = parsing.Delimiters;
 const PartType = parsing.PartType;
-const FileReader = parsing.FileReader;
 
 const ref_counter = @import("ref_counter.zig");
 
@@ -32,6 +31,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
         pub const Node = parsing.Node(options);
 
         const TextScanner = parsing.TextScanner(Node, options);
+        const FileReader = parsing.FileReader(options);
         const TextPart = Node.TextPart;
         const RefCounter = ref_counter.RefCounter(options);
         const comptime_count = if (is_comptime) TextScanner.ComptimeCounter.count() else {};
@@ -68,12 +68,12 @@ pub fn Parser(comptime options: TemplateOptions) type {
             last_static_text_node: ?u32 = null,
         },
 
-        pub fn init(gpa: Allocator, template: []const u8, delimiters: Delimiters) if (options.source == .String) Allocator.Error!Self else FileReader(options).Error!Self {
+        pub fn init(gpa: Allocator, template: []const u8, delimiters: Delimiters) if (options.source == .String) Allocator.Error!Self else FileReader.OpenError!Self {
             return Self{
                 .gpa = gpa,
                 .default_delimiters = delimiters,
                 .inner_state = .{
-                    .text_scanner = try TextScanner.init(gpa, template),
+                    .text_scanner = try TextScanner.init(template),
                 },
             };
         }
