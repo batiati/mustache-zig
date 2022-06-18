@@ -119,7 +119,7 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
 
             var out_writer = self.data_render.out_writer;
             var list = std.ArrayList(u8).init(allocator);
-            self.data_render.out_writer = .{ .Buffer = list.writer() };
+            self.data_render.out_writer = .{ .buffer = list.writer() };
 
             defer {
                 self.data_render.out_writer = out_writer;

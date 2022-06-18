@@ -21,15 +21,15 @@ pub const TemplateOptions = struct {
     load_mode: TemplateLoadMode = .runtime_loaded,
 
     pub fn isRefCounted(self: @This()) bool {
-        return self.source == .Stream;
+        return self.source == .file;
     }
 
     pub fn copyStrings(self: @This()) bool {
         return switch (self.output) {
-            .Render => false,
-            .Parse => switch (self.source) {
-                .String => |option| option.copy_strings,
-                .Stream => true,
+            .render => false,
+            .cache => switch (self.source) {
+                .string => |option| option.copy_strings,
+                .file => true,
             },
         };
     }
@@ -46,14 +46,14 @@ pub const TemplateLoadMode = union(enum) {
 pub const TemplateSource = union(enum) {
 
     /// Loads a template from string
-    String: struct {
+    string: struct {
 
         /// Use 'false' if the source string is static or lives enough
         copy_strings: bool = true,
     },
 
     /// Loads a template from a file or stream
-    Stream: struct {
+    file: struct {
 
         /// Define the buffer size for reading the stream
         read_buffer_size: usize = 4 * 1024,
@@ -65,11 +65,11 @@ pub const ParserOutput = enum {
     /// Parses a template
     /// Use this option for validation and to store a template for future rendering
     /// This option speeds up the rendering process when the same template is rendered many times
-    Parse,
+    cache,
 
     /// Parses just enough to render directly, without storing the template.
     /// This option saves memory.
-    Render,
+    render,
 };
 
 pub const ParseTextOptions = struct {
@@ -108,17 +108,17 @@ pub const Features = struct {
     preseve_line_breaks_and_indentation: bool = true,
 
     /// Lambda expansion support
-    lambdas: Lambdas = .{ .Enabled = .{} },
+    lambdas: Lambdas = .{ .enabled = .{} },
 };
 
 pub const Lambdas = union(enum) {
 
     /// Use this option if your data source does not implement lambda functions
     /// Disabling lambda support saves memory and speeds up the parsing process
-    Disabled,
+    disabled,
 
     /// Use this option to support lambda functions in your data sources
-    Enabled: struct {
+    enabled: struct {
 
         /// Lambdas can expand to new tags, including another lambda
         /// Defines the max recursion depth to avoid infinite recursion when evaluating lambdas
@@ -128,36 +128,36 @@ pub const Lambdas = union(enum) {
 };
 
 pub const ContextMisses = enum {
-    Empty,
-    Error,
+    empty,
+    fail,
 };
 
-pub const RenderTemplateOptions = struct {
+pub const RenderFromTemplateOptions = struct {
 
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
-    context_misses: ContextMisses = if (builtin.mode == .Debug) .Error else .Empty,
+    context_misses: ContextMisses = if (builtin.mode == .Debug) .fail else .empty,
 };
 
-pub const RenderTextOptions = struct {
+pub const RenderFromStringOptions = struct {
 
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
-    context_misses: ContextMisses = if (builtin.mode == .Debug) .Error else .Empty,
+    context_misses: ContextMisses = if (builtin.mode == .Debug) .fail else .empty,
 
     /// Those options affect both performance and supported Mustache features.
     /// Defaults to full-spec compatible.
     features: Features = .{},
 };
 
-pub const RenderFileOptions = struct {
+pub const RenderFromFileOptions = struct {
 
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
-    context_misses: ContextMisses = if (builtin.mode == .Debug) .Error else .Empty,
+    context_misses: ContextMisses = if (builtin.mode == .Debug) .fail else .empty,
 
     /// Define the buffer size for reading the stream
     read_buffer_size: usize = 4 * 1024,
@@ -168,7 +168,7 @@ pub const RenderFileOptions = struct {
 };
 
 pub const RenderOptions = union(enum) {
-    Template: RenderTemplateOptions,
-    Text: RenderTextOptions,
-    File: RenderFileOptions,
+    template: RenderFromTemplateOptions,
+    string: RenderFromStringOptions,
+    file: RenderFromFileOptions,
 };

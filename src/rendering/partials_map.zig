@@ -18,8 +18,8 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
         pub const options: RenderOptions = options;
 
         pub const Template = switch (options) {
-            .Template => mustache.Template,
-            .Text, .File => []const u8,
+            .template => mustache.Template,
+            .string, .file => []const u8,
         };
 
         pub fn isEmpty() bool {
@@ -29,11 +29,11 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
             }
         }
 
-        allocator: if (options != .Template and !isEmpty()) Allocator else void,
+        allocator: if (options != .template and !isEmpty()) Allocator else void,
         partials: TPartials,
 
         pub usingnamespace switch (options) {
-            .Template => struct {
+            .template => struct {
                 pub fn init(partials: TPartials) Self {
                     return .{
                         .allocator = {},
@@ -41,7 +41,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
                     };
                 }
             },
-            .Text, .File => struct {
+            .string, .file => struct {
                 pub fn init(allocator: Allocator, partials: TPartials) Self {
                     return .{
                         .allocator = if (comptime isEmpty()) {} else allocator,
@@ -182,7 +182,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) ty
 test "Map single tuple" {
     var data = .{ "hello", "{{hello}}world" };
 
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
@@ -195,7 +195,7 @@ test "Map single tuple" {
 
 test "Map empty tuple" {
     var data = .{};
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
     try testing.expect(map.get("wrong") == null);
@@ -203,7 +203,7 @@ test "Map empty tuple" {
 
 test "Map void" {
     var data = {};
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
     try testing.expect(map.get("wrong") == null);
@@ -215,7 +215,7 @@ test "Map multiple tuple" {
         .{ "hi", "{{hi}}there" },
     };
 
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
@@ -238,7 +238,7 @@ test "Map array" {
         .{ "hi", "{{hi}}there" },
     };
 
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
@@ -261,7 +261,7 @@ test "Map ref array" {
         .{ "hi", "{{hi}}there" },
     };
 
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
@@ -284,7 +284,7 @@ test "Map slice" {
     };
     const data = array[0..];
 
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
@@ -306,7 +306,7 @@ test "Map hashmap" {
     try data.put("hello", "{{hello}}world");
     try data.put("hi", "{{hi}}there");
 
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 

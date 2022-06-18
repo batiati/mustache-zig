@@ -141,8 +141,8 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
 }
 
 const testing_options = TemplateOptions{
-    .source = .{ .String = .{} },
-    .output = .Render,
+    .source = .{ .string = .{} },
+    .output = .render,
 };
 const Node = parsing.Node(testing_options);
 const TestingTextScanner = parsing.TextScanner(Node, testing_options);

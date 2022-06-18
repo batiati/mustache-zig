@@ -478,10 +478,10 @@ const struct_tests = struct {
         return person_2;
     }
 
-    const dummy_options = RenderOptions{ .Text = .{} };
+    const dummy_options = RenderOptions{ .string = .{} };
 
     const DummyPartialsMap = map.PartialsMap(void, dummy_options);
-    const DummyParser = @import("../parsing/parser.zig").Parser(.{ .source = .{ .String = .{ .copy_strings = false } }, .output = .Render, .load_mode = .runtime_loaded });
+    const DummyParser = @import("../parsing/parser.zig").Parser(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
     const dummy_map = DummyPartialsMap.init({});
 
     fn expectPath(allocator: Allocator, path: []const u8) !Element.Path {
@@ -511,7 +511,7 @@ const struct_tests = struct {
 
         var data_render = RenderEngine.DataRender{
             .stack = &stack,
-            .out_writer = .{ .Writer = writer },
+            .out_writer = .{ .writer = writer },
             .partials_map = undefined,
             .indentation_queue = undefined,
             .template_options = {},

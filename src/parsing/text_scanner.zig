@@ -25,7 +25,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
     const TrimmingIndex = parsing.TrimmingIndex(options);
     const FileReader = parsing.FileReader(options);
 
-    const allow_lambdas = options.features.lambdas == .Enabled;
+    const allow_lambdas = options.features.lambdas == .enabled;
 
     return struct {
         const Self = @This();
@@ -62,14 +62,11 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
         delimiters: Delimiters = undefined,
         nodes: *const Node.List = undefined,
 
-        stream: switch (options.source) {
-            .Stream => struct {
-                reader: FileReader,
-                ref_counter: RefCounter = .{},
-                preserve_bookmark: ?u32 = null,
-            },
-            .String => void,
-        } = undefined,
+        file: if (options.source == .file) struct {
+            reader: FileReader,
+            ref_counter: RefCounter = .{},
+            preserve_bookmark: ?u32 = null,
+        } else void = undefined,
 
         bookmark: if (allow_lambdas) struct {
             node_index: ?u32 = null,
@@ -130,16 +127,16 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             }
         };
 
-        /// Should be the template content if source == .String
+        /// Should be the template content if source == .string
         /// or the absolute path if source == .File
-        pub fn init(template: []const u8) if (options.source == .String) error{}!Self else FileReader.OpenError!Self {
+        pub fn init(template: []const u8) if (options.source == .string) error{}!Self else FileReader.OpenError!Self {
             return switch (options.source) {
-                .String => Self{
+                .string => Self{
                     .content = template,
                 },
-                .Stream => Self{
+                .file => Self{
                     .content = &.{},
-                    .stream = .{
+                    .file = .{
                         .reader = try FileReader.init(template),
                     },
                 },
@@ -147,9 +144,9 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
         }
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            if (comptime options.source == .Stream) {
-                self.stream.ref_counter.unRef(allocator);
-                self.stream.reader.deinit();
+            if (comptime options.source == .file) {
+                self.file.ref_counter.unRef(allocator);
+                self.file.reader.deinit();
             }
         }
 
@@ -162,8 +159,8 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
         }
 
         fn requestContent(self: *Self, allocator: Allocator) !void {
-            if (comptime options.source == .Stream) {
-                if (!self.stream.reader.finished()) {
+            if (comptime options.source == .file) {
+                if (!self.file.reader.finished()) {
 
                     //
                     // Requesting a new buffer must preserve some parts of the current slice that are still needed
@@ -173,7 +170,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                         // bookmark.last_starting_mark: index of the last starting mark '{{', used to determine the inner_text between two tags
                         const last_index = if (self.bookmark.node_index == null) self.block_index else std.math.min(self.block_index, self.bookmark.last_starting_mark);
 
-                        if (self.stream.preserve_bookmark) |preserve| {
+                        if (self.file.preserve_bookmark) |preserve| {
 
                             // Only when reading from Stream
                             // stream.preserve_bookmark: is the index of the pending bookmark
@@ -199,11 +196,11 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
                     const prepend = self.content[adjust.off_set..];
 
-                    const read = try self.stream.reader.read(allocator, prepend);
+                    const read = try self.file.reader.read(allocator, prepend);
                     errdefer read.ref_counter.unRef(allocator);
 
-                    self.stream.ref_counter.unRef(allocator);
-                    self.stream.ref_counter = read.ref_counter;
+                    self.file.ref_counter.unRef(allocator);
+                    self.file.ref_counter = read.ref_counter;
 
                     self.content = read.slice;
                     self.index -= adjust.off_set;
@@ -215,7 +212,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                             self.bookmark.last_starting_mark -= adjust.off_set;
                         }
 
-                        self.stream.preserve_bookmark = adjust.preserve;
+                        self.file.preserve_bookmark = adjust.preserve;
                     }
                 }
             }
@@ -227,9 +224,9 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             self.index = self.block_index;
             var trimmer = Trimmer.init(self);
             while (self.index < self.content.len or
-                (options.source == .Stream and !self.stream.reader.finished())) : (self.index += 1)
+                (options.source == .file and !self.file.reader.finished())) : (self.index += 1)
             {
-                if (comptime options.source == .Stream) {
+                if (comptime options.source == .file) {
                     // Request a new slice if near to the end
                     const look_ahead = self.index + self.delimiter_max_size + 1;
                     if (look_ahead >= self.content.len) {
@@ -355,7 +352,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                 .is_stand_alone = PartType.canBeStandAlone(.static_text),
                 .content = .{
                     .slice = tail,
-                    .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                    .ref_counter = if (options.source == .file) self.file.ref_counter.ref() else .{},
                 },
                 .source = .{
                     .lin = self.start_pos.lin,
@@ -403,7 +400,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                 .is_stand_alone = PartType.canBeStandAlone(self.state.produce_close),
                 .content = .{
                     .slice = tail,
-                    .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                    .ref_counter = if (options.source == .file) self.file.ref_counter.ref() else .{},
                 },
                 .source = .{
                     .lin = self.start_pos.lin,
@@ -429,7 +426,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                         .is_stand_alone = part_type.canBeStandAlone(),
                         .content = .{
                             .slice = tail,
-                            .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                            .ref_counter = if (options.source == .file) self.file.ref_counter.ref() else .{},
                         },
                         .source = .{
                             .lin = self.start_pos.lin,
@@ -450,7 +447,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                             .is_stand_alone = PartType.canBeStandAlone(.static_text),
                             .content = .{
                                 .slice = tail,
-                                .ref_counter = if (options.source == .Stream) self.stream.ref_counter.ref() else .{},
+                                .ref_counter = if (options.source == .file) self.file.ref_counter.ref() else .{},
                             },
                             .source = .{
                                 .lin = self.start_pos.lin,
@@ -476,11 +473,11 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                 };
 
                 self.bookmark.node_index = node.index;
-                if (options.source == .Stream) {
-                    if (self.stream.preserve_bookmark) |preserve| {
+                if (options.source == .file) {
+                    if (self.file.preserve_bookmark) |preserve| {
                         assert(preserve <= self.index);
                     } else {
-                        self.stream.preserve_bookmark = self.index;
+                        self.file.preserve_bookmark = self.index;
                     }
                 }
             }
@@ -494,8 +491,8 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
                     defer {
                         self.bookmark.node_index = bookmark.prev_node_index;
-                        if (options.source == .Stream and bookmark.prev_node_index == null) {
-                            self.stream.preserve_bookmark = null;
+                        if (options.source == .file and bookmark.prev_node_index == null) {
+                            self.file.preserve_bookmark = null;
                         }
                     }
 
@@ -525,8 +522,8 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 }
 
 const testing_options = TemplateOptions{
-    .source = .{ .String = .{} },
-    .output = .Render,
+    .source = .{ .string = .{} },
+    .output = .render,
 };
 const TestingNode = parsing.Node(testing_options);
 const TestingTextScanner = parsing.TextScanner(TestingNode, testing_options);

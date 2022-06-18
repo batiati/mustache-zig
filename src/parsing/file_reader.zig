@@ -14,8 +14,8 @@ const File = std.fs.File;
 
 pub fn FileReader(comptime options: TemplateOptions) type {
     const read_buffer_size = switch (options.source) {
-        .Stream => |stream| stream.read_buffer_size,
-        .String => return void,
+        .file => |file| file.read_buffer_size,
+        .string => return void,
     };
 
     const RefCounter = ref_counter.RefCounter(options);
@@ -81,7 +81,7 @@ test "FileReader.Slices" {
     // So we can parse many tokens on a single read, and read a new slice containing only the last unparsed bytes
     //
     // Just 5 chars in our test
-    const SlicedReader = FileReader(.{ .source = .{ .Stream = .{ .read_buffer_size = 5 } }, .output = .Parse });
+    const SlicedReader = FileReader(.{ .source = .{ .file = .{ .read_buffer_size = 5 } }, .output = .cache });
 
     //
     //                           Block index

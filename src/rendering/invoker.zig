@@ -1205,8 +1205,8 @@ const tests = struct {
         a_tuple: Tuple = Tuple{ 0, 0, 0 },
     };
 
-    const dummy_options = RenderOptions{ .Template = .{} };
-    const DummyParser = @import("../parsing/parser.zig").Parser(.{ .source = .{ .String = .{ .copy_strings = false } }, .output = .Render, .load_mode = .runtime_loaded });
+    const dummy_options = RenderOptions{ .template = .{} };
+    const DummyParser = @import("../parsing/parser.zig").Parser(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
     const DummyWriter = @TypeOf(std.io.null_writer);
     const DummyPartialsMap = map.PartialsMap(void, dummy_options);
     const DummyRenderEngine = rendering.RenderEngine(DummyWriter, DummyPartialsMap, dummy_options);

@@ -17,7 +17,7 @@ const IndexBookmark = parsing.IndexBookmark;
 pub fn Node(comptime options: TemplateOptions) type {
     const RefCounter = ref_counter.RefCounter(options);
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
-    const allow_lambdas = options.features.lambdas == .Enabled;
+    const allow_lambdas = options.features.lambdas == .enabled;
 
     return struct {
         const Self = @This();

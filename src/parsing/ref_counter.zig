@@ -87,8 +87,8 @@ const NoOpRefCounter = struct {
 };
 
 const testing_options = TemplateOptions{
-    .source = .{ .Stream = .{} },
-    .output = .Render,
+    .source = .{ .file = .{} },
+    .output = .render,
 };
 
 test "ref and free" {

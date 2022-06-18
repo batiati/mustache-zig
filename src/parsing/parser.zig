@@ -20,12 +20,12 @@ const PartType = parsing.PartType;
 const ref_counter = @import("ref_counter.zig");
 
 pub fn Parser(comptime options: TemplateOptions) type {
-    const allow_lambdas = options.features.lambdas == .Enabled;
+    const allow_lambdas = options.features.lambdas == .enabled;
     const copy_string = options.copyStrings();
     const is_comptime = options.load_mode == .comptime_loaded;
 
     return struct {
-        pub const LoadError = Allocator.Error || if (options.source == .Stream) std.fs.File.ReadError || std.fs.File.OpenError else error{};
+        pub const LoadError = Allocator.Error || if (options.source == .file) std.fs.File.ReadError || std.fs.File.OpenError else error{};
         pub const AbortError = error{ParserAbortedError};
 
         pub const Node = parsing.Node(options);
@@ -68,7 +68,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
             last_static_text_node: ?u32 = null,
         },
 
-        pub fn init(gpa: Allocator, template: []const u8, delimiters: Delimiters) if (options.source == .String) Allocator.Error!Self else FileReader.OpenError!Self {
+        pub fn init(gpa: Allocator, template: []const u8, delimiters: Delimiters) if (options.source == .string) Allocator.Error!Self else FileReader.OpenError!Self {
             return Self{
                 .gpa = gpa,
                 .default_delimiters = delimiters,
@@ -218,9 +218,9 @@ pub fn Parser(comptime options: TemplateOptions) type {
 
                         self.inner_state.last_static_text_node = current_node.index;
 
-                        // When options.output = .Render,
+                        // When options.output = .render,
                         // A stand-alone line in the root level indicates that the previous produced nodes can be rendered
-                        if (options.output == .Render) {
+                        if (options.output == .render) {
                             if (level == 0 and
                                 current_node.text_part.trimming.left != .PreserveWhitespaces and
                                 self.canProducePartialNodes())
@@ -293,7 +293,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
         }
 
         fn canProducePartialNodes(self: *const Self) bool {
-            if (options.output == .Render) {
+            if (options.output == .render) {
                 var nodes = &self.inner_state.nodes;
                 const min_nodes = 2;
                 if (nodes.items.len > min_nodes) {
@@ -372,7 +372,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                 }
             }
 
-            const elements = if (options.output == .Render or options.load_mode == .comptime_loaded) list.items else list.toOwnedSlice(self.gpa);
+            const elements = if (options.output == .render or options.load_mode == .comptime_loaded) list.items else list.toOwnedSlice(self.gpa);
             try render.render(elements);
         }
 
@@ -501,7 +501,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
 
 const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
 fn TesterParser(comptime load_mode: TemplateLoadMode) type {
-    return Parser(.{ .source = .{ .String = .{} }, .output = .Render, .load_mode = load_mode });
+    return Parser(.{ .source = .{ .string = .{} }, .output = .render, .load_mode = load_mode });
 }
 
 const DummyRender = struct {

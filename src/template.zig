@@ -286,7 +286,7 @@ pub fn parseText(
     default_delimiters: Delimiters,
     comptime options: mustache.options.ParseTextOptions,
 ) Allocator.Error!ParseResult {
-    const source = TemplateSource{ .String = .{ .copy_strings = options.copy_strings } };
+    const source = TemplateSource{ .string = .{ .copy_strings = options.copy_strings } };
     return try parseSource(
         source,
         options.features,
@@ -305,7 +305,7 @@ pub fn parseComptime(
 ) Template {
     comptime {
         @setEvalBranchQuota(999999);
-        const source = TemplateSource{ .String = .{ .copy_strings = false } };
+        const source = TemplateSource{ .string = .{ .copy_strings = false } };
         const unused: Allocator = undefined;
         const parse_result = parseSource(
             source,
@@ -344,7 +344,7 @@ pub fn parseFile(
     default_delimiters: Delimiters,
     comptime options: mustache.options.ParseFileOptions,
 ) (Allocator.Error || std.fs.File.OpenError || std.fs.File.ReadError)!ParseResult {
-    const source = TemplateSource{ .Stream = .{ .read_buffer_size = options.read_buffer_size } };
+    const source = TemplateSource{ .file = .{ .read_buffer_size = options.read_buffer_size } };
     return try parseSource(
         source,
         options.features,
@@ -365,7 +365,7 @@ fn parseSource(
 ) !ParseResult {
     const options = TemplateOptions{
         .source = source,
-        .output = .Parse,
+        .output = .cache,
         .features = features,
         .load_mode = load_mode,
     };
@@ -484,8 +484,8 @@ const tests = struct {
 
     fn TesterTemplateLoader(comptime load_mode: TemplateLoadMode) type {
         const options = TemplateOptions{
-            .source = .{ .String = .{ .copy_strings = false } },
-            .output = .Parse,
+            .source = .{ .string = .{ .copy_strings = false } },
+            .output = .cache,
             .load_mode = load_mode,
         };
 
@@ -2255,8 +2255,8 @@ const tests = struct {
             // Read from a file, assuring that this text should read four times from the buffer
             const read_buffer_size = (template_text.len / 4);
             const SmallBufferTemplateloader = TemplateLoader(.{
-                .source = .{ .Stream = .{ .read_buffer_size = read_buffer_size } },
-                .output = .Parse,
+                .source = .{ .file = .{ .read_buffer_size = read_buffer_size } },
+                .output = .cache,
             });
 
             var template = SmallBufferTemplateloader{
@@ -2355,8 +2355,8 @@ const tests = struct {
             // Strings are not ownned by the template,
             // Use this option when creating templates from a static string or when rendering direct to a stream
             const RefStringsTemplate = TemplateLoader(.{
-                .source = .{ .Stream = .{} },
-                .output = .Render,
+                .source = .{ .file = .{} },
+                .output = .render,
             });
 
             // Create a template to parse and render this 10MB file, with only 16KB of memory

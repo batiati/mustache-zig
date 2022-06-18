@@ -9,9 +9,9 @@ const assert = std.debug.assert;
 const mustache = @import("../mustache.zig");
 const RenderOptions = mustache.options.RenderOptions;
 const TemplateOptions = mustache.options.TemplateOptions;
-const RenderTemplateOptions = mustache.options.RenderTemplateOptions;
-const RenderTextOptions = mustache.options.RenderTextOptions;
-const RenderFileOptions = mustache.options.RenderFileOptions;
+const RenderFromTemplateOptions = mustache.options.RenderFromTemplateOptions;
+const RenderFromStringOptions = mustache.options.RenderFromStringOptions;
+const RenderFromFileOptions = mustache.options.RenderFromFileOptions;
 
 const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
@@ -41,7 +41,7 @@ pub fn render(template: Template, data: anytype, writer: anytype) !void {
 
 /// Renders the `Template` with the given `data` to a `writer`.
 /// `options` defines the behavior of the render process
-pub fn renderWithOptions(template: Template, data: anytype, writer: anytype, comptime options: mustache.options.RenderTemplateOptions) !void {
+pub fn renderWithOptions(template: Template, data: anytype, writer: anytype, comptime options: mustache.options.RenderFromTemplateOptions) !void {
     return try renderPartialsWithOptions(template, {}, data, writer, options);
 }
 
@@ -54,8 +54,8 @@ pub fn renderPartials(template: Template, partials: anytype, data: anytype, writ
 /// Renders the `Template` with the given `data` to a `writer`.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// `options` defines the behavior of the render process
-pub fn renderPartialsWithOptions(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderTemplateOptions) !void {
-    const render_options = RenderOptions{ .Template = options };
+pub fn renderPartialsWithOptions(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderFromTemplateOptions) !void {
+    const render_options = RenderOptions{ .template = options };
     try internalRender(template, partials, data, writer, render_options);
 }
 
@@ -68,7 +68,7 @@ pub fn allocRender(allocator: Allocator, template: Template, data: anytype) Allo
 /// Renders the `Template` with the given `data` and returns an owned slice with the content.
 /// `options` defines the behavior of the render process
 /// Caller must free the memory
-pub fn allocRenderWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![]const u8 {
+pub fn allocRenderWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) Allocator.Error![]const u8 {
     return try allocRenderPartialsWithOptions(allocator, template, {}, data, options);
 }
 
@@ -83,8 +83,8 @@ pub fn allocRenderPartials(allocator: Allocator, template: Template, partials: a
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// `options` defines the behavior of the render process
 /// Caller must free the memory
-pub fn allocRenderPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![]const u8 {
-    const render_options = RenderOptions{ .Template = options };
+pub fn allocRenderPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) Allocator.Error![]const u8 {
+    const render_options = RenderOptions{ .template = options };
     return try internalAllocRender(allocator, template, partials, data, render_options, null);
 }
 
@@ -97,7 +97,7 @@ pub fn allocRenderZ(allocator: Allocator, template: Template, data: anytype) All
 /// Renders the `Template` with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// `options` defines the behavior of the render process
 /// Caller must free the memory
-pub fn allocRenderZWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![:0]const u8 {
+pub fn allocRenderZWithOptions(allocator: Allocator, template: Template, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) Allocator.Error![:0]const u8 {
     return try allocRenderZPartialsWithOptions(allocator, template, {}, data, options);
 }
 
@@ -112,8 +112,8 @@ pub fn allocRenderZPartials(allocator: Allocator, template: Template, partials: 
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// `options` defines the behavior of the render process
 /// Caller must free the memory
-pub fn allocRenderZPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) Allocator.Error![:0]const u8 {
-    const render_options = RenderOptions{ .Template = options };
+pub fn allocRenderZPartialsWithOptions(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) Allocator.Error![:0]const u8 {
+    const render_options = RenderOptions{ .template = options };
     return try internalAllocRender(allocator, template, partials, data, render_options, '\x00');
 }
 
@@ -126,7 +126,7 @@ pub fn bufRender(buf: []u8, template: Template, data: anytype) (Allocator.Error 
 /// Renders the `Template` with the given `data` to a buffer.
 /// `options` defines the behavior of the render process
 /// Returns a slice pointing to the underlying buffer
-pub fn bufRenderWithOptions(buf: []u8, template: Template, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![]const u8 {
+pub fn bufRenderWithOptions(buf: []u8, template: Template, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) (Allocator.Error || BufError)![]const u8 {
     return try bufRenderPartialsWithOptions(buf, template, {}, data, options);
 }
 
@@ -141,7 +141,7 @@ pub fn bufRenderPartials(buf: []u8, template: Template, partials: anytype, data:
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// `options` defines the behavior of the render process
 /// Returns a slice pointing to the underlying buffer
-pub fn bufRenderPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![]const u8 {
+pub fn bufRenderPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) (Allocator.Error || BufError)![]const u8 {
     var fbs = std.io.fixedBufferStream(buf);
     try renderPartialsWithOptions(template, partials, data, fbs.writer(), options);
     return fbs.getWritten();
@@ -156,7 +156,7 @@ pub fn bufRenderZ(buf: []u8, template: Template, data: anytype) (Allocator.Error
 /// Renders the `Template` with the given `data` to a buffer, terminated by the zero sentinel.
 /// `options` defines the behavior of the render process
 /// Returns a slice pointing to the underlying buffer
-pub fn bufRenderZWithOptions(buf: []u8, template: Template, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
+pub fn bufRenderZWithOptions(buf: []u8, template: Template, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
     return try bufRenderZPartialsWithOptions(buf, template, {}, data, options);
 }
 
@@ -171,7 +171,7 @@ pub fn bufRenderZPartials(buf: []u8, template: Template, partials: anytype, data
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the `Template` as value
 /// `options` defines the behavior of the render process
 /// Returns a slice pointing to the underlying buffer
-pub fn bufRenderZPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
+pub fn bufRenderZPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
     var ret = try bufRenderPartialsWithOptions(buf, template, partials, data, options);
 
     if (ret.len < buf.len) {
@@ -189,7 +189,7 @@ pub fn renderText(allocator: Allocator, template_text: []const u8, data: anytype
 
 /// Parses the `template_text` and renders with the given `data` to a `writer`
 /// `options` defines the behavior of the parser and render process
-pub fn renderTextWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
+pub fn renderTextWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, writer: anytype, comptime options: mustache.options.RenderFromStringOptions) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
     try renderTextPartialsWithOptions(allocator, template_text, {}, data, writer, options);
 }
 
@@ -202,8 +202,8 @@ pub fn renderTextPartials(allocator: Allocator, template_text: []const u8, parti
 /// Parses the `template_text` and renders with the given `data` to a `writer`
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
 /// `options` defines the behavior of the parser and render process
-pub fn renderTextPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
-    const render_options = RenderOptions{ .Text = options };
+pub fn renderTextPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderFromStringOptions) (Allocator.Error || ParseError || @TypeOf(writer).Error)!void {
+    const render_options = RenderOptions{ .string = options };
     try internalCollect(allocator, template_text, partials, data, writer, render_options);
 }
 
@@ -216,7 +216,7 @@ pub fn allocRenderText(allocator: Allocator, template_text: []const u8, data: an
 /// Parses the `template_text` and renders with the given `data` and returns an owned slice with the content.
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderTextWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError)![]const u8 {
+pub fn allocRenderTextWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, comptime options: mustache.options.RenderFromStringOptions) (Allocator.Error || ParseError)![]const u8 {
     return try allocRenderTextPartialsWithOptions(allocator, template_text, {}, data, options);
 }
 
@@ -231,8 +231,8 @@ pub fn allocRenderTextPartials(allocator: Allocator, template_text: []const u8, 
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderTextPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError)![]const u8 {
-    const render_options = RenderOptions{ .Text = options };
+pub fn allocRenderTextPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromStringOptions) (Allocator.Error || ParseError)![]const u8 {
+    const render_options = RenderOptions{ .string = options };
     return try internalAllocCollect(allocator, template_text, partials, data, render_options, null);
 }
 
@@ -245,7 +245,7 @@ pub fn allocRenderTextZ(allocator: Allocator, template_text: []const u8, data: a
 /// Parses the `template_text` and renders with the given `data` and returns an owned sentinel-terminated slice with the content.
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderTextZWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError)![:0]const u8 {
+pub fn allocRenderTextZWithOptions(allocator: Allocator, template_text: []const u8, data: anytype, comptime options: mustache.options.RenderFromStringOptions) (Allocator.Error || ParseError)![:0]const u8 {
     return try allocRenderTextZPartialsWithOptions(allocator, template_text, {}, data, options);
 }
 
@@ -260,8 +260,8 @@ pub fn allocRenderTextZPartials(allocator: Allocator, template_text: []const u8,
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template text as value
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderTextZPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderTextOptions) (Allocator.Error || ParseError)![:0]const u8 {
-    const render_options = RenderOptions{ .Text = options };
+pub fn allocRenderTextZPartialsWithOptions(allocator: Allocator, template_text: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromStringOptions) (Allocator.Error || ParseError)![:0]const u8 {
+    const render_options = RenderOptions{ .string = options };
     return try internalAllocCollect(allocator, template_text, partials, data, render_options, '\x00');
 }
 
@@ -272,7 +272,7 @@ pub fn renderFile(allocator: Allocator, template_absolute_path: []const u8, data
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a `writer`
 /// `options` defines the behavior of the parser and render process
-pub fn renderFileWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
+pub fn renderFileWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, writer: anytype, comptime options: mustache.options.RenderFromFileOptions) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
     try renderFilePartialsWithOptions(allocator, template_absolute_path, {}, data, writer, options);
 }
 
@@ -285,8 +285,8 @@ pub fn renderFilePartials(allocator: Allocator, template_absolute_path: []const 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` to a `writer`
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
 /// `options` defines the behavior of the parser and render process
-pub fn renderFilePartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
-    const render_options = RenderOptions{ .File = options };
+pub fn renderFilePartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: mustache.options.RenderFromFileOptions) (Allocator.Error || ParseError || FileError || @TypeOf(writer).Error)!void {
+    const render_options = RenderOptions{ .file = options };
     try internalCollect(allocator, template_absolute_path, partials, data, writer, render_options);
 }
 
@@ -299,7 +299,7 @@ pub fn allocRenderFile(allocator: Allocator, template_absolute_path: []const u8,
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderFileWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
+pub fn allocRenderFileWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, comptime options: mustache.options.RenderFromFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
     return try allocRenderFilePartialsWithOptions(allocator, template_absolute_path, {}, data, options);
 }
 
@@ -314,8 +314,8 @@ pub fn allocRenderFilePartials(allocator: Allocator, template_absolute_path: []c
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderFilePartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
-    const render_options = RenderOptions{ .File = options };
+pub fn allocRenderFilePartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
+    const render_options = RenderOptions{ .file = options };
     return try internalAllocCollect(allocator, template_absolute_path, partials, data, render_options, null);
 }
 
@@ -328,7 +328,7 @@ pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderFileZWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
+pub fn allocRenderFileZWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, comptime options: mustache.options.RenderFromFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
     return try allocRenderFileZPartialsWithOptions(allocator, template_absolute_path, {}, data, options);
 }
 
@@ -343,13 +343,13 @@ pub fn allocRenderFileZPartials(allocator: Allocator, template_absolute_path: []
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderFileZPartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderFileOptions) (Allocator.Error || ParseError || FileError)![:0]const u8 {
-    const render_options = RenderOptions{ .File = options };
+pub fn allocRenderFileZPartialsWithOptions(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromFileOptions) (Allocator.Error || ParseError || FileError)![:0]const u8 {
+    const render_options = RenderOptions{ .file = options };
     return try internalAllocCollect(allocator, template_absolute_path, partials, data, render_options, '\x00');
 }
 
 fn internalRender(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
-    comptime assert(options == .Template);
+    comptime assert(options == .template);
 
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
@@ -358,7 +358,7 @@ fn internalRender(template: Template, partials: anytype, data: anytype, writer: 
 }
 
 fn internalAllocRender(allocator: Allocator, template: Template, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
-    comptime assert(options == .Template);
+    comptime assert(options == .template);
 
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
@@ -376,7 +376,7 @@ fn internalAllocRender(allocator: Allocator, template: Template, partials: anyty
 }
 
 fn internalCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
-    comptime assert(options != .Template);
+    comptime assert(options != .template);
 
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
@@ -385,7 +385,7 @@ fn internalCollect(allocator: Allocator, template: []const u8, partials: anytype
 }
 
 fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
-    comptime assert(options != .Template);
+    comptime assert(options != .template);
 
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
@@ -416,11 +416,11 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
         pub const OutWriter = union(enum) {
 
             /// Render directly to the underlying stream
-            Writer: Writer,
+            writer: Writer,
 
             /// Render to a intermediate buffer
             /// for processing lambda expansions
-            Buffer: std.ArrayList(u8).Writer,
+            buffer: std.ArrayList(u8).Writer,
         };
 
         pub const DataRender = struct {
@@ -431,15 +431,15 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             stack: *const ContextStack,
             partials_map: PartialsMap,
             indentation_queue: *IndentationQueue,
-            template_options: if (options == .Template) *const TemplateOptions else void,
+            template_options: if (options == .template) *const TemplateOptions else void,
 
             pub fn collect(self: *Self, allocator: Allocator, template: []const u8) !void {
                 switch (comptime options) {
-                    .Text => |text_options| {
+                    .string => |string_options| {
                         const template_options = mustache.options.TemplateOptions{
-                            .source = .{ .String = .{ .copy_strings = false } },
-                            .output = .Render,
-                            .features = text_options.features,
+                            .source = .{ .string = .{ .copy_strings = false } },
+                            .output = .render,
+                            .features = string_options.features,
                             .load_mode = .runtime_loaded,
                         };
 
@@ -449,10 +449,10 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                         errdefer template_loader.deinit();
                         try template_loader.collectElements(template, self);
                     },
-                    .File => |file_options| {
+                    .file => |file_options| {
                         const render_file_options = TemplateOptions{
-                            .source = .{ .Stream = .{ .read_buffer_size = file_options.read_buffer_size } },
-                            .output = .Render,
+                            .source = .{ .file = .{ .read_buffer_size = file_options.read_buffer_size } },
+                            .output = .render,
                             .features = file_options.features,
                             .load_mode = .runtime_loaded,
                         };
@@ -464,14 +464,14 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                         try template_loader.collectElements(template, self);
                     },
 
-                    .Template => unreachable,
+                    .template => unreachable,
                 }
             }
 
             pub fn render(self: *Self, elements: []const Element) !void {
                 switch (self.out_writer) {
-                    .Buffer => |writer| {
-                        var list = writer.context;
+                    .buffer => |buffer| {
+                        var list = buffer.context;
                         const capacity_hint = self.levelCapacityHint(elements);
                         try list.ensureUnusedCapacity(capacity_hint);
                     },
@@ -483,18 +483,18 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
             inline fn lambdasSupported(self: *Self) bool {
                 return switch (options) {
-                    .Template => self.template_options.features.lambdas == .Enabled,
-                    .Text => |text| text.features.lambdas == .Enabled,
-                    .File => |file| file.features.lambdas == .Enabled,
+                    .template => self.template_options.features.lambdas == .enabled,
+                    .string => |string| string.features.lambdas == .enabled,
+                    .file => |file| file.features.lambdas == .enabled,
                 };
             }
 
             inline fn preseveLineBreaksAndIndentation(self: *Self) bool {
                 return !PartialsMap.isEmpty() and
                     switch (options) {
-                    .Template => self.template_options.features.preseve_line_breaks_and_indentation,
-                    .Text => |text| text.features.preseve_line_breaks_and_indentation,
-                    .File => |file| file.features.preseve_line_breaks_and_indentation,
+                    .template => self.template_options.features.preseve_line_breaks_and_indentation,
+                    .string => |string| string.features.preseve_line_breaks_and_indentation,
+                    .file => |file| file.features.preseve_line_breaks_and_indentation,
                 };
             }
 
@@ -589,10 +589,10 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 comptime assert(!PartialsMap.isEmpty());
 
                 switch (options) {
-                    .Template => {
+                    .template => {
                         try self.render(partial_template.elements);
                     },
-                    .Text, .File => {
+                    .string, .file => {
                         self.collect(self.partials_map.allocator, partial_template) catch unreachable;
                     },
                 }
@@ -668,13 +668,13 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 escape: Escape,
             ) (Allocator.Error || Writer.Error)!void {
                 switch (self.out_writer) {
-                    .Writer => |writer| switch (escape) {
+                    .writer => |writer| switch (escape) {
                         .Escaped => try self.recursiveWrite(writer, value, .Escaped),
                         .Unescaped => try self.recursiveWrite(writer, value, .Unescaped),
                     },
-                    .Buffer => |writer| switch (escape) {
-                        .Escaped => try self.recursiveWrite(writer, value, .Escaped),
-                        .Unescaped => try self.recursiveWrite(writer, value, .Unescaped),
+                    .buffer => |buffer| switch (escape) {
+                        .Escaped => try self.recursiveWrite(buffer, value, .Escaped),
+                        .Unescaped => try self.recursiveWrite(buffer, value, .Unescaped),
                     },
                 }
             }
@@ -685,7 +685,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 escape: Escape,
             ) (Allocator.Error || Writer.Error)!usize {
                 switch (self.out_writer) {
-                    .Writer => |writer| {
+                    .writer => |writer| {
                         var counter = std.io.countingWriter(writer);
 
                         switch (escape) {
@@ -695,8 +695,8 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
                         return counter.bytes_written;
                     },
-                    .Buffer => |writer| {
-                        var counter = std.io.countingWriter(writer);
+                    .buffer => |buffer| {
+                        var counter = std.io.countingWriter(buffer);
 
                         switch (escape) {
                             .Escaped => try self.recursiveWrite(counter.writer(), value, .Escaped),
@@ -941,14 +941,14 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
         };
 
         pub fn render(template: Template, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
-            comptime assert(options == .Template);
+            comptime assert(options == .template);
 
             const Data = @TypeOf(data);
             const by_value = comptime Fields.byValue(Data);
 
             var indentation_queue = IndentationQueue{};
             var data_render = DataRender{
-                .out_writer = .{ .Writer = writer },
+                .out_writer = .{ .writer = writer },
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
@@ -967,14 +967,14 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
         }
 
         pub fn bufRender(writer: std.ArrayList(u8).Writer, template: Template, data: anytype, partials_map: PartialsMap) !void {
-            comptime assert(options == .Template);
+            comptime assert(options == .template);
 
             const Data = @TypeOf(data);
             const by_value = comptime Fields.byValue(Data);
 
             var indentation_queue = IndentationQueue{};
             var data_render = DataRender{
-                .out_writer = .{ .Buffer = writer },
+                .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
@@ -993,14 +993,14 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
         }
 
         pub fn collect(allocator: Allocator, template: []const u8, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
-            comptime assert(options != .Template);
+            comptime assert(options != .template);
 
             const Data = @TypeOf(data);
             const by_value = comptime Fields.byValue(Data);
 
             var indentation_queue = IndentationQueue{};
             var data_render = DataRender{
-                .out_writer = .{ .Writer = writer },
+                .out_writer = .{ .writer = writer },
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
@@ -1019,14 +1019,14 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
         }
 
         pub fn bufCollect(allocator: Allocator, writer: std.ArrayList(u8).Writer, template: []const u8, data: anytype, partials_map: PartialsMap) !void {
-            comptime assert(options != .Template);
+            comptime assert(options != .template);
 
             const Data = @TypeOf(data);
             const by_value = comptime Fields.byValue(Data);
 
             var indentation_queue = IndentationQueue{};
             var data_render = DataRender{
-                .out_writer = .{ .Buffer = writer },
+                .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
@@ -3372,7 +3372,7 @@ const tests = struct {
             var template = try expectParseTemplate("{{hello}}world");
             defer template.deinit(testing.allocator);
 
-            const options = RenderTemplateOptions{};
+            const options = RenderFromTemplateOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3406,7 +3406,7 @@ const tests = struct {
             var template = try expectParseTemplate("{{hello}}world");
             defer template.deinit(testing.allocator);
 
-            const options = RenderTemplateOptions{};
+            const options = RenderFromTemplateOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3444,7 +3444,7 @@ const tests = struct {
             var template = try expectParseTemplate("{{hello}}world");
             defer template.deinit(testing.allocator);
 
-            const options = RenderTemplateOptions{};
+            const options = RenderFromTemplateOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3483,7 +3483,7 @@ const tests = struct {
             defer template.deinit(testing.allocator);
 
             var buf: [11]u8 = undefined;
-            const options = RenderTemplateOptions{};
+            const options = RenderFromTemplateOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3514,7 +3514,7 @@ const tests = struct {
             defer template.deinit(testing.allocator);
 
             var buf: [12]u8 = undefined;
-            const options = RenderTemplateOptions{};
+            const options = RenderFromTemplateOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3545,7 +3545,7 @@ const tests = struct {
             defer template.deinit(testing.allocator);
 
             var buf: [5]u8 = undefined;
-            const options = RenderTemplateOptions{};
+            const options = RenderFromTemplateOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
 
@@ -3591,7 +3591,7 @@ const tests = struct {
             defer template.deinit(testing.allocator);
 
             var buf: [5]u8 = undefined;
-            const options = RenderTemplateOptions{};
+            const options = RenderFromTemplateOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
 
@@ -3634,7 +3634,7 @@ const tests = struct {
 
         test "renderText API" {
             const template_text = "{{hello}}world";
-            const options = RenderTextOptions{};
+            const options = RenderFromStringOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3666,7 +3666,7 @@ const tests = struct {
 
         test "allocRenderText API" {
             const template_text = "{{hello}}world";
-            const options = RenderTextOptions{};
+            const options = RenderFromStringOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3698,7 +3698,7 @@ const tests = struct {
 
         test "allocRenderTextZ API" {
             const template_text = "{{hello}}world";
-            const options = RenderTextOptions{};
+            const options = RenderFromStringOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3733,7 +3733,7 @@ const tests = struct {
             defer tmp.cleanup();
 
             const template_text = "{{hello}}world";
-            const options = RenderFileOptions{};
+            const options = RenderFromFileOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3771,7 +3771,7 @@ const tests = struct {
             defer tmp.cleanup();
 
             const template_text = "{{hello}}world";
-            const options = RenderFileOptions{};
+            const options = RenderFromFileOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3809,7 +3809,7 @@ const tests = struct {
             defer tmp.cleanup();
 
             const template_text = "{{hello}}world";
-            const options = RenderFileOptions{};
+            const options = RenderFromFileOptions{};
             const data = .{ .hello = "hello " };
             const partials = .{};
             const expected = "hello world";
@@ -3844,7 +3844,7 @@ const tests = struct {
     };
 
     const escape_tests = struct {
-        const dummy_options = RenderOptions{ .Text = .{} };
+        const dummy_options = RenderOptions{ .string = .{} };
         const DummyPartialsMap = map.PartialsMap(@TypeOf(.{ "foo", "bar" }), dummy_options);
         const Engine = RenderEngine(std.ArrayList(u8).Writer, DummyPartialsMap, dummy_options);
         const IndentationQueue = Engine.IndentationQueue;
@@ -3931,7 +3931,7 @@ const tests = struct {
             defer list.deinit();
 
             var data_render = Engine.DataRender{
-                .out_writer = .{ .Buffer = list.writer() },
+                .out_writer = .{ .buffer = list.writer() },
                 .stack = undefined,
                 .partials_map = undefined,
                 .indentation_queue = indentation_queue,
