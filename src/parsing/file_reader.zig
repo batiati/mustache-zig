@@ -66,10 +66,6 @@ pub fn FileReader(comptime options: TemplateOptions) type {
         pub fn deinit(self: *Self) void {
             self.file.close();
         }
-
-        pub inline fn finished(self: *Self) bool {
-            return self.eof;
-        }
     };
 }
 
@@ -114,7 +110,7 @@ test "FileReader.Slices" {
     defer result_1.ref_counter.unRef(allocator);
     slice = result_1.slice;
 
-    try testing.expectEqual(false, reader.finished());
+    try testing.expectEqual(false, reader.eof);
     try testing.expectEqual(@as(usize, 5), slice.len);
     try testing.expectEqualStrings("{{nam", slice);
 
@@ -126,7 +122,7 @@ test "FileReader.Slices" {
     defer result_2.ref_counter.unRef(allocator);
     slice = result_2.slice;
 
-    try testing.expectEqual(false, reader.finished());
+    try testing.expectEqual(false, reader.eof);
     try testing.expectEqualStrings("name}}Ju", slice);
 
     // Third read,
@@ -136,7 +132,7 @@ test "FileReader.Slices" {
     defer result_3.ref_counter.unRef(allocator);
     slice = result_3.slice;
 
-    try testing.expectEqual(false, reader.finished());
+    try testing.expectEqual(false, reader.eof);
     try testing.expectEqualStrings("Just st", slice);
 
     // Last read,
@@ -145,7 +141,7 @@ test "FileReader.Slices" {
     defer result_4.ref_counter.unRef(allocator);
     slice = result_4.slice;
 
-    try testing.expectEqual(true, reader.finished());
+    try testing.expectEqual(true, reader.eof);
     try testing.expectEqualStrings("Just static", slice);
 
     // After that, EOF
@@ -153,6 +149,6 @@ test "FileReader.Slices" {
     defer result_5.ref_counter.unRef(allocator);
     slice = result_5.slice;
 
-    try testing.expectEqual(true, reader.finished());
+    try testing.expectEqual(true, reader.eof);
     try testing.expectEqualStrings("Just static", slice);
 }

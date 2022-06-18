@@ -160,7 +160,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
         fn requestContent(self: *Self, allocator: Allocator) !void {
             if (comptime options.source == .file) {
-                if (!self.file.reader.finished()) {
+                if (!self.file.reader.eof) {
 
                     //
                     // Requesting a new buffer must preserve some parts of the current slice that are still needed
@@ -223,16 +223,18 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
             self.index = self.block_index;
             var trimmer = Trimmer.init(self);
-            while (self.index < self.content.len or
-                (options.source == .file and !self.file.reader.finished())) : (self.index += 1)
-            {
+            while (true) : (self.index += 1) {
                 if (comptime options.source == .file) {
-                    // Request a new slice if near to the end
-                    const look_ahead = self.index + self.delimiter_max_size + 1;
-                    if (look_ahead >= self.content.len) {
-                        try self.requestContent(allocator);
+                    if (!self.file.reader.eof) {
+                        // Request a new slice if near to the end
+                        const look_ahead = self.index + self.delimiter_max_size + 1;
+                        if (look_ahead >= self.content.len) {
+                            try self.requestContent(allocator);
+                        }
                     }
                 }
+
+                if (self.index >= self.content.len) break;
 
                 const char = self.content[self.index];
 

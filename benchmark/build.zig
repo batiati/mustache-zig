@@ -1,7 +1,11 @@
 const std = @import("std");
 
 pub fn build(b: *std.build.Builder) void {
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .cpu_model = .baseline,
+        },
+    });
 
     // Benchmark defaults to ReleaseSafe
     const mode = std.builtin.Mode.ReleaseSafe;

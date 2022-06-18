@@ -3378,28 +3378,35 @@ const tests = struct {
             const partials = .{};
             const expected = "hello world";
 
+            var buffer: [256]u8 = undefined;
+            var fba = std.io.fixedBufferStream(&buffer);
+
             {
-                var couting_writer = std.io.countingWriter(std.io.null_writer);
-                try mustache.render(template, data, couting_writer.writer());
-                try testing.expect(couting_writer.bytes_written == expected.len);
+                fba.reset();
+                try mustache.render(template, data, fba.writer());
+                try testing.expect(fba.pos == expected.len);
+                try testing.expectEqualStrings(expected, buffer[0..fba.pos]);
             }
 
             {
-                var couting_writer = std.io.countingWriter(std.io.null_writer);
-                try mustache.renderPartials(template, partials, data, couting_writer.writer());
-                try testing.expect(couting_writer.bytes_written == expected.len);
+                fba.reset();
+                try mustache.renderPartials(template, partials, data, fba.writer());
+                try testing.expect(fba.pos == expected.len);
+                try testing.expectEqualStrings(expected, buffer[0..fba.pos]);
             }
 
             {
-                var couting_writer = std.io.countingWriter(std.io.null_writer);
-                try mustache.renderWithOptions(template, data, couting_writer.writer(), options);
-                try testing.expect(couting_writer.bytes_written == expected.len);
+                fba.reset();
+                try mustache.renderWithOptions(template, data, fba.writer(), options);
+                try testing.expect(fba.pos == expected.len);
+                try testing.expectEqualStrings(expected, buffer[0..fba.pos]);
             }
 
             {
-                var couting_writer = std.io.countingWriter(std.io.null_writer);
-                try mustache.renderPartialsWithOptions(template, partials, data, couting_writer.writer(), options);
-                try testing.expect(couting_writer.bytes_written == expected.len);
+                fba.reset();
+                try mustache.renderPartialsWithOptions(template, partials, data, fba.writer(), options);
+                try testing.expect(fba.pos == expected.len);
+                try testing.expectEqualStrings(expected, buffer[0..fba.pos]);
             }
         }
 
