@@ -53,14 +53,14 @@ pub fn Node(comptime options: TemplateOptions) type {
             var text_part = &self.text_part;
             if (text_part.part_type == .static_text) {
                 switch (text_part.trimming.left) {
-                    .PreserveWhitespaces => {},
-                    .Trimmed => assert(false),
-                    .AllowTrimming => {
+                    .preserve_whitespaces => {},
+                    .trimmed => assert(false),
+                    .allow_trimming => {
                         const can_trim = trimPreviousNodesRight(list, self.index);
                         if (can_trim) {
                             text_part.trimLeft();
                         } else {
-                            text_part.trimming.left = .PreserveWhitespaces;
+                            text_part.trimming.left = .preserve_whitespaces;
                         }
                     },
                 }
@@ -133,7 +133,7 @@ pub fn Node(comptime options: TemplateOptions) type {
 
                 if (text_part.part_type == .static_text) {
                     switch (text_part.trimming.right) {
-                        .AllowTrimming => |trimming| {
+                        .allow_trimming => |trimming| {
 
                             // Non standalone tags must check the previous node
                             const can_trim = trimming.stand_alone or trimPreviousNodesRight(nodes, prev_index);
@@ -144,12 +144,12 @@ pub fn Node(comptime options: TemplateOptions) type {
 
                                 return true;
                             } else {
-                                text_part.trimming.right = .PreserveWhitespaces;
+                                text_part.trimming.right = .preserve_whitespaces;
                                 return false;
                             }
                         },
-                        .Trimmed => return true,
-                        .PreserveWhitespaces => return false,
+                        .trimmed => return true,
+                        .preserve_whitespaces => return false,
                     }
                 } else if (text_part.is_stand_alone) {
                     // Depends on the previous node

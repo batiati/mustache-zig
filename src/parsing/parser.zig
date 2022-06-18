@@ -222,7 +222,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                         // A stand-alone line in the root level indicates that the previous produced nodes can be rendered
                         if (options.output == .render) {
                             if (level == 0 and
-                                current_node.text_part.trimming.left != .PreserveWhitespaces and
+                                current_node.text_part.trimming.left != .preserve_whitespaces and
                                 self.canProducePartialNodes())
                             {
                                 // Remove the last node

@@ -43,15 +43,15 @@ pub const PartType = enum(u8) {
 pub fn TrimmingIndex(comptime options: TemplateOptions) type {
     return if (options.features.preseve_line_breaks_and_indentation)
         union(enum) {
-            PreserveWhitespaces,
-            AllowTrimming: struct {
+            preserve_whitespaces,
+            allow_trimming: struct {
                 index: u32,
                 stand_alone: bool,
             },
-            Trimmed,
+            trimmed,
         }
     else
-        enum { PreserveWhitespaces };
+        enum { preserve_whitespaces };
 }
 
 pub const IndexBookmark = struct {

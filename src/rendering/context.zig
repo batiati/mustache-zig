@@ -30,29 +30,29 @@ pub fn PathResolution(comptime Payload: type) type {
         /// For example:
         /// context = .{ name = "Phill" };
         /// path = "address"
-        NotFoundInContext,
+        not_found_in_context,
 
         /// Parts of the path could not be found on the current context.
         /// This result indicates that the path is broken and should NOT be resolved against the parent context
         /// For example:
         /// context = .{ .address = .{ street = "Wall St, 50", } };
         /// path = "address.country"
-        ChainBroken,
+        chain_broken,
 
         /// The path could be resolved against the current context, but the iterator was fully consumed
         /// This result indicates that the path is valid, but not to be rendered and should NOT be resolved against the parent context
         /// For example:
         /// context = .{ .visible = false  };
         /// path = "visible"
-        IteratorConsumed,
+        iterator_consumed,
 
         /// The lambda could be resolved against the current context,
         /// The payload is the result returned by "action_fn"
-        Lambda: Payload,
+        lambda: Payload,
 
         /// The field could be resolved against the current context
         /// The payload is the result returned by "action_fn"
-        Field: Payload,
+        field: Payload,
     };
 }
 
@@ -94,17 +94,17 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
         pub const Iterator = struct {
             data: union(enum) {
-                Empty,
-                Lambda: Self,
-                Sequence: struct {
+                empty,
+                lambda: Self,
+                sequence: struct {
                     context: *const Self,
                     path: Element.Path,
                     state: union(enum) {
-                        Fetching: struct {
+                        fetching: struct {
                             item: Self,
                             index: usize,
                         },
-                        Finished,
+                        finished,
                     },
 
                     fn fetch(self: *@This(), index: usize) ?Self {
@@ -115,8 +115,8 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         );
 
                         return switch (result) {
-                            .Field => |item| item,
-                            .IteratorConsumed => null,
+                            .field => |item| item,
+                            .iterator_consumed => null,
                             else => {
                                 assert(false);
                                 unreachable;
@@ -128,14 +128,14 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
             fn initEmpty() Iterator {
                 return .{
-                    .data = .Empty,
+                    .data = .empty,
                 };
             }
 
             fn initLambda(lambda_ctx: Self) Iterator {
                 return .{
                     .data = .{
-                        .Lambda = lambda_ctx,
+                        .lambda = lambda_ctx,
                     },
                 };
             }
@@ -143,11 +143,11 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             fn initSequence(parent_ctx: *const Self, path: Element.Path, item: Self) Iterator {
                 return .{
                     .data = .{
-                        .Sequence = .{
+                        .sequence = .{
                             .context = parent_ctx,
                             .path = path,
                             .state = .{
-                                .Fetching = .{
+                                .fetching = .{
                                     .item = item,
                                     .index = 0,
                                 },
@@ -159,42 +159,42 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
             pub fn lambda(self: Iterator) ?Self {
                 return switch (self.data) {
-                    .Lambda => |item| item,
+                    .lambda => |item| item,
                     else => null,
                 };
             }
 
             pub inline fn truthy(self: Iterator) bool {
                 switch (self.data) {
-                    .Empty => return false,
-                    .Lambda => return true,
-                    .Sequence => |sequence| switch (sequence.state) {
-                        .Fetching => return true,
-                        .Finished => return false,
+                    .empty => return false,
+                    .lambda => return true,
+                    .sequence => |sequence| switch (sequence.state) {
+                        .fetching => return true,
+                        .finished => return false,
                     },
                 }
             }
 
             pub fn next(self: *Iterator) ?Self {
                 switch (self.data) {
-                    .Lambda, .Empty => return null,
-                    .Sequence => |*sequence| switch (sequence.state) {
-                        .Fetching => |current| {
+                    .lambda, .empty => return null,
+                    .sequence => |*sequence| switch (sequence.state) {
+                        .fetching => |current| {
                             const next_index = current.index + 1;
                             if (sequence.fetch(next_index)) |item| {
                                 sequence.state = .{
-                                    .Fetching = .{
+                                    .fetching = .{
                                         .item = item,
                                         .index = next_index,
                                     },
                                 };
                             } else {
-                                sequence.state = .Finished;
+                                sequence.state = .finished;
                             }
 
                             return current.item;
                         },
-                        .Finished => return null,
+                        .finished => return null,
                     },
                 }
             }
@@ -219,17 +219,17 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             const result = self.vtable.get(&self.ctx, path, 0);
 
             return switch (result) {
-                .Field => |item| .{
-                    .Field = Iterator.initSequence(self, path, item),
+                .field => |item| .{
+                    .field = Iterator.initSequence(self, path, item),
                 },
-                .IteratorConsumed => .{
-                    .Field = Iterator.initEmpty(),
+                .iterator_consumed => .{
+                    .field = Iterator.initEmpty(),
                 },
-                .Lambda => |item| .{
-                    .Field = Iterator.initLambda(item),
+                .lambda => |item| .{
+                    .field = Iterator.initLambda(item),
                 },
-                .ChainBroken => .ChainBroken,
-                .NotFoundInContext => .NotFoundInContext,
+                .chain_broken => .chain_broken,
+                .not_found_in_context => .not_found_in_context,
             };
         }
 
@@ -521,7 +521,7 @@ const struct_tests = struct {
         defer Element.destroyPath(testing.allocator, false, path);
 
         switch (try ctx.interpolate(&data_render, path, escape)) {
-            .Lambda => {
+            .lambda => {
                 _ = try ctx.expandLambda(&data_render, path, "", escape, .{});
             },
             else => {},
@@ -1099,7 +1099,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             switch (person_ctx.get(path)) {
-                .Field => |found| break :address_ctx found,
+                .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1121,7 +1121,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             switch (address_ctx.get(path)) {
-                .Field => |found| break :street_ctx found,
+                .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1172,7 +1172,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             switch (person_ctx.get(path)) {
-                .Field => |found| break :indication_ctx found,
+                .field => |found| break :indication_ctx found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1194,7 +1194,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             switch (indication_ctx.get(path)) {
-                .Field => |found| break :address_ctx found,
+                .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1216,7 +1216,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             switch (address_ctx.get(path)) {
-                .Field => |found| break :street_ctx found,
+                .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1255,7 +1255,7 @@ const struct_tests = struct {
 
             // Person.address
             switch (person_ctx.get(path)) {
-                .Field => |found| break :address_ctx found,
+                .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1268,7 +1268,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             var wrong_address = person_ctx.get(path);
-            try testing.expect(wrong_address == .NotFoundInContext);
+            try testing.expect(wrong_address == .not_found_in_context);
         }
 
         const street_ctx = street_ctx: {
@@ -1277,7 +1277,7 @@ const struct_tests = struct {
 
             // Person.address.street
             switch (address_ctx.get(path)) {
-                .Field => |found| break :street_ctx found,
+                .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1290,7 +1290,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             var wrong_street = address_ctx.get(path);
-            try testing.expect(wrong_street == .NotFoundInContext);
+            try testing.expect(wrong_street == .not_found_in_context);
         }
 
         {
@@ -1298,7 +1298,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
             // Person.address.street.len
             var street_len_ctx = switch (street_ctx.get(path)) {
-                .Field => |found| found,
+                .field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1312,7 +1312,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             var wrong_len = street_ctx.get(path);
-            try testing.expect(wrong_len == .NotFoundInContext);
+            try testing.expect(wrong_len == .not_found_in_context);
         }
     }
 
@@ -1333,7 +1333,7 @@ const struct_tests = struct {
         defer Element.destroyPath(allocator, false, path);
 
         var iterator = switch (ctx.iterator(path)) {
-            .Field => |found| found,
+            .field => |found| found,
             else => {
                 try testing.expect(false);
                 unreachable;
@@ -1380,7 +1380,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             var iterator = switch (ctx.iterator(path)) {
-                .Field => |found| found,
+                .field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1400,7 +1400,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             var iterator = switch (ctx.iterator(path)) {
-                .Field => |found| found,
+                .field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1428,7 +1428,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             var iterator = switch (ctx.iterator(path)) {
-                .Field => |found| found,
+                .field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;
@@ -1448,7 +1448,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             var iterator = switch (ctx.iterator(path)) {
-                .Field => |found| found,
+                .field => |found| found,
                 else => {
                     try testing.expect(false);
                     unreachable;

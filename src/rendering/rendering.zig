@@ -473,7 +473,9 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     .buffer => |buffer| {
                         var list = buffer.context;
                         const capacity_hint = self.levelCapacityHint(elements);
-                        try list.ensureUnusedCapacity(capacity_hint);
+
+                        // Add extra 25% extra capacity for HTML escapes, indentation, etc
+                        try list.ensureUnusedCapacity(capacity_hint + (capacity_hint / 4));
                     },
                     else => {},
                 }
@@ -522,7 +524,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                                         assert(section.delimiters != null);
 
                                         const expand_result = try lambda_ctx.expandLambda(self, &.{}, section.inner_text.?, .Unescaped, section.delimiters.?);
-                                        assert(expand_result == .Lambda);
+                                        assert(expand_result == .lambda);
                                         continue;
                                     }
                                 }
@@ -609,25 +611,25 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     const path_resolution = try current.ctx.interpolate(self, path, escape);
 
                     switch (path_resolution) {
-                        .Field => {
+                        .field => {
                             // Success, break the loop
                             break;
                         },
 
-                        .Lambda => {
+                        .lambda => {
 
                             // Expand the lambda against the current context and break the loop
                             const expand_result = try current.ctx.expandLambda(self, path, "", escape, .{});
-                            assert(expand_result == .Lambda);
+                            assert(expand_result == .lambda);
                             break;
                         },
 
-                        .IteratorConsumed, .ChainBroken => {
+                        .iterator_consumed, .chain_broken => {
                             // Not rendered, but should NOT try against the parent context
                             break;
                         },
 
-                        .NotFoundInContext => {
+                        .not_found_in_context => {
                             // Not rendered, should try against the parent context
                             continue;
                         },
@@ -643,16 +645,16 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
 
                 while (level) |current| : (level = current.parent) {
                     switch (current.ctx.iterator(path)) {
-                        .Field => |found| return found,
+                        .field => |found| return found,
 
-                        .Lambda => |found| return found,
+                        .lambda => |found| return found,
 
-                        .IteratorConsumed, .ChainBroken => {
+                        .iterator_consumed, .chain_broken => {
                             // Not found, but should NOT try against the parent context
                             break;
                         },
 
-                        .NotFoundInContext => {
+                        .not_found_in_context => {
                             // Should try against the parent context
                             continue;
                         },
@@ -868,8 +870,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     }
                 }
 
-                // Add extra 25% extra capacity for HTML escapes, indentation, etc
-                return size + (size / 4);
+                return size;
             }
 
             fn pathCapacityHint(
@@ -882,14 +883,14 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                     const path_resolution = current.ctx.capacityHint(self, path);
 
                     switch (path_resolution) {
-                        .Field => |size| return size,
+                        .field => |size| return size,
 
-                        .Lambda, .IteratorConsumed, .ChainBroken => {
+                        .lambda, .iterator_consumed, .chain_broken => {
                             // No size can be counted
                             break;
                         },
 
-                        .NotFoundInContext => {
+                        .not_found_in_context => {
                             // Not rendered, should try against the parent context
                             continue;
                         },

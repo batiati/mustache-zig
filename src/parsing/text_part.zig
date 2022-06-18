@@ -39,8 +39,8 @@ pub fn TextPart(comptime options: TemplateOptions) type {
 
         /// Trimming rules
         trimming: struct {
-            left: TrimmingIndex = .PreserveWhitespaces,
-            right: TrimmingIndex = .PreserveWhitespaces,
+            left: TrimmingIndex = .preserve_whitespaces,
+            right: TrimmingIndex = .preserve_whitespaces,
         } = .{},
 
         pub inline fn unRef(self: *Self, allocator: Allocator) void {
@@ -59,8 +59,8 @@ pub fn TextPart(comptime options: TemplateOptions) type {
         /// Processes the trimming rules for the right side of the slice
         pub fn trimRight(self: *Self) ?RefCountedSlice {
             return switch (self.trimming.right) {
-                .PreserveWhitespaces, .Trimmed => null,
-                .AllowTrimming => |right_trimming| indentation: {
+                .preserve_whitespaces, .trimmed => null,
+                .allow_trimming => |right_trimming| indentation: {
                     const content = self.content.slice;
 
                     if (right_trimming.index == 0) {
@@ -69,7 +69,7 @@ pub fn TextPart(comptime options: TemplateOptions) type {
                         self.content.slice = content[0..right_trimming.index];
                     }
 
-                    self.trimming.right = .Trimmed;
+                    self.trimming.right = .trimmed;
 
                     if (right_trimming.index + 1 >= content.len) {
                         break :indentation null;
@@ -86,8 +86,8 @@ pub fn TextPart(comptime options: TemplateOptions) type {
         /// Processes the trimming rules for the left side of the slice
         pub fn trimLeft(self: *Self) void {
             switch (self.trimming.left) {
-                .PreserveWhitespaces, .Trimmed => {},
-                .AllowTrimming => |left_trimming| {
+                .preserve_whitespaces, .trimmed => {},
+                .allow_trimming => |left_trimming| {
                     const content = self.content.slice;
 
                     // Update the trim-right index and indentation after trimming left
@@ -102,9 +102,9 @@ pub fn TextPart(comptime options: TemplateOptions) type {
                     //const value = "ABC\n  "
 
                     switch (self.trimming.right) {
-                        .AllowTrimming => |right_trimming| {
+                        .allow_trimming => |right_trimming| {
                             self.trimming.right = .{
-                                .AllowTrimming = .{
+                                .allow_trimming = .{
                                     .index = right_trimming.index - left_trimming.index - 1,
                                     .stand_alone = right_trimming.stand_alone,
                                 },
@@ -120,7 +120,7 @@ pub fn TextPart(comptime options: TemplateOptions) type {
                         self.content.slice = content[left_trimming.index + 1 ..];
                     }
 
-                    self.trimming.left = .Trimmed;
+                    self.trimming.left = .trimmed;
                 },
             }
         }

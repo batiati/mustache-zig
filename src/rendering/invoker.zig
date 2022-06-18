@@ -56,19 +56,19 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     index: ?usize,
                 ) TError!Result {
                     const Data = @TypeOf(data);
-                    if (Data == void) return .ChainBroken;
+                    if (Data == void) return .chain_broken;
 
                     const ctx = Fields.getRuntimeValue(data);
 
                     if (comptime lambda.isLambdaInvoker(Data)) {
-                        return Result{ .Lambda = try action_fn(action_param, ctx) };
+                        return Result{ .lambda = try action_fn(action_param, ctx) };
                     } else {
                         if (path.len > 0) {
                             return try recursiveFind(depth, Data, action_param, ctx, path[0], path[1..], index);
                         } else if (index) |current_index| {
                             return try iterateAt(Data, action_param, ctx, current_index);
                         } else {
-                            return Result{ .Field = try action_fn(action_param, ctx) };
+                            return Result{ .field = try action_fn(action_param, ctx) };
                         }
                     }
                 }
@@ -116,7 +116,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         else => {},
                     }
 
-                    return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+                    return if (depth == .Root) .not_found_in_context else .chain_broken;
                 }
 
                 fn findFieldPath(
@@ -157,12 +157,12 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                                 if (is_valid_lambda) {
                                     return try getLambda(action_param, Fields.lhs(data), bound_fn, next_path_parts, index);
                                 } else {
-                                    return .ChainBroken;
+                                    return .chain_broken;
                                 }
                             }
                         }
                     } else {
-                        return if (depth == .Root) .NotFoundInContext else .ChainBroken;
+                        return if (depth == .Root) .not_found_in_context else .chain_broken;
                     }
                 }
 
@@ -179,7 +179,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                     // Lambdas cannot be used for navigation through a path
                     // Examples:
-                    // Path: "person.lambda.address" > Returns "ChainBroken"
+                    // Path: "person.lambda.address" > Returns "chain_broken"
                     // Path: "person.address.lambda" > "Resolved"
                     if (next_path_parts.len == 0) {
                         const Impl = if (args_len == 1) LambdaInvoker(void, TFn) else LambdaInvoker(TData, TFn);
@@ -190,7 +190,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                         return try find(.Leaf, action_param, &impl, next_path_parts, index);
                     } else {
-                        return .ChainBroken;
+                        return .chain_broken;
                     }
                 }
 
@@ -207,14 +207,14 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                                 inline for (info.fields) |_, i| {
                                     if (index == i) {
                                         return Result{
-                                            .Field = try action_fn(
+                                            .field = try action_fn(
                                                 action_param,
                                                 Fields.getTupleElement(if (derref) data.* else data, i),
                                             ),
                                         };
                                     }
                                 } else {
-                                    return .IteratorConsumed;
+                                    return .iterator_consumed;
                                 }
                             }
                         },
@@ -222,9 +222,9 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         // Booleans are evaluated on the iterator
                         .Bool => {
                             return if (data == true and index == 0)
-                                Result{ .Field = try action_fn(action_param, data) }
+                                Result{ .field = try action_fn(action_param, data) }
                             else
-                                .IteratorConsumed;
+                                .iterator_consumed;
                         },
 
                         .Pointer => |info| switch (info.size) {
@@ -236,9 +236,9 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                                 //Slice of u8 is always string
                                 if (info.child != u8) {
                                     return if (index < data.len)
-                                        Result{ .Field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
+                                        Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
                                     else
-                                        .IteratorConsumed;
+                                        .iterator_consumed;
                                 }
                             },
                             else => {},
@@ -249,32 +249,32 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             //Array of u8 is always string
                             if (info.child != u8) {
                                 return if (index < data.len)
-                                    Result{ .Field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
+                                    Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
                                 else
-                                    .IteratorConsumed;
+                                    .iterator_consumed;
                             }
                         },
 
                         .Vector => {
                             return if (index < data.len)
-                                Result{ .Field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
+                                Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
                             else
-                                .IteratorConsumed;
+                                .iterator_consumed;
                         },
 
                         .Optional => |info| {
                             return if (!Fields.isNull(data))
                                 try iterateAt(info.child, action_param, Fields.lhs(data), index)
                             else
-                                .IteratorConsumed;
+                                .iterator_consumed;
                         },
                         else => {},
                     }
 
                     return if (index == 0)
-                        Result{ .Field = try action_fn(action_param, data) }
+                        Result{ .field = try action_fn(action_param, data) }
                     else
-                        .IteratorConsumed;
+                        .iterator_consumed;
                 }
             };
         }
@@ -1238,24 +1238,24 @@ const tests = struct {
 
     fn expectFound(comptime TExpected: type, data: anytype, path: []const u8) !void {
         const value = try dummySeek(TExpected, data, path, null);
-        try testing.expect(value == .Field);
-        try testing.expect(value.Field == true);
+        try testing.expect(value == .field);
+        try testing.expect(value.field == true);
     }
 
     fn expectNotFound(data: anytype, path: []const u8) !void {
         const value = try dummySeek(void, data, path, null);
-        try testing.expect(value != .Field);
+        try testing.expect(value != .field);
     }
 
     fn expectIterFound(comptime TExpected: type, data: anytype, path: []const u8, index: usize) !void {
         const value = try dummySeek(TExpected, data, path, index);
-        try testing.expect(value == .Field);
-        try testing.expect(value.Field == true);
+        try testing.expect(value == .field);
+        try testing.expect(value.field == true);
     }
 
     fn expectIterNotFound(data: anytype, path: []const u8, index: usize) !void {
         const value = try dummySeek(void, data, path, index);
-        try testing.expect(value != .Field);
+        try testing.expect(value != .field);
     }
 
     test "Comptime seek - self" {
