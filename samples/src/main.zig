@@ -46,7 +46,10 @@ pub fn main() anyerror!void {
 /// Render a template from a string
 pub fn renderFromString() anyerror!void {
     var gpa = GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    defer {
+        if (gpa.detectLeaks()) @panic("renderFromString leaked");
+        _ = gpa.deinit();
+    }
 
     const allocator = gpa.allocator();
     var out = std.io.getStdOut();
@@ -71,7 +74,10 @@ pub fn renderComptimeTemplate() anyerror!void {
 /// Caches a template to render many times
 pub fn renderFromCachedTemplate() anyerror!void {
     var gpa = GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    defer {
+        if (gpa.detectLeaks()) @panic("renderFromCachedTemplate leaked");
+        _ = gpa.deinit();
+    }
 
     const allocator = gpa.allocator();
 
@@ -83,6 +89,7 @@ pub fn renderFromCachedTemplate() anyerror!void {
             return;
         },
     };
+    defer cached_template.deinit(allocator);
 
     var repeat: u32 = 0;
     while (repeat < 10) : (repeat += 1) {
