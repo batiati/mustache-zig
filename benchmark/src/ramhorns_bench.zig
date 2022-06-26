@@ -30,6 +30,7 @@ pub fn main() anyerror!void {
     defer file.close();
 
     var file_writer = std.io.bufferedWriter(file.writer());
+    defer file_writer.flush() catch unreachable;
     var buffer: [1024]u8 = undefined;
 
     if (builtin.mode == .Debug) {
@@ -39,22 +40,16 @@ pub fn main() anyerror!void {
         const allocator = gpa.allocator();
         try simpleTemplate(allocator, &buffer, .Buffer, std.io.null_writer);
         try simpleTemplate(allocator, &buffer, .Alloc, std.io.null_writer);
-
         try simpleTemplate(allocator, &buffer, .Writer, file_writer);
-        try file_writer.flush();
-
         try partialTemplates(allocator, &buffer, .Buffer, std.io.null_writer);
         try partialTemplates(allocator, &buffer, .Alloc, std.io.null_writer);
         try parseTemplates(allocator);
     } else {
-        const allocator = std.heap.raw_c_allocator;
+        const allocator = std.heap.c_allocator;
 
         try simpleTemplate(allocator, &buffer, .Buffer, std.io.null_writer);
         try simpleTemplate(allocator, &buffer, .Alloc, std.io.null_writer);
-
         try simpleTemplate(allocator, &buffer, .Writer, file_writer);
-        try file_writer.flush();
-
         try partialTemplates(allocator, &buffer, .Buffer, std.io.null_writer);
         try partialTemplates(allocator, &buffer, .Alloc, std.io.null_writer);
         try parseTemplates(allocator);
