@@ -107,7 +107,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         finished,
                     },
 
-                    fn fetch(self: *@This(), index: usize) ?Self {
+                    fn fetch(self: @This(), index: usize) ?Self {
                         const result = self.context.vtable.get(
                             &self.context.ctx,
                             self.path,
@@ -117,10 +117,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         return switch (result) {
                             .field => |item| item,
                             .iterator_consumed => null,
-                            else => {
-                                assert(false);
-                                unreachable;
-                            },
+                            else => unreachable,
                         };
                     }
                 },

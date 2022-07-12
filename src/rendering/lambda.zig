@@ -18,7 +18,7 @@ const rendering = @import("rendering.zig");
 /// Context for a lambda call,
 /// this type must be accept as parameter by any function intended to be used as a lambda
 ///
-/// When a lambda is called, any children {{tags}} will not have been expanded - the lambda should do that on its own.
+/// When a lambda is called, any children {{tags}} won't have been expanded yet - the lambda should do that on its own.
 /// In this way you can implement transformations, filters or caching.
 pub const LambdaContext = struct {
     ptr: *const anyopaque,
@@ -203,7 +203,7 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
     const Type = std.builtin.TypeInfo;
 
     const argIs = struct {
-        fn _argIs(comptime arg: Type.FnArg, comptime types: []const type) bool {
+        fn action(comptime arg: Type.FnArg, comptime types: []const type) bool {
             inline for (types) |compare_to| {
                 if (arg.arg_type) |arg_type| {
                     if (arg_type == compare_to) return true;
@@ -212,7 +212,7 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
                 return false;
             }
         }
-    }._argIs;
+    }.action;
 
     const TValue = if (comptime meta.trait.isSingleItemPtr(TData)) meta.Child(TData) else TData;
 
