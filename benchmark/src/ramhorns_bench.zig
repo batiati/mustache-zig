@@ -13,7 +13,7 @@ const TIMES = if (builtin.mode == .Debug) 10_000 else 1_000_000;
 const full = true;
 const features: mustache.options.Features = if (full) .{} else .{
     .preseve_line_breaks_and_indentation = false,
-    .lambdas = .Disabled,
+    .lambdas = .disabled,
 };
 
 const Mode = enum {
