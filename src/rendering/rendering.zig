@@ -414,7 +414,6 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
         /// Provides the ability to choose between two writers
         /// while keeping the static dispatch interface.
         pub const OutWriter = union(enum) {
-
             /// Render directly to the underlying stream
             writer: Writer,
 

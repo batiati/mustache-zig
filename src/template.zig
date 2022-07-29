@@ -47,7 +47,6 @@ pub const Element = union(Element.Type) {
     pub const Path = []const []const u8;
 
     pub const Type = enum {
-
         /// Static text
         static_text,
 

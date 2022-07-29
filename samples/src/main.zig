@@ -17,14 +17,30 @@ const template_text =
     \\{{/features}}
 ;
 
+const Feature = struct {
+    name: []const u8,
+    condition: []const u8,
+};
+
+const Env = struct {
+    zig_version: []const u8,
+    mustache_version: []const u8,
+};
+
+const Context = struct {
+    name: []const u8,
+    env: Env,
+    features: []const Feature,
+};
+
 // Context, can be any Zig struct, supporting optionals, slices, tuples, recursive types, pointers, etc.
-var ctx = .{
+var ctx: Context = .{
     .name = "friends",
     .env = .{
         .zig_version = "master",
         .mustache_version = "alpha",
     },
-    .features = .{
+    .features = &.{
         .{ .name = "interpolation", .condition = "✅ done" },
         .{ .name = "sections", .condition = "✅ done" },
         .{ .name = "comments", .condition = "✅ done" },
@@ -37,6 +53,7 @@ var ctx = .{
 
 pub fn main() anyerror!void {
     try renderFromString();
+    try renderFromJson();
     try renderComptimeTemplate();
     try renderFromCachedTemplate();
     try renderFromFile();
@@ -56,6 +73,32 @@ pub fn renderFromString() anyerror!void {
 
     // Direct render to save memory
     try mustache.renderText(allocator, template_text, ctx, out.writer());
+}
+
+/// Render a template from a Json object
+pub fn renderFromJson() anyerror!void {
+    var gpa = GeneralPurposeAllocator(.{}){};
+    defer {
+        if (gpa.detectLeaks()) @panic("renderFromJson leaked");
+        _ = gpa.deinit();
+    }
+
+    const allocator = gpa.allocator();
+    var out = std.io.getStdOut();
+
+    // Serializing the context as a json string
+    const json_text = try std.json.stringifyAlloc(allocator, ctx, .{});
+    defer allocator.free(json_text);
+
+    // Parsing into a Json object
+    var parser = std.json.Parser.init(allocator, false);
+    defer parser.deinit();
+
+    var tree = try parser.parse(json_text);
+    defer tree.deinit();
+
+    // Rendering from a Json object
+    try mustache.renderText(allocator, template_text, tree, out.writer());
 }
 
 /// Parses a template at comptime to render many times at runtime, no allocations needed

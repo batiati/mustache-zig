@@ -74,7 +74,6 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
         } else void = if (allow_lambdas) .{} else {},
 
         pub const ComptimeCounter = struct {
-
             /// Quantity of nodes present on the template text
             nodes: usize = 0,
 

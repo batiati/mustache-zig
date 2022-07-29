@@ -6,6 +6,8 @@ const trait = std.meta.trait;
 const assert = std.debug.assert;
 const testing = std.testing;
 
+const json = std.json;
+
 const mustache = @import("../mustache.zig");
 const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
@@ -24,7 +26,6 @@ const map = @import("partials_map.zig");
 
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
-
         /// The path could no be found on the current context
         /// This result indicates that the path should be resolved against the parent context
         /// For example:
@@ -69,8 +70,18 @@ pub fn getContext(comptime Writer: type, data: anytype, comptime PartialsMap: ty
     const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
     break :Context RenderEngine.Context;
 } {
-    const Impl = ContextImpl(Writer, @TypeOf(data), PartialsMap, options);
-    return Impl.context(data);
+    const Data = @TypeOf(data);
+
+    if (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value) {    
+        const Impl = JsonContextImpl(Writer, PartialsMap, options);
+        return Impl.context(data);        
+    } else if (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree) {
+        const Impl = JsonContextImpl(Writer, PartialsMap, options);
+        return Impl.context(&data.root);        
+    } else {
+        const Impl = ContextImpl(Writer, Data, PartialsMap, options);
+        return Impl.context(data);
+    }
 }
 
 pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
@@ -337,6 +348,172 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
 
         inline fn getData(ctx: *const anyopaque) Data {
             return if (is_zero_size) undefined else (@ptrCast(*const Data, @alignCast(@alignOf(Data), ctx))).*;
+        }
+    };
+}
+
+fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
+    const ContextInterface = RenderEngine.Context;
+    const DataRender = RenderEngine.DataRender;
+    const Depth = enum { Root, Leaf };
+
+    return struct {
+        const vtable = ContextInterface.VTable{
+            .get = get,
+            .capacityHint = capacityHint,
+            .interpolate = interpolate,
+            .expandLambda = expandLambda,
+        };
+
+        const Self = @This();
+
+        pub fn context(json_value: *const json.Value) ContextInterface {
+            var interface = ContextInterface{
+                .vtable = &vtable,
+                .ctx = undefined,
+            };
+
+            const Data = *const json.Value;
+            var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &interface.ctx));
+            ptr.* = json_value;
+
+            return interface;
+        }
+
+        fn get(ctx: *const anyopaque, path: Element.Path, index: ?usize) PathResolution(ContextInterface) {
+            const root = getJsonRoot(ctx);
+            const value = getJsonValue(.Root, root, path, index);
+
+            return switch (value) {
+                .not_found_in_context => .not_found_in_context,
+                .chain_broken => .chain_broken,
+                .iterator_consumed => .iterator_consumed,
+                .field => |content| .{ .field = getContext(Writer, content, PartialsMap, options) },
+                .lambda => {
+                    assert(false);
+                    unreachable;
+                },
+            };
+        }
+
+        fn capacityHint(
+            ctx: *const anyopaque,
+            data_render: *DataRender,
+            path: Element.Path,
+        ) PathResolution(usize) {
+            const root = getJsonRoot(ctx);
+            const value = getJsonValue(.Root, root, path, null);
+
+            return switch (value) {
+                .not_found_in_context => .not_found_in_context,
+                .chain_broken => .chain_broken,
+                .iterator_consumed => .iterator_consumed,
+                .field => |content| switch (content.*) {
+                    .Bool => |boolean| return .{ .field = data_render.valueCapacityHint(boolean) },
+                    .Integer => |integer| return .{ .field = data_render.valueCapacityHint(integer) },
+                    .Float => |float| return .{ .field = data_render.valueCapacityHint(float) },
+                    .NumberString => |number_string| return .{ .field = data_render.valueCapacityHint(number_string) },
+                    .String => |string| return .{ .field = data_render.valueCapacityHint(string) },
+                    .Array => |array| return .{ .field = data_render.valueCapacityHint(array.items) },
+                    else => return .{ .field = 0 },
+                },
+                .lambda => {
+                    assert(false);
+                    unreachable;
+                },
+            };
+        }
+
+        fn interpolate(
+            ctx: *const anyopaque,
+            data_render: *DataRender,
+            path: Element.Path,
+            escape: Escape,
+        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            const root = getJsonRoot(ctx);
+            const value = getJsonValue(.Root, root, path, null);
+
+            switch (value) {
+                .not_found_in_context => return .not_found_in_context,
+                .chain_broken => return .chain_broken,
+                .iterator_consumed => return .iterator_consumed,
+                .field => |content| switch (content.*) {
+                    .Bool => |boolean| try data_render.write(boolean, escape),
+                    .Integer => |integer| try data_render.write(integer, escape),
+                    .Float => |float| try data_render.write(float, escape),
+                    .NumberString => |number_string| try data_render.write(number_string, escape),
+                    .String => |string| try data_render.write(string, escape),
+                    .Array => |array| try data_render.write(array.items, escape),
+                    else => {},
+                },
+                .lambda => {
+                    assert(false);
+                    unreachable;
+                },
+            }
+
+            return .field;
+        }
+
+        fn expandLambda(
+            ctx: *const anyopaque,
+            data_render: *DataRender,
+            path: Element.Path,
+            inner_text: []const u8,
+            escape: Escape,
+            delimiters: Delimiters,
+        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            _ = ctx;
+            _ = data_render;
+            _ = path;
+            _ = inner_text;
+            _ = escape;
+            _ = delimiters;
+
+            // Json objects cannot have declared lambdas
+            return PathResolution(void).chain_broken;
+        }
+
+        fn getJsonValue(depth: Depth, value: *const std.json.Value, path: Element.Path, index: ?usize) PathResolution(*const std.json.Value) {
+            if (path.len == 0) {
+                if (index) |current_index| {
+                    switch (value.*) {
+                        .Array => |array| if (array.items.len > current_index) {
+                            return .{ .field = &array.items[current_index] };
+                        },
+                        .Bool => |boolean| if (boolean == true) {
+                            return .{ .field = value };
+                        },
+                        else => if (current_index == 0) {
+                            return .{ .field = value };
+                        },
+                        .Null => {},
+                    }
+
+                    return .iterator_consumed;
+                } else {
+                    return .{ .field = value };
+                }
+            } else {
+                switch (value.*) {
+                    .Object => |obj| {
+                        const key = path[0];
+
+                        if (obj.get(key)) |*next_value| {
+                            return getJsonValue(.Leaf, next_value, path[1..], index);
+                        }
+                    },
+
+                    else => {},
+                }
+            }
+
+            return if (depth == .Root) .not_found_in_context else .chain_broken;
+        }
+
+        inline fn getJsonRoot(ctx: *const anyopaque) *const std.json.Value {
+            return @ptrCast(*const std.json.Value, @alignCast(@alignOf(std.json.Value), ctx));
         }
     };
 }

@@ -5,7 +5,6 @@ const builtin = @import("builtin");
 
 /// General options for processing a mustache template
 pub const TemplateOptions = struct {
-
     /// Template source options
     source: TemplateSource,
 
@@ -44,24 +43,20 @@ pub const TemplateLoadMode = union(enum) {
 };
 
 pub const TemplateSource = union(enum) {
-
     /// Loads a template from string
     string: struct {
-
         /// Use 'false' if the source string is static or lives enough
         copy_strings: bool = true,
     },
 
     /// Loads a template from a file or stream
     file: struct {
-
         /// Define the buffer size for reading the stream
         read_buffer_size: usize = 4 * 1024,
     },
 };
 
 pub const ParserOutput = enum {
-
     /// Parses a template
     /// Use this option for validation and to store a template for future rendering
     /// This option speeds up the rendering process when the same template is rendered many times
@@ -73,7 +68,6 @@ pub const ParserOutput = enum {
 };
 
 pub const ParseTextOptions = struct {
-
     /// Use 'false' if the source string is static or lives enough
     copy_strings: bool,
 
@@ -83,7 +77,6 @@ pub const ParseTextOptions = struct {
 };
 
 pub const ParseFileOptions = struct {
-
     /// Define the buffer size for reading the stream
     read_buffer_size: usize = 4 * 1024,
 
@@ -93,7 +86,6 @@ pub const ParseFileOptions = struct {
 };
 
 pub const Features = struct {
-
     /// Allows redefining the delimiters through the tags '{{=' and '=}}'
     /// Disabling this option speeds up the parsing process.
     /// If disabled, any occurrence of '{{=' will result in a parse error
@@ -112,14 +104,12 @@ pub const Features = struct {
 };
 
 pub const Lambdas = union(enum) {
-
     /// Use this option if your data source does not implement lambda functions
     /// Disabling lambda support saves memory and speeds up the parsing process
     disabled,
 
     /// Use this option to support lambda functions in your data sources
     enabled: struct {
-
         /// Lambdas can expand to new tags, including another lambda
         /// Defines the max recursion depth to avoid infinite recursion when evaluating lambdas
         /// A recursive lambda will interpolate as an empty string, without erros
@@ -133,7 +123,6 @@ pub const ContextMisses = enum {
 };
 
 pub const RenderFromTemplateOptions = struct {
-
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
@@ -141,7 +130,6 @@ pub const RenderFromTemplateOptions = struct {
 };
 
 pub const RenderFromStringOptions = struct {
-
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
@@ -153,7 +141,6 @@ pub const RenderFromStringOptions = struct {
 };
 
 pub const RenderFromFileOptions = struct {
-
     /// Defines the behavior when rendering a unknown context
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
