@@ -106,6 +106,36 @@ pub fn main() !void {
 ```
 
 
+### JSON support
+
+```Zig
+
+const std = @import("std");
+const mustache = @import("mustache");
+
+pub fn main() !void {
+    const template = "Hello {{name}} from Zig";
+
+    const allocator = std.testing.allocator;
+
+    var parser = std.json.Parser.init(allocator, false);
+    defer parser.deinit();
+
+    // Parsing an arbitrary json string
+    var json = try parser.parse(
+        \\{
+        \\   "name": "friends"
+        \\}
+    );
+    defer json.deinit();
+
+    const result = try mustache.allocRenderText(allocator, template, json);
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("Hello friends from Zig" , result);
+}
+
+```
 
 ## Benchmarks.
 
