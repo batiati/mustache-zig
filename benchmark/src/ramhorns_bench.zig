@@ -266,20 +266,20 @@ fn notParsedPartials(allocator: Allocator, buffer: []u8, mode: Mode, template_te
 
 fn parse(allocator: Allocator) !usize {
     const template_text =
-        \\<html>\
-        \\    <head>\
-        \\        <title>{{title}}</title>\
+        \\<html>
+        \\    <head>
+        \\        <title>{{title}}</title>
         \\    </head>
-        \\    <body>\
-        \\        {{#posts}}\
-        \\            <h1>{{title}}</h1>\
-        \\            <em>{{date}}</em>\
-        \\            <article>\
-        \\                {{{body}}}\
-        \\            </article>\
-        \\        {{/posts}}\
-        \\    </body>\
-        \\</html>\
+        \\    <body>
+        \\        {{#posts}}
+        \\            <h1>{{title}}</h1>
+        \\            <em>{{date}}</em>
+        \\            <article>
+        \\                {{{body}}}
+        \\            </article>
+        \\        {{/posts}}
+        \\    </body>
+        \\</html>
     ;
 
     var template = switch (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })) {

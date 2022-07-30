@@ -150,7 +150,59 @@ pub fn main() !void {
 
 There are [some benchmark tests](benchmark/src/ramhorns_bench.zig) inspired by the excellent [Ramhorns](https://github.com/maciejhirsz/ramhorns)'s benchmarks, comparing the performance of most popular Rust template engines.
 
-(...)
+### Mustache vs Zig's fmt
+
+We can assume that Zig's `std.fmt` is the **fastest** possible way to render a simple string. [This benchmark](benchmark/src/ramhorns_bench.zig) shows how much **slower** a mustache template is rendered when compared with the same template rendered by Zig's `std.fmt`.
+
+1. Rendering to a pre-allocated buffer 1 million times
+
+    |               | Total time | ns/iter | MB/s      | Penality
+    ----------------|------------|---------|-----------|-------
+    |Zig fmt        | 0.058s     | 58 ns   | 2596 MB/s | -- 
+    |mustache-zig   | 0.167s     | 167 ns  | 1149 MB/s | 2.260x slower
+
+2. Rendering to a new allocated string 1 million times**
+
+    |               | Total time | ns/iter | MB/s      | Penality
+    ----------------|------------|---------|-----------|-------
+    |Zig fmt        | 0.042s     | 42 ns   | 1869 MB/s | -- 
+    |mustache-zig   | 0.094s     | 94 ns   |  645 MB/s | 2.897x slower
+
+
+3. Rendering to a local file 1 million times
+
+    |               | Total time | ns/iter | MB/s      | Penality
+    ----------------|------------|---------|-----------|-------
+    |Zig fmt        | 0.079s     |  79 ns  | 1367 MB/s | -- 
+    |mustache-zig   | 0.125s     | 125 ns  |  862 MB/s | 1.586x slower
+
+_*All tests were compiled as ReleaseSafe, and executed on a Intel i7-1185G7 @ 3.00GHz, Linux kernel 5.17_
+
+### Parser benchmarks
+
+This simple template takes about **1.5 microssecond** to be full parsed at runtime.
+
+```zig
+const template_text =
+    \\<html>
+    \\    <head>
+    \\        <title>{{title}}</title>
+    \\    </head>
+    \\    <body>
+    \\        {{#posts}}
+    \\            <h1>{{title}}</h1>
+    \\            <em>{{date}}</em>
+    \\            <article>
+    \\                {{{body}}}
+    \\            </article>
+    \\        {{/posts}}
+    \\    </body>
+    \\</html>
+```
+
+
+
+### Memory benchmarks
 
 Mustache templates are well known for HTML templating, but it's useful to render any kind of dynamic document, and potentially load templates from untrusted or user-defined sources.
 
