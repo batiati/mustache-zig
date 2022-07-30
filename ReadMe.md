@@ -148,11 +148,35 @@ pub fn main() !void {
 
 ## Benchmarks.
 
-There are [some benchmark tests](benchmark/src/ramhorns_bench.zig) inspired by the excellent [Ramhorns](https://github.com/maciejhirsz/ramhorns)'s benchmarks, comparing the performance of most popular Rust template engines.
+There are [some benchmark tests](benchmark/src/ramhorns_bench.zig) inspired by the excellent [Ramhorns](https://github.com/maciejhirsz/ramhorns)'s benchmarks, comparing the performance of most popular **Rust** template engines.
 
+1. Rendering to a new allocated string 1 million times
+
+    |                                                               | Total time | ns/iter  | MB/s      
+    ----------------------------------------------------------------|------------|----------|-----------
+    |[Ramhorns 0.14.0](https://crates.io/crates/ramhorns)           | 0,040s     |    40 ns | 2425 MB/s
+    |[Askama 0.9](https://crates.io/crates/askama)                  | 0,136s     |   136 ns |  713 MB/s
+    |[Tera 1.2.0](https://crates.io/crates/tera)                    | 0,308s     |   308 ns |  314 MB/s
+    |[Mustache 0.9](https://crates.io/crates/mustache)              | 0,363s     |   363 ns |  267 MB/s
+    |[Handlebars 3.1.0-beta.2](https://crates.io/crates/handlebars) | 1,833s     | 1,833 ns |   52 MB/s
+
+2. Parsing a template 1 million times
+
+    |                                                               | Total time | ns/iter   | MB/s      
+    ----------------------------------------------------------------|------------|-----------|-----------
+    |[Ramhorns 0.14.0](https://crates.io/crates/ramhorns)           |  0,040s    |    317 ns |  492 MB/s
+    |[Mustache 0.9](https://crates.io/crates/mustache)              |  5,863s    |  5,863 ns |   26 MB/s
+    |[Handlebars 3.1.0-beta.2](https://crates.io/crates/handlebars) | 11,797s    | 11,797 ns |   13 MB/s
+
+
+_*All benchmarks were executed using `cargo bench` on a Intel i7-1185G7 @ 3.00GHz, Linux kernel 5.17_
+
+>For comparision with mustache-zig, refer to "Rendering to a new allocated string 1 million times" and "Parsing a template 1 million times" sections bellow.
 ### Mustache vs Zig's fmt
 
-We can assume that Zig's `std.fmt` is the **fastest** possible way to render a simple string. [This benchmark](benchmark/src/ramhorns_bench.zig) shows how much **slower** a mustache template is rendered when compared with the same template rendered by Zig's `std.fmt`.
+The same benchmark was implemented in Zig for both mustache-zig and Zig's `std.fmt`.
+
+We can assume that Zig's `std.fmt` is the **fastest** possible way to render a simple string using Zig. [This benchmark](benchmark/src/ramhorns_bench.zig) shows how much **slower** a mustache template is rendered when compared with the same template rendered by Zig's `std.fmt`.
 
 1. Rendering to a pre-allocated buffer 1 million times
 
@@ -160,6 +184,7 @@ We can assume that Zig's `std.fmt` is the **fastest** possible way to render a s
     ----------------|------------|---------|-----------|-------
     |Zig fmt        | 0.042s     | 42 ns   | 2596 MB/s | -- 
     |mustache-zig   | 0.094s     | 94 ns   | 1149 MB/s | 2.260x slower
+
 
 2. Rendering to a new allocated string 1 million times
 
@@ -176,31 +201,15 @@ We can assume that Zig's `std.fmt` is the **fastest** possible way to render a s
     |Zig fmt        | 0.079s     |  79 ns  | 1367 MB/s | -- 
     |mustache-zig   | 0.125s     | 125 ns  |  862 MB/s | 1.586x slower
 
-_*All tests were compiled as ReleaseSafe, and executed on a Intel i7-1185G7 @ 3.00GHz, Linux kernel 5.17_
 
-### Parser benchmarks
+4. Parsing a template 1 million times
 
-This simple template takes about **1.5 microssecond** to be full parsed at runtime.
-
-```zig
-const template_text =
-    \\<html>
-    \\    <head>
-    \\        <title>{{title}}</title>
-    \\    </head>
-    \\    <body>
-    \\        {{#posts}}
-    \\            <h1>{{title}}</h1>
-    \\            <em>{{date}}</em>
-    \\            <article>
-    \\                {{{body}}}
-    \\            </article>
-    \\        {{/posts}}
-    \\    </body>
-    \\</html>
-```
+    |               | Total time | ns/iter  | MB/s      
+    ----------------|------------|----------|-----------
+    |mustache-zig   | 1.380s     | 1,380 ns |  182 MB/s 
 
 
+_*All benchmarks were compiled as ReleaseSafe, and executed on a Intel i7-1185G7 @ 3.00GHz, Linux kernel 5.17_
 
 ### Memory benchmarks
 
