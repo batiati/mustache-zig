@@ -22,7 +22,9 @@ const LambdaInvoker = lambda.LambdaInvoker;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-pub const FlattenedType = [4]usize;
+// TODO: There is no need to JSON contexts be dynamic invoked
+// Add a new Context aware way to resolve the path
+pub const FlattenedType = [@sizeOf(std.json.Value) / @sizeOf(usize)]usize;
 
 pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
@@ -577,6 +579,7 @@ pub const Fields = struct {
                 trait.isSingleItemPtr(TField);
 
             const can_embed = @sizeOf(TField) <= max_size and
+                TField == std.json.Value or
                 (trait.is(.Enum)(TField) or
                 trait.is(.EnumLiteral)(TField) or
                 TField == bool or

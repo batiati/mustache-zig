@@ -1730,37 +1730,7 @@ const tests = struct {
                 const expected = "a1.A1x.A1y.";
 
                 {
-                    // TODO:
-                    // All elements must be the same type in a tuple
-                    // Rework the iterator to solve that limitation
-                    const Bottom = struct {
-                        bname: []const u8,
-                    };
-
-                    var data = .{
-                        .tops = .{
-                            .{
-                                .tname = .{
-                                    .upper = "A",
-                                    .lower = "a",
-                                },
-                                .middles = .{
-                                    .{
-                                        .mname = "1",
-                                        .bottoms = .{
-                                            Bottom{ .bname = "x" },
-                                            Bottom{ .bname = "y" },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    };
-
-                    try expectRender(template_text, data, expected);
-                }
-
-                {
+                    //slices
                     const Bottom = struct {
                         bname: []const u8,
                     };
@@ -1803,6 +1773,83 @@ const tests = struct {
                     };
 
                     try expectRender(template_text, data, expected);
+                }
+
+                {
+                    //array
+                    const Bottom = struct {
+                        bname: []const u8,
+                    };
+
+                    const Middle = struct {
+                        mname: []const u8,
+                        bottoms: [2]Bottom,
+                    };
+
+                    const Top = struct {
+                        tname: struct {
+                            upper: []const u8,
+                            lower: []const u8,
+                        },
+                        middles: [1]Middle,
+                    };
+
+                    const Data = struct {
+                        tops: [1]Top,
+                    };
+
+                    var data = Data{
+                        .tops = [_]Top{
+                            .{
+                                .tname = .{
+                                    .upper = "A",
+                                    .lower = "a",
+                                },
+                                .middles = [_]Middle{
+                                    .{
+                                        .mname = "1",
+                                        .bottoms = [_]Bottom{
+                                            .{ .bname = "x" },
+                                            .{ .bname = "y" },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    };
+
+                    try expectRender(template_text, data, expected);
+                }
+
+                {
+                    //tuples
+                    const Bottom = struct {
+                        bname: []const u8,
+                    };
+
+                    var data = .{
+                        .tops = .{
+                            .{
+                                .tname = .{
+                                    .upper = "A",
+                                    .lower = "a",
+                                },
+                                .middles = .{
+                                    .{
+                                        .mname = "1",
+                                        .bottoms = .{
+                                            Bottom{ .bname = "x" },
+                                            Bottom{ .bname = "y" },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    };
+
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -1919,7 +1966,9 @@ const tests = struct {
                         },
                     };
 
-                    try expectRender(template_text, data, expected);
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -1930,10 +1979,11 @@ const tests = struct {
 
                 {
                     // slice
-                    const Data = struct { list: []const struct { item: u32 } };
+                    const Item = struct { item: u32 };
+                    const Data = struct { list: []const Item };
 
                     var data = Data{
-                        .list = &.{},
+                        .list = &[0]Item{},
                     };
 
                     try expectRender(template_text, data, expected);
@@ -1941,10 +1991,11 @@ const tests = struct {
 
                 {
                     // array
-                    const Data = struct { list: [0]struct { item: u32 } };
+                    const Item = struct { item: u32 };
+                    const Data = struct { list: [0]Item };
 
                     var data = Data{
-                        .list = .{},
+                        .list = [0]Item{},
                     };
 
                     try expectRender(template_text, data, expected);
@@ -1956,7 +2007,9 @@ const tests = struct {
                         .list = .{},
                     };
 
-                    try expectRender(template_text, data, expected);
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -2031,7 +2084,9 @@ const tests = struct {
                 {
                     // tuple
                     var data = .{ .list = .{ "a", "b", "c", "d", "e" } };
-                    try expectRender(template_text, data, expected);
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -2057,7 +2112,9 @@ const tests = struct {
                 {
                     // tuple
                     var data = .{ .list = .{ 1, 2, 3, 4, 5 } };
-                    try expectRender(template_text, data, expected);
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -2085,7 +2142,10 @@ const tests = struct {
                 {
                     // tuple
                     var data = .{ .list = .{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
-                    try expectRender(template_text, data, expected);
+
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -2121,7 +2181,10 @@ const tests = struct {
                         .{ 1, 2, 3 },
                         .{ 4, 5, 6 },
                     } };
-                    try expectRender(template_text, data, expected);
+
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -2135,7 +2198,10 @@ const tests = struct {
                     .{ 1, 2, 3 },
                     .{ "a", "b", "c" },
                 } };
-                try expectRender(template_text, data, expected);
+
+                try expectCachedRender(template_text, data, expected);
+                try expectComptimeRender(template_text, data, expected);
+                try expectStreamedRender(template_text, data, expected);
             }
 
             // Dotted names should be valid for Section tags.
@@ -2339,7 +2405,9 @@ const tests = struct {
                 {
                     // tuple
                     var data = .{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
-                    try expectRender(template_text, data, expected);
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -2365,7 +2433,9 @@ const tests = struct {
                 {
                     // tuple
                     var data = .{ .list = .{} };
-                    try expectRender(template_text, data, expected);
+                    try expectCachedRender(template_text, data, expected);
+                    try expectComptimeRender(template_text, data, expected);
+                    try expectStreamedRender(template_text, data, expected);
                 }
             }
 
@@ -3300,13 +3370,15 @@ const tests = struct {
                 \\DONE
             ;
 
+            const Item = struct { item: i32 };
             var data = .{
-                .list = .{
+                .list = &[_]Item{
                     .{ .item = 1 },
                     .{ .item = 2 },
                     .{ .item = 3 },
                 },
             };
+
             try expectRender(template_text, data, expected);
         }
 
@@ -3355,8 +3427,9 @@ const tests = struct {
                 \\EOF
             ;
 
+            const Item = struct { id: u32, desc: []const u8 };
             var data = .{
-                .list = .{
+                .list = &[_]Item{
                     .{ .id = 1, .desc = "task a" },
                     .{ .id = 2, .desc = "task b" },
                     .{ .id = 3, .desc = "task c" },
@@ -3954,12 +4027,20 @@ const tests = struct {
         try expectCachedRender(template_text, data, expected);
         try expectComptimeRender(template_text, data, expected);
         try expectStreamedRender(template_text, data, expected);
+
+        // Lambdas are not supported for JSON objects
+        const has_lambda = comptime hasLambda(@TypeOf(data));
+        if (!has_lambda) try expectJsonRender(template_text, data, expected);
     }
 
     fn expectRenderPartials(comptime template_text: []const u8, comptime partials: anytype, data: anytype, expected: []const u8) anyerror!void {
         try expectCachedRenderPartials(template_text, partials, data, expected);
         try expectComptimeRenderPartials(template_text, partials, data, expected);
         try expectStreamedRenderPartials(template_text, partials, data, expected);
+
+        // Lambdas are not supported for JSON objects
+        const has_lambda = comptime hasLambda(@TypeOf(data));
+        if (!has_lambda) try expectJsonRenderPartials(template_text, partials, data, expected);
     }
 
     fn expectParseTemplate(template_text: []const u8) !Template {
@@ -3984,6 +4065,47 @@ const tests = struct {
 
         var result = try allocRender(allocator, cached_template, data);
         defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    fn hasLambda(comptime Data: type) bool {
+        if (trait.isSingleItemPtr(Data)) {
+            return hasLambda(meta.Child(Data));
+        } else {
+            const info = @typeInfo(Data);
+            if (info == .Struct) {
+                const decls = info.Struct.decls;
+                inline for (decls) |decl| {
+                    if (decl.is_pub) {
+                        const DeclType = @TypeOf(@field(Data, decl.name));
+                        if (@typeInfo(DeclType) == .Fn) return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+
+    fn expectJsonRender(template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
+        const allocator = testing.allocator;
+
+        // Cached template render
+        var cached_template = try expectParseTemplate(template_text);
+        defer cached_template.deinit(allocator);
+
+        const json_text = try std.json.stringifyAlloc(allocator, data, .{});
+        defer allocator.free(json_text);
+
+        var parser = std.json.Parser.init(allocator, false);
+        defer parser.deinit();
+
+        var json = try parser.parse(json_text);
+        defer json.deinit();
+
+        var result = try allocRender(allocator, cached_template, json);
+        defer allocator.free(result);
+
         try testing.expectEqualStrings(expected, result);
     }
 
@@ -4024,6 +4146,44 @@ const tests = struct {
         }
 
         var result = try allocRenderPartials(allocator, cached_template, hashMap, data);
+        defer allocator.free(result);
+
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    fn expectJsonRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {
+        const allocator = testing.allocator;
+
+        // Cached template render
+        var cached_template = try expectParseTemplate(template_text);
+        defer cached_template.deinit(allocator);
+
+        var hashMap = std.StringHashMap(Template).init(allocator);
+        defer {
+            var iterator = hashMap.valueIterator();
+            while (iterator.next()) |partial| {
+                partial.deinit(allocator);
+            }
+            hashMap.deinit();
+        }
+
+        inline for (partials) |item| {
+            var partial_template = try expectParseTemplate(item[1]);
+            errdefer partial_template.deinit(allocator);
+
+            try hashMap.put(item[0], partial_template);
+        }
+
+        const json_text = try std.json.stringifyAlloc(allocator, data, .{});
+        defer allocator.free(json_text);
+
+        var parser = std.json.Parser.init(allocator, false);
+        defer parser.deinit();
+
+        var json = try parser.parse(json_text);
+        defer json.deinit();
+
+        var result = try allocRenderPartials(allocator, cached_template, hashMap, json);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);

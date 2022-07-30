@@ -72,12 +72,12 @@ pub fn getContext(comptime Writer: type, data: anytype, comptime PartialsMap: ty
 } {
     const Data = @TypeOf(data);
 
-    if (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value) {    
+    if (comptime Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
         const Impl = JsonContextImpl(Writer, PartialsMap, options);
-        return Impl.context(data);        
-    } else if (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree) {
+        return Impl.context(data);
+    } else if (Data == json.ValueTree or (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
         const Impl = JsonContextImpl(Writer, PartialsMap, options);
-        return Impl.context(&data.root);        
+        return Impl.context(data.root);
     } else {
         const Impl = ContextImpl(Writer, Data, PartialsMap, options);
         return Impl.context(data);
@@ -368,13 +368,13 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
 
         const Self = @This();
 
-        pub fn context(json_value: *const json.Value) ContextInterface {
+        pub fn context(json_value: json.Value) ContextInterface {
             var interface = ContextInterface{
                 .vtable = &vtable,
                 .ctx = undefined,
             };
 
-            const Data = *const json.Value;
+            const Data = json.Value;
             var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &interface.ctx));
             ptr.* = json_value;
 
@@ -409,7 +409,7 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
                 .not_found_in_context => .not_found_in_context,
                 .chain_broken => .chain_broken,
                 .iterator_consumed => .iterator_consumed,
-                .field => |content| switch (content.*) {
+                .field => |content| switch (content) {
                     .Bool => |boolean| return .{ .field = data_render.valueCapacityHint(boolean) },
                     .Integer => |integer| return .{ .field = data_render.valueCapacityHint(integer) },
                     .Float => |float| return .{ .field = data_render.valueCapacityHint(float) },
@@ -438,7 +438,7 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
                 .not_found_in_context => return .not_found_in_context,
                 .chain_broken => return .chain_broken,
                 .iterator_consumed => return .iterator_consumed,
-                .field => |content| switch (content.*) {
+                .field => |content| switch (content) {
                     .Bool => |boolean| try data_render.write(boolean, escape),
                     .Integer => |integer| try data_render.write(integer, escape),
                     .Float => |float| try data_render.write(float, escape),
@@ -475,14 +475,14 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
             return PathResolution(void).chain_broken;
         }
 
-        fn getJsonValue(depth: Depth, value: *const std.json.Value, path: Element.Path, index: ?usize) PathResolution(*const std.json.Value) {
+        fn getJsonValue(depth: Depth, value: json.Value, path: Element.Path, index: ?usize) PathResolution(json.Value) {
             if (path.len == 0) {
                 if (index) |current_index| {
-                    switch (value.*) {
+                    switch (value) {
                         .Array => |array| if (array.items.len > current_index) {
-                            return .{ .field = &array.items[current_index] };
+                            return .{ .field = array.items[current_index] };
                         },
-                        .Bool => |boolean| if (boolean == true) {
+                        .Bool => |boolean| if (boolean == true and current_index == 0) {
                             return .{ .field = value };
                         },
                         else => if (current_index == 0) {
@@ -496,11 +496,11 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
                     return .{ .field = value };
                 }
             } else {
-                switch (value.*) {
+                switch (value) {
                     .Object => |obj| {
                         const key = path[0];
 
-                        if (obj.get(key)) |*next_value| {
+                        if (obj.get(key)) |next_value| {
                             return getJsonValue(.Leaf, next_value, path[1..], index);
                         }
                     },
@@ -512,8 +512,9 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
             return if (depth == .Root) .not_found_in_context else .chain_broken;
         }
 
-        inline fn getJsonRoot(ctx: *const anyopaque) *const std.json.Value {
-            return @ptrCast(*const std.json.Value, @alignCast(@alignOf(std.json.Value), ctx));
+        inline fn getJsonRoot(ctx: *const anyopaque) json.Value {
+            const Data = json.Value;
+            return (@ptrCast(*const Data, @alignCast(@alignOf(Data), ctx))).*;
         }
     };
 }
