@@ -161,7 +161,7 @@ We can assume that Zig's `std.fmt` is the **fastest** possible way to render a s
     |Zig fmt        | 0.058s     | 58 ns   | 2596 MB/s | -- 
     |mustache-zig   | 0.167s     | 167 ns  | 1149 MB/s | 2.260x slower
 
-2. Rendering to a new allocated string 1 million times**
+2. Rendering to a new allocated string 1 million times
 
     |               | Total time | ns/iter | MB/s      | Penality
     ----------------|------------|---------|-----------|-------
