@@ -66,6 +66,15 @@ pub fn simpleTemplate(allocator: Allocator, buffer: []u8, comptime mode: Mode, w
         .body = "This is a really simple test of the rendering!",
     };
 
+    var json_text = try std.json.stringifyAlloc(allocator, data, .{});
+    defer allocator.free(json_text);
+
+    var parser = std.json.Parser.init(allocator, false);
+    defer parser.deinit();
+
+    var json_data = try parser.parse(json_text);
+    defer json_data.deinit();
+
     var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })).success;
     defer template.deinit(allocator);
 
@@ -79,8 +88,63 @@ pub fn simpleTemplate(allocator: Allocator, buffer: []u8, comptime mode: Mode, w
         data,
         writer,
     }, null);
-    _ = try repeat("Mustache pre-parsed", preParsed, .{ allocator, buffer, mode, template, data, writer }, reference);
-    if (mode != .Buffer) _ = try repeat("Mustache not parsed", notParsed, .{ allocator, buffer, mode, template_text, data, writer }, reference);
+
+    _ = try repeat(
+        "Mustache pre-parsed",
+        preParsed,
+        .{
+            allocator,
+            buffer,
+            mode,
+            template,
+            data,
+            writer,
+        },
+        reference,
+    );
+
+    _ = try repeat(
+        "Mustache pre-parsed - JSON",
+        preParsed,
+        .{
+            allocator,
+            buffer,
+            mode,
+            template,
+            json_data,
+            writer,
+        },
+        reference,
+    );
+
+    if (mode != .Buffer) _ = try repeat(
+        "Mustache not parsed",
+        notParsed,
+        .{
+            allocator,
+            buffer,
+            mode,
+            template_text,
+            data,
+            writer,
+        },
+        reference,
+    );
+
+    if (mode != .Buffer) _ = try repeat(
+        "Mustache not parsed - JSON",
+        notParsed,
+        .{
+            allocator,
+            buffer,
+            mode,
+            template_text,
+            data,
+            writer,
+        },
+        reference,
+    );
+
     std.debug.print("\n\n", .{});
 }
 
@@ -127,10 +191,78 @@ pub fn partialTemplates(allocator: Allocator, buffer: []u8, comptime mode: Mode,
         .body = "This is a really simple test of the rendering!",
     };
 
+    var json_text = try std.json.stringifyAlloc(allocator, data, .{});
+    defer allocator.free(json_text);
+
+    var parser = std.json.Parser.init(allocator, false);
+    defer parser.deinit();
+
+    var json_data = try parser.parse(json_text);
+    defer json_data.deinit();
+
     std.debug.print("Mode {s}\n", .{@tagName(mode)});
     std.debug.print("----------------------------------\n", .{});
-    _ = try repeat("Mustache pre-parsed partials", preParsedPartials, .{ allocator, buffer, mode, template, partial_templates, data, writer }, null);
-    if (mode != .Buffer) _ = try repeat("Mustache not parsed partials", notParsedPartials, .{ allocator, buffer, mode, template_text, partial_templates_text, data, writer }, null);
+
+    _ = try repeat(
+        "Mustache pre-parsed partials",
+        preParsedPartials,
+        .{
+            allocator,
+            buffer,
+            mode,
+            template,
+            partial_templates,
+            data,
+            writer,
+        },
+        null,
+    );
+
+    _ = try repeat(
+        "Mustache pre-parsed partials - JSON",
+        preParsedPartials,
+        .{
+            allocator,
+            buffer,
+            mode,
+            template,
+            partial_templates,
+            json_data,
+            writer,
+        },
+        null,
+    );
+
+    if (mode != .Buffer) _ = try repeat(
+        "Mustache not parsed partials",
+        notParsedPartials,
+        .{
+            allocator,
+            buffer,
+            mode,
+            template_text,
+            partial_templates_text,
+            data,
+            writer,
+        },
+        null,
+    );
+
+    if (mode != .Buffer) _ = try repeat(
+        "Mustache not parsed partials - JSON",
+        notParsedPartials,
+        .{
+            allocator,
+            buffer,
+            mode,
+            template_text,
+            partial_templates_text,
+            json_data,
+            writer,
+        },
+        null,
+    );
+
     std.debug.print("\n\n", .{});
 }
 
