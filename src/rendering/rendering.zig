@@ -1,6 +1,7 @@
 const std = @import("std");
 const meta = std.meta;
 const trait = meta.trait;
+const json = std.json;
 const Allocator = std.mem.Allocator;
 
 const testing = std.testing;
@@ -33,6 +34,21 @@ const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 const BufError = std.io.FixedBufferStream([]u8).WriteError;
 
 pub const LambdaContext = @import("lambda.zig").LambdaContext;
+
+pub const ContextType = enum {
+    native,
+    json,
+
+    pub fn fromData(comptime Data: type) ContextType {
+        if (Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
+            return .json;
+        } else if (Data == json.ValueTree or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
+            return .json;
+        } else {
+            return .native;
+        }
+    }
+};
 
 /// Renders the `Template` with the given `data` to a `writer`.
 pub fn render(template: Template, data: anytype, writer: anytype) !void {
@@ -351,8 +367,9 @@ pub fn allocRenderFileZPartialsWithOptions(allocator: Allocator, template_absolu
 fn internalRender(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
     comptime assert(options == .template);
 
+    const context_type = comptime ContextType.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
-    const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
+    const Engine = RenderEngine(context_type, @TypeOf(writer), PartialsMap, options);
 
     try Engine.render(template, data, writer, PartialsMap.init(partials));
 }
@@ -363,9 +380,10 @@ fn internalAllocRender(allocator: Allocator, template: Template, partials: anyty
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
+    const context_type = comptime ContextType.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
-    const Engine = RenderEngine(Writer, PartialsMap, options);
+    const Engine = RenderEngine(context_type, Writer, PartialsMap, options);
 
     try Engine.bufRender(list.writer(), template, data, PartialsMap.init(partials));
 
@@ -378,8 +396,9 @@ fn internalAllocRender(allocator: Allocator, template: Template, partials: anyty
 fn internalCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
     comptime assert(options != .template);
 
+    const context_type = comptime ContextType.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
-    const Engine = RenderEngine(@TypeOf(writer), PartialsMap, options);
+    const Engine = RenderEngine(context_type, @TypeOf(writer), PartialsMap, options);
 
     try Engine.collect(allocator, template, data, writer, PartialsMap.init(allocator, partials));
 }
@@ -390,9 +409,10 @@ fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: an
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
+    const context_type = comptime ContextType.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
-    const Engine = RenderEngine(Writer, PartialsMap, options);
+    const Engine = RenderEngine(context_type, Writer, PartialsMap, options);
 
     try Engine.bufCollect(allocator, list.writer(), template, data, PartialsMap.init(allocator, partials));
 
@@ -403,9 +423,9 @@ fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: an
 }
 
 /// Group functions and structs that are denpendent of Writer and RenderOptions
-pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     return struct {
-        pub const Context = context.Context(Writer, PartialsMap, options);
+        pub const Context = context.Context(context_type, Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
         pub const PartialsMap = PartialsMap;
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
@@ -940,6 +960,35 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
             }
         };
 
+        pub fn getContext(data: anytype) Context: {
+            const Data = @TypeOf(data);
+
+            if (context_type == .native) {
+                const by_value = Fields.byValue(Data);
+                if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
+            }
+
+            break :Context Context;
+        } {
+            const Data = @TypeOf(data);
+
+            switch (context_type) {
+                .native => {
+                    const ContextImpl = context.NativeContextImpl(Writer, Data, PartialsMap, options);
+                    return ContextImpl.context(data);
+                },
+                .json => {
+                    if (comptime Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
+                        return Context.context(data);
+                    } else if (Data == json.ValueTree or (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
+                        return Context.context(data.root);
+                    } else {
+                        @compileError("Expected a std.json.Value or std.json.ValueTree");
+                    }
+                },
+            }
+        }
+
         pub fn render(template: Template, data: anytype, writer: Writer, partials_map: PartialsMap) !void {
             comptime assert(options == .template);
 
@@ -952,12 +1001,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
-                    .ctx = context.getContext(
-                        Writer,
-                        if (by_value) data else @as(*const Data, &data),
-                        PartialsMap,
-                        options,
-                    ),
+                    .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
                 },
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
@@ -978,12 +1022,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
-                    .ctx = context.getContext(
-                        Writer,
-                        if (by_value) data else @as(*const Data, &data),
-                        PartialsMap,
-                        options,
-                    ),
+                    .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
                 },
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
@@ -1004,12 +1043,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
-                    .ctx = context.getContext(
-                        Writer,
-                        if (by_value) data else @as(*const Data, &data),
-                        PartialsMap,
-                        options,
-                    ),
+                    .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
                 },
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
@@ -1030,12 +1064,7 @@ pub fn RenderEngine(comptime Writer: type, comptime PartialsMap: type, comptime 
                 .partials_map = partials_map,
                 .stack = &ContextStack{
                     .parent = null,
-                    .ctx = context.getContext(
-                        Writer,
-                        if (by_value) data else @as(*const Data, &data),
-                        PartialsMap,
-                        options,
-                    ),
+                    .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
                 },
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
@@ -3926,7 +3955,7 @@ const tests = struct {
     const escape_tests = struct {
         const dummy_options = RenderOptions{ .string = .{} };
         const DummyPartialsMap = map.PartialsMap(@TypeOf(.{ "foo", "bar" }), dummy_options);
-        const Engine = RenderEngine(std.ArrayList(u8).Writer, DummyPartialsMap, dummy_options);
+        const Engine = RenderEngine(.native, std.ArrayList(u8).Writer, DummyPartialsMap, dummy_options);
         const IndentationQueue = Engine.IndentationQueue;
 
         test "Escape" {
@@ -4100,10 +4129,10 @@ const tests = struct {
         var parser = std.json.Parser.init(allocator, false);
         defer parser.deinit();
 
-        var json = try parser.parse(json_text);
-        defer json.deinit();
+        var json_obj = try parser.parse(json_text);
+        defer json_obj.deinit();
 
-        var result = try allocRender(allocator, cached_template, json);
+        var result = try allocRender(allocator, cached_template, json_obj);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
@@ -4180,10 +4209,10 @@ const tests = struct {
         var parser = std.json.Parser.init(allocator, false);
         defer parser.deinit();
 
-        var json = try parser.parse(json_text);
-        defer json.deinit();
+        var json_obj = try parser.parse(json_text);
+        defer json_obj.deinit();
 
-        var result = try allocRenderPartials(allocator, cached_template, hashMap, json);
+        var result = try allocRenderPartials(allocator, cached_template, hashMap, json_obj);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);

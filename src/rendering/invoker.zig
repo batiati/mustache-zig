@@ -22,12 +22,12 @@ const LambdaInvoker = lambda.LambdaInvoker;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-// TODO: There is no need to JSON contexts be dynamic invoked
-// Add a new Context aware way to resolve the path
-pub const FlattenedType = [@sizeOf(std.json.Value) / @sizeOf(usize)]usize;
+/// This type is large enough to hold some context data such as a pointer, a slice, a nullable pointer/slice
+/// and some common primitives passed by value like enums, integers, floats and nullable integer/floats
+pub const FlattenedType = [4]usize;
 
 pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
+    const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);
     const Context = RenderEngine.Context;
     const DataRender = RenderEngine.DataRender;
 
@@ -343,7 +343,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
         fn getAction(param: void, value: anytype) error{}!Context {
             _ = param;
-            return context.getContext(Writer, value, PartialsMap, options);
+            return RenderEngine.getContext(value);
         }
 
         fn interpolateAction(
@@ -1212,7 +1212,7 @@ const tests = struct {
     const DummyParser = @import("../parsing/parser.zig").Parser(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
     const DummyWriter = @TypeOf(std.io.null_writer);
     const DummyPartialsMap = map.PartialsMap(void, dummy_options);
-    const DummyRenderEngine = rendering.RenderEngine(DummyWriter, DummyPartialsMap, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngine(.native, DummyWriter, DummyPartialsMap, dummy_options);
     const DummyInvoker = DummyRenderEngine.Invoker;
     const DummyCaller = DummyInvoker.PathInvoker(error{}, bool, dummyAction);
 

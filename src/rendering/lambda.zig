@@ -84,7 +84,7 @@ pub const LambdaContext = struct {
 };
 
 pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
+    const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {

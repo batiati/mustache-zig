@@ -14,6 +14,7 @@ const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 
 const rendering = @import("rendering.zig");
+const ContextType = rendering.ContextType;
 
 const lambda = @import("lambda.zig");
 const LambdaContext = lambda.LambdaContext;
@@ -62,30 +63,18 @@ pub const Escape = enum {
     Unescaped,
 };
 
-pub fn getContext(comptime Writer: type, data: anytype, comptime PartialsMap: type, comptime options: RenderOptions) Context: {
-    const Data = @TypeOf(data);
-    const by_value = Fields.byValue(Data);
-    if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
+pub fn Context(comptime context_type: ContextType, comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
 
-    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
-    break :Context RenderEngine.Context;
-} {
-    const Data = @TypeOf(data);
-
-    if (comptime Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
-        const Impl = JsonContextImpl(Writer, PartialsMap, options);
-        return Impl.context(data);
-    } else if (Data == json.ValueTree or (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
-        const Impl = JsonContextImpl(Writer, PartialsMap, options);
-        return Impl.context(data.root);
-    } else {
-        const Impl = ContextImpl(Writer, Data, PartialsMap, options);
-        return Impl.context(data);
-    }
+    // The native context uses dynamic dispatch to resolve how to render each kind of struct and data-type
+    // The json context uses static dispatch, once the JSON key-value is well known for any possible type
+    return switch (context_type) {
+        .native => NativeContextInterface(Writer, PartialsMap, options),
+        .json => JsonContext(Writer, PartialsMap, options),
+    };
 }
 
-pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
+pub fn NativeContextInterface(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -103,116 +92,13 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             expandLambda: fn (*const anyopaque, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
-        pub const Iterator = struct {
-            data: union(enum) {
-                empty,
-                lambda: Self,
-                sequence: struct {
-                    context: *const Self,
-                    path: Element.Path,
-                    state: union(enum) {
-                        fetching: struct {
-                            item: Self,
-                            index: usize,
-                        },
-                        finished,
-                    },
-
-                    fn fetch(self: @This(), index: usize) ?Self {
-                        const result = self.context.vtable.get(
-                            &self.context.ctx,
-                            self.path,
-                            index,
-                        );
-
-                        return switch (result) {
-                            .field => |item| item,
-                            .iterator_consumed => null,
-                            else => unreachable,
-                        };
-                    }
-                },
-            },
-
-            fn initEmpty() Iterator {
-                return .{
-                    .data = .empty,
-                };
-            }
-
-            fn initLambda(lambda_ctx: Self) Iterator {
-                return .{
-                    .data = .{
-                        .lambda = lambda_ctx,
-                    },
-                };
-            }
-
-            fn initSequence(parent_ctx: *const Self, path: Element.Path, item: Self) Iterator {
-                return .{
-                    .data = .{
-                        .sequence = .{
-                            .context = parent_ctx,
-                            .path = path,
-                            .state = .{
-                                .fetching = .{
-                                    .item = item,
-                                    .index = 0,
-                                },
-                            },
-                        },
-                    },
-                };
-            }
-
-            pub fn lambda(self: Iterator) ?Self {
-                return switch (self.data) {
-                    .lambda => |item| item,
-                    else => null,
-                };
-            }
-
-            pub inline fn truthy(self: Iterator) bool {
-                switch (self.data) {
-                    .empty => return false,
-                    .lambda => return true,
-                    .sequence => |sequence| switch (sequence.state) {
-                        .fetching => return true,
-                        .finished => return false,
-                    },
-                }
-            }
-
-            pub fn next(self: *Iterator) ?Self {
-                switch (self.data) {
-                    .lambda, .empty => return null,
-                    .sequence => |*sequence| switch (sequence.state) {
-                        .fetching => |current| {
-                            const next_index = current.index + 1;
-                            if (sequence.fetch(next_index)) |item| {
-                                sequence.state = .{
-                                    .fetching = .{
-                                        .item = item,
-                                        .index = next_index,
-                                    },
-                                };
-                            } else {
-                                sequence.state = .finished;
-                            }
-
-                            return current.item;
-                        },
-                        .finished => return null,
-                    },
-                }
-            }
-        };
+        pub const Iterator = ContextIterator(Self);
 
         ctx: FlattenedType = undefined,
         vtable: *const VTable,
 
-        pub inline fn get(self: Self, path: Element.Path) PathResolution(Self) {
-            return self.vtable.get(&self.ctx, path, null);
+        pub inline fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
+            return self.vtable.get(&self.ctx, path, index);
         }
 
         pub inline fn capacityHint(
@@ -263,8 +149,8 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
     };
 }
 
-fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
+pub fn NativeContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);
     const ContextInterface = RenderEngine.Context;
     const DataRender = RenderEngine.DataRender;
     const Invoker = RenderEngine.Invoker;
@@ -352,44 +238,37 @@ fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap:
     };
 }
 
-fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(Writer, PartialsMap, options);
-    const ContextInterface = RenderEngine.Context;
+pub fn JsonContext(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+    const RenderEngine = rendering.RenderEngine(.json, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
     const Depth = enum { Root, Leaf };
 
     return struct {
-        const vtable = ContextInterface.VTable{
-            .get = get,
-            .capacityHint = capacityHint,
-            .interpolate = interpolate,
-            .expandLambda = expandLambda,
-        };
-
         const Self = @This();
 
-        pub fn context(json_value: json.Value) ContextInterface {
-            var interface = ContextInterface{
-                .vtable = &vtable,
-                .ctx = undefined,
+        pub const ContextStack = struct {
+            parent: ?*const @This(),
+            ctx: Self,
+        };
+
+        pub const Iterator = ContextIterator(Self);
+
+        ctx: json.Value = undefined,
+
+        pub fn context(json_value: json.Value) Self {
+            return .{
+                .ctx = json_value,
             };
-
-            const Data = json.Value;
-            var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &interface.ctx));
-            ptr.* = json_value;
-
-            return interface;
         }
 
-        fn get(ctx: *const anyopaque, path: Element.Path, index: ?usize) PathResolution(ContextInterface) {
-            const root = getJsonRoot(ctx);
-            const value = getJsonValue(.Root, root, path, index);
+        pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
+            const value = getJsonValue(.Root, self.ctx, path, index);
 
             return switch (value) {
                 .not_found_in_context => .not_found_in_context,
                 .chain_broken => .chain_broken,
                 .iterator_consumed => .iterator_consumed,
-                .field => |content| .{ .field = getContext(Writer, content, PartialsMap, options) },
+                .field => |content| .{ .field = RenderEngine.getContext(content) },
                 .lambda => {
                     assert(false);
                     unreachable;
@@ -397,13 +276,12 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
             };
         }
 
-        fn capacityHint(
-            ctx: *const anyopaque,
+        pub fn capacityHint(
+            self: Self,
             data_render: *DataRender,
             path: Element.Path,
         ) PathResolution(usize) {
-            const root = getJsonRoot(ctx);
-            const value = getJsonValue(.Root, root, path, null);
+            const value = getJsonValue(.Root, self.ctx, path, null);
 
             return switch (value) {
                 .not_found_in_context => .not_found_in_context,
@@ -425,14 +303,13 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
             };
         }
 
-        fn interpolate(
-            ctx: *const anyopaque,
+        pub inline fn interpolate(
+            self: Self,
             data_render: *DataRender,
             path: Element.Path,
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            const root = getJsonRoot(ctx);
-            const value = getJsonValue(.Root, root, path, null);
+            const value = getJsonValue(.Root, self.ctx, path, null);
 
             switch (value) {
                 .not_found_in_context => return .not_found_in_context,
@@ -456,15 +333,15 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
             return .field;
         }
 
-        fn expandLambda(
-            ctx: *const anyopaque,
+        pub inline fn expandLambda(
+            self: Self,
             data_render: *DataRender,
             path: Element.Path,
             inner_text: []const u8,
             escape: Escape,
             delimiters: Delimiters,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            _ = ctx;
+            _ = self;
             _ = data_render;
             _ = path;
             _ = inner_text;
@@ -473,6 +350,24 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
 
             // Json objects cannot have declared lambdas
             return PathResolution(void).chain_broken;
+        }
+
+        pub fn iterator(self: *const Self, path: Element.Path) PathResolution(Iterator) {
+            const result = self.get(path, 0);
+
+            return switch (result) {
+                .field => |item| .{
+                    .field = Iterator.initSequence(self, path, item),
+                },
+                .iterator_consumed => .{
+                    .field = Iterator.initEmpty(),
+                },
+                .lambda => |item| .{
+                    .field = Iterator.initLambda(item),
+                },
+                .chain_broken => .chain_broken,
+                .not_found_in_context => .not_found_in_context,
+            };
         }
 
         fn getJsonValue(depth: Depth, value: json.Value, path: Element.Path, index: ?usize) PathResolution(json.Value) {
@@ -511,10 +406,110 @@ fn JsonContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime o
 
             return if (depth == .Root) .not_found_in_context else .chain_broken;
         }
+    };
+}
 
-        inline fn getJsonRoot(ctx: *const anyopaque) json.Value {
-            const Data = json.Value;
-            return (@ptrCast(*const Data, @alignCast(@alignOf(Data), ctx))).*;
+fn ContextIterator(comptime ContextInterface: type) type {
+    return struct {
+        const Iterator = @This();
+
+        data: union(enum) {
+            empty,
+            lambda: ContextInterface,
+            sequence: struct {
+                context: *const ContextInterface,
+                path: Element.Path,
+                state: union(enum) {
+                    fetching: struct {
+                        item: ContextInterface,
+                        index: usize,
+                    },
+                    finished,
+                },
+
+                fn fetch(self: @This(), index: usize) ?ContextInterface {
+                    const result = self.context.get(self.path, index);
+
+                    return switch (result) {
+                        .field => |item| item,
+                        .iterator_consumed => null,
+                        else => unreachable,
+                    };
+                }
+            },
+        },
+
+        fn initEmpty() Iterator {
+            return .{
+                .data = .empty,
+            };
+        }
+
+        fn initLambda(lambda_ctx: ContextInterface) Iterator {
+            return .{
+                .data = .{
+                    .lambda = lambda_ctx,
+                },
+            };
+        }
+
+        fn initSequence(parent_ctx: *const ContextInterface, path: Element.Path, item: ContextInterface) Iterator {
+            return .{
+                .data = .{
+                    .sequence = .{
+                        .context = parent_ctx,
+                        .path = path,
+                        .state = .{
+                            .fetching = .{
+                                .item = item,
+                                .index = 0,
+                            },
+                        },
+                    },
+                },
+            };
+        }
+
+        pub fn lambda(self: Iterator) ?ContextInterface {
+            return switch (self.data) {
+                .lambda => |item| item,
+                else => null,
+            };
+        }
+
+        pub inline fn truthy(self: Iterator) bool {
+            switch (self.data) {
+                .empty => return false,
+                .lambda => return true,
+                .sequence => |sequence| switch (sequence.state) {
+                    .fetching => return true,
+                    .finished => return false,
+                },
+            }
+        }
+
+        pub fn next(self: *Iterator) ?ContextInterface {
+            switch (self.data) {
+                .lambda, .empty => return null,
+                .sequence => |*sequence| switch (sequence.state) {
+                    .fetching => |current| {
+                        const next_index = current.index + 1;
+                        if (sequence.fetch(next_index)) |item| {
+                            sequence.state = .{
+                                .fetching = .{
+                                    .item = item,
+                                    .index = next_index,
+                                },
+                            };
+                        } else {
+                            sequence.state = .finished;
+                        }
+
+                        return current.item;
+                    },
+                    .finished => return null,
+                },
+            }
         }
     };
 }
@@ -654,8 +649,10 @@ const struct_tests = struct {
     }
 
     const dummy_options = RenderOptions{ .string = .{} };
-
     const DummyPartialsMap = map.PartialsMap(void, dummy_options);
+    const DummyWriter = std.ArrayList(u8).Writer;
+    const DummyRenderEngine = rendering.RenderEngine(.native, DummyWriter, DummyPartialsMap, dummy_options);
+
     const DummyParser = @import("../parsing/parser.zig").Parser(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
     const dummy_map = DummyPartialsMap.init({});
 
@@ -670,21 +667,18 @@ const struct_tests = struct {
         const Data = @TypeOf(data);
         const by_value = comptime Fields.byValue(Data);
 
-        const Writer = @TypeOf(writer);
-        var ctx = getContext(Writer, if (by_value) data else @as(*const Data, &data), DummyPartialsMap, dummy_options);
+        var ctx = DummyRenderEngine.getContext(if (by_value) data else @as(*const Data, &data));
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
 
-    fn interpolateCtx(writer: anytype, ctx: Context(@TypeOf(writer), DummyPartialsMap, dummy_options), identifier: []const u8, escape: Escape) anyerror!void {
-        const RenderEngine = rendering.RenderEngine(@TypeOf(writer), DummyPartialsMap, dummy_options);
-
-        var stack = RenderEngine.ContextStack{
+    fn interpolateCtx(writer: anytype, ctx: DummyRenderEngine.Context, identifier: []const u8, escape: Escape) anyerror!void {
+        var stack = DummyRenderEngine.ContextStack{
             .parent = null,
             .ctx = ctx,
         };
 
-        var data_render = RenderEngine.DataRender{
+        var data_render = DummyRenderEngine.DataRender{
             .stack = &stack,
             .out_writer = .{ .writer = writer },
             .partials_map = undefined,
@@ -1258,7 +1252,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
+        var person_ctx = DummyRenderEngine.getContext(&person);
 
         {
             list.clearAndFree();
@@ -1273,7 +1267,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (person_ctx.get(path)) {
+            switch (person_ctx.get(path, null)) {
                 .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1295,7 +1289,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (address_ctx.get(path)) {
+            switch (address_ctx.get(path, null)) {
                 .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1331,7 +1325,7 @@ const struct_tests = struct {
 
         // Person
 
-        var person_ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
+        var person_ctx = DummyRenderEngine.getContext(&person);
 
         {
             list.clearAndFree();
@@ -1346,7 +1340,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "indication");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (person_ctx.get(path)) {
+            switch (person_ctx.get(path, null)) {
                 .field => |found| break :indication_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1368,7 +1362,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (indication_ctx.get(path)) {
+            switch (indication_ctx.get(path, null)) {
                 .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1390,7 +1384,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (address_ctx.get(path)) {
+            switch (address_ctx.get(path, null)) {
                 .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1421,15 +1415,14 @@ const struct_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const Writer = @TypeOf(std.io.null_writer);
-        var person_ctx = getContext(Writer, &person, DummyPartialsMap, dummy_options);
+        var person_ctx = DummyRenderEngine.getContext(&person);
 
         const address_ctx = address_ctx: {
             const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
             // Person.address
-            switch (person_ctx.get(path)) {
+            switch (person_ctx.get(path, null)) {
                 .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1442,7 +1435,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "wrong_address");
             defer Element.destroyPath(allocator, false, path);
 
-            var wrong_address = person_ctx.get(path);
+            var wrong_address = person_ctx.get(path, null);
             try testing.expect(wrong_address == .not_found_in_context);
         }
 
@@ -1451,7 +1444,7 @@ const struct_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             // Person.address.street
-            switch (address_ctx.get(path)) {
+            switch (address_ctx.get(path, null)) {
                 .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1464,7 +1457,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "wrong_street");
             defer Element.destroyPath(allocator, false, path);
 
-            var wrong_street = address_ctx.get(path);
+            var wrong_street = address_ctx.get(path, null);
             try testing.expect(wrong_street == .not_found_in_context);
         }
 
@@ -1472,7 +1465,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "len");
             defer Element.destroyPath(allocator, false, path);
             // Person.address.street.len
-            var street_len_ctx = switch (street_ctx.get(path)) {
+            var street_len_ctx = switch (street_ctx.get(path, null)) {
                 .field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1486,7 +1479,7 @@ const struct_tests = struct {
             const path = try expectPath(allocator, "wrong_len");
             defer Element.destroyPath(allocator, false, path);
 
-            var wrong_len = street_ctx.get(path);
+            var wrong_len = street_ctx.get(path, null);
             try testing.expect(wrong_len == .not_found_in_context);
         }
     }
@@ -1502,7 +1495,7 @@ const struct_tests = struct {
         var writer = list.writer();
 
         // Person
-        var ctx = getContext(@TypeOf(writer), &person, DummyPartialsMap, dummy_options);
+        var ctx = DummyRenderEngine.getContext(&person);
 
         const path = try expectPath(allocator, "items");
         defer Element.destroyPath(allocator, false, path);
@@ -1546,8 +1539,7 @@ const struct_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const Writer = @TypeOf(std.io.null_writer);
-        var ctx = getContext(Writer, &person, DummyPartialsMap, dummy_options);
+        var ctx = DummyRenderEngine.getContext(&person);
 
         {
             // iterator over true
@@ -1594,8 +1586,7 @@ const struct_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const Writer = @TypeOf(std.io.null_writer);
-        var ctx = getContext(Writer, &person, DummyPartialsMap, dummy_options);
+        var ctx = DummyRenderEngine.getContext(&person);
 
         {
             // iterator over true

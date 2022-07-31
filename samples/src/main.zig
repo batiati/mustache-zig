@@ -41,12 +41,12 @@ var ctx = .{
 };
 
 pub fn main() anyerror!void {
-    //try renderFromString();
+    try renderFromString();
     try renderFromJson();
-    //try renderComptimeTemplate();
-    //try renderFromCachedTemplate();
-    //try renderFromFile();
-    //try renderComptimePartialTemplate();
+    try renderComptimeTemplate();
+    try renderFromCachedTemplate();
+    try renderFromFile();
+    try renderComptimePartialTemplate();
 }
 
 /// Render a template from a string
