@@ -6,82 +6,15 @@ const trait = meta.trait;
 const assert = std.debug.assert;
 const testing = std.testing;
 
-const mustache = @import("../mustache.zig");
+const mustache = @import("../../../mustache.zig");
 const RenderOptions = mustache.options.RenderOptions;
 const Delimiters = mustache.Delimiters;
 
-const context = @import("context.zig");
+const context = @import("../../context.zig");
 const Escape = context.Escape;
+const LambdaContext = context.LambdaContext;
 
-const rendering = @import("rendering.zig");
-
-/// Context for a lambda call,
-/// this type must be accept as parameter by any function intended to be used as a lambda
-///
-/// When a lambda is called, any children {{tags}} won't have been expanded yet - the lambda should do that on its own.
-/// In this way you can implement transformations, filters or caching.
-pub const LambdaContext = struct {
-    ptr: *const anyopaque,
-    vtable: *const VTable,
-
-    inner_text: []const u8,
-
-    const VTable = struct {
-        renderAlloc: fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
-        render: fn (*const anyopaque, Allocator, []const u8) anyerror!void,
-        write: fn (*const anyopaque, []const u8) anyerror!usize,
-    };
-
-    /// Renders a template against the current context
-    /// Returns an owned mutable slice with the rendered text
-    pub inline fn renderAlloc(self: LambdaContext, allocator: Allocator, template_text: []const u8) anyerror![]u8 {
-        return try self.vtable.renderAlloc(self.ptr, allocator, template_text);
-    }
-
-    /// Formats a template to be rendered against the current context
-    /// Returns an owned mutable slice with the rendered text
-    pub fn renderFormatAlloc(self: LambdaContext, allocator: Allocator, comptime fmt: []const u8, args: anytype) anyerror![]u8 {
-        const template_text = try std.fmt.allocPrint(allocator, fmt, args);
-        defer allocator.free(template_text);
-
-        return try self.vtable.renderAlloc(self.ptr, allocator, template_text);
-    }
-
-    /// Renders a template against the current context
-    /// Can return anyerror depending on the underlying writer
-    pub inline fn render(self: LambdaContext, allocator: Allocator, template_text: []const u8) anyerror!void {
-        try self.vtable.render(self.ptr, allocator, template_text);
-    }
-
-    /// Formats a template to be rendered against the current context
-    /// Can return anyerror depending on the underlying writer
-    pub fn renderFormat(self: LambdaContext, allocator: Allocator, comptime fmt: []const u8, args: anytype) anyerror!void {
-        const template_text = try std.fmt.allocPrint(allocator, fmt, args);
-        defer allocator.free(template_text);
-
-        try self.vtable.render(self.ptr, allocator, template_text);
-    }
-
-    /// Writes the raw text on the output stream.
-    /// Can return anyerror depending on the underlying writer
-    pub fn writeFormat(self: LambdaContext, comptime fmt: []const u8, args: anytype) anyerror!void {
-        var writer = std.io.Writer(LambdaContext, anyerror, writeFn){
-            .context = self,
-        };
-
-        try std.fmt.format(writer, fmt, args);
-    }
-
-    /// Writes the raw text on the output stream.
-    /// Can return anyerror depending on the underlying writer
-    pub fn write(self: LambdaContext, raw_text: []const u8) anyerror!void {
-        _ = try self.vtable.write(self.ptr, raw_text);
-    }
-
-    fn writeFn(self: LambdaContext, bytes: []const u8) anyerror!usize {
-        return try return self.vtable.write(self.ptr, bytes);
-    }
-};
+const rendering = @import("../../rendering.zig");
 
 pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);

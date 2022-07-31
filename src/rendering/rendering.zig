@@ -23,17 +23,15 @@ const TemplateLoader = @import("../template.zig").TemplateLoader;
 
 const context = @import("context.zig");
 const Escape = context.Escape;
+const Fields = context.Fields;
 
-const invoker = @import("invoker.zig");
-const Fields = invoker.Fields;
+pub const LambdaContext = context.LambdaContext;
 
 const indent = @import("indent.zig");
 const map = @import("partials_map.zig");
 
 const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 const BufError = std.io.FixedBufferStream([]u8).WriteError;
-
-pub const LambdaContext = @import("lambda.zig").LambdaContext;
 
 pub const ContextType = enum {
     native,
@@ -429,7 +427,6 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
         pub const ContextStack = Context.ContextStack;
         pub const PartialsMap = PartialsMap;
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
-        pub const Invoker = invoker.Invoker(Writer, PartialsMap, options);
 
         /// Provides the ability to choose between two writers
         /// while keeping the static dispatch interface.
@@ -971,17 +968,17 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             break :Context Context;
         } {
             const Data = @TypeOf(data);
+            const ContextImpl = context.ContextImpl(context_type, Writer, Data, PartialsMap, options);
 
             switch (context_type) {
                 .native => {
-                    const ContextImpl = context.NativeContextImpl(Writer, Data, PartialsMap, options);
                     return ContextImpl.context(data);
                 },
                 .json => {
                     if (comptime Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
-                        return Context.context(data);
+                        return ContextImpl.context(data);
                     } else if (Data == json.ValueTree or (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
-                        return Context.context(data.root);
+                        return ContextImpl.context(data.root);
                     } else {
                         @compileError("Expected a std.json.Value or std.json.ValueTree");
                     }
