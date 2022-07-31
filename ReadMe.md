@@ -148,7 +148,7 @@ pub fn main() !void {
 
 ## Customizable use
 
-No "one size fits all", but mustache-zig's API aims to offer flexibility of use, allowing users to tune the most optimal configuration for their use case.
+There is no "one size fits all", but the mustache-zig API is intended to provide great flexibility to cover many use cases.
  
 ![diagram](docs/diagram.svg)
 
