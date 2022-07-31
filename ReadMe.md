@@ -146,6 +146,62 @@ pub fn main() !void {
 
 ```
 
+## Customizable use
+
+No "one size fits all", but mustache-zig's API aims to offer flexibility of use, allowing the user to choose the most optimal configuration for their use case. 
+
+```mermaid
+graph LR
+    subgraph "parser"
+    TemplateSource[Template source]
+    Parser[/"mustache.parseText(...)"/]
+    ComptimeParser[/"mustache.parseComptime(...)"/]
+    FileParser[/"mustache.parseFile(...)"/]
+    StreamedParser[/"mustache.renderText*(...)"/]
+    StreamedFileParser[/"mustache.renderFile*(...)"/]
+    
+    TemplateSource-->|runtime string| Parser
+    TemplateSource-->|comptime string|ComptimeParser
+    TemplateSource-->|file|FileParser
+    TemplateSource-->|runtime string| StreamedParser
+    TemplateSource-->|file|StreamedFileParser
+    end
+    
+    subgraph "context resolution"
+    DataSource[Data source]
+    JsonContext[Json object]
+    ZigContext[Zig struct]
+    Context[Data context]
+
+    DataSource-->|statically typed|ZigContext
+    DataSource-->|dynamically typed|JsonContext
+    ZigContext-->|comptime reflection|Context
+    JsonContext-->|runtime key-value|Context
+    end
+
+    subgraph "render"
+    Elements[Partial elements]
+
+    Render[Render]
+    OutputStream[/"mustache.render*(...)"/]
+    Buffer[/"mustache.bufRender*(...)"/]
+    Allocation[/"mustache.allocRender*(...)"/]
+    Template[Template]
+    
+    Parser & FileParser-->|loads|Template
+    ComptimeParser-->|declares|Template
+    StreamedParser & StreamedFileParser-->|streamed render|Elements
+
+    Context-->Render
+    Render[Render engine]
+    Template-->Render
+    Elements-->Render
+
+    Render-->|render to a writer|OutputStream
+    Render-->|render to a pre-allocated buffer|Buffer
+    Render-->|render allocating a new string|Allocation
+    end
+``` 
 ## Benchmarks.
 
 There are [some benchmark tests](benchmark/src/ramhorns_bench.zig) inspired by the excellent [Ramhorns](https://github.com/maciejhirsz/ramhorns)'s benchmarks, comparing the performance of most popular **Rust** template engines.
