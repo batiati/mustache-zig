@@ -150,7 +150,7 @@ pub fn main() !void {
 
 There is no "one size fits all", but the mustache-zig API is intended to provide great flexibility to cover many use cases.
  
-![diagram](docs/diagram.svg)
+[![diagram](docs/diagram.svg)](https://raw.githubusercontent.com/batiati/mustache-zig/master/docs/diagram.svg)
 
 ## Benchmarks.
 
