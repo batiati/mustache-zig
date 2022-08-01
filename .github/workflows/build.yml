@@ -12,6 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        comptime: [true, false]
         include:
           - os: windows-latest
             crlf: fix
@@ -30,4 +31,7 @@ jobs:
         with:
           version: master
 
-      - run: zig build test
+      - name: Run Tests
+        run: |
+          zig version
+          zig build test -Dcomptime-tests=${{ matrix.comptime }}
