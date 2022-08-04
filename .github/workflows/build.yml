@@ -19,11 +19,13 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         comptime: [false]
         include:
-          - os: windows-latest
-            crlf: fix
+          #- os: windows-latest
+          #  crlf: fix
           - os: ubuntu-latest
             comptime: false
             coverage: -Dtest-coverage
+          - os: macos-latest
+            comptime: true
     runs-on: ${{matrix.os}}
     steps:
       - name: Force Line Endings for Windows
