@@ -16,9 +16,13 @@ jobs:
         include:
           - os: windows-latest
             crlf: fix
+          - os: ubuntu-latest
+            comptime: false
+            coverage: -Dtest-coverage
     runs-on: ${{matrix.os}}
     steps:
-      - if: ${{ matrix.crlf }}
+      - name: Force Line Endings for Windows
+        if: ${{ matrix.crlf }}
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -31,7 +35,21 @@ jobs:
         with:
           version: master
 
+      - name: Download kcov
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.comptime == false }}
+        run: |
+          sudo apt-get install -y kcov
+
       - name: Run Tests
         run: |
           zig version
-          zig build test -Dcomptime-tests=${{ matrix.comptime }}
+          zig build test ${{ matrix.coverage }} -Dcomptime-tests=${{ matrix.comptime }}
+      
+      - name: Upload Codecov
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.comptime == false }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          curl -Os https://uploader.codecov.io/latest/linux/codecov
+          chmod +x codecov
+          ./codecov -t ${CODECOV_TOKEN}
