@@ -246,9 +246,10 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
             }
 
             const fn_type = @typeInfo(TFn).Fn;
-            const return_type = fn_type.return_type orelse @compileError("Generic function could not be evaluated");
-            const has_error = @typeInfo(return_type) == .ErrorUnion;
-            const args = if (TData == void) .{lambda_context} else blk: {
+
+            if (TData == void) {
+                try self.call(.{lambda_context});
+            } else {
 
                 // Determining the correct type to call the first argument
                 // depending on how is was declared on the lambda signature
@@ -266,7 +267,7 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
 
                                     // Context is a pointer, but the parameter is a value
                                     // fn (self TValue ...) called from a *TValue or *const TValue
-                                    break :blk .{ self.data.*, lambda_context };
+                                    try self.call(.{ self.data.*, lambda_context });
                                 } else {
                                     switch (@typeInfo(fnArg)) {
                                         .Pointer => |arg_info| {
@@ -277,7 +278,7 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
                                                     // fn (self *TValue ...) called from a *TValue
                                                     // or
                                                     // fn (self const* TValue ...) called from a *const TValue or *TValue
-                                                    break :blk .{ self.data, lambda_context };
+                                                    try self.call(.{ self.data, lambda_context });
                                                 }
                                             }
                                         },
@@ -294,7 +295,7 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
                                 if (TData == arg_info.child and arg_info.is_const == true) {
 
                                     // fn (self const* TValue ...)
-                                    break :blk .{ &self.data, lambda_context };
+                                    try self.call(.{ &self.data, lambda_context });
                                 }
                             },
                             else => {
@@ -306,7 +307,7 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
                                     // fn (self *TValue ...) called from a *TValue
                                     // or
                                     // fn (self const* TValue ...) called from a *const TValue
-                                    break :blk .{ self.data, lambda_context };
+                                    try self.call(.{ self.data, lambda_context });
                                 }
                             },
                         }
@@ -317,7 +318,13 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
                 // and the context is a value or a const pointer
 
                 return;
-            };
+            }
+        }
+
+        inline fn call(self: Self, args: anytype) anyerror!void {
+            const fn_type = @typeInfo(TFn).Fn;
+            const return_type = fn_type.return_type orelse @compileError("Generic function could not be evaluated");
+            const has_error = @typeInfo(return_type) == .ErrorUnion;
 
             if (has_error)
                 try @call(.{}, self.bound_fn, args)
@@ -425,5 +432,100 @@ test "LambdaInvoker" {
         try impl.invoke(undefined);
         try testing.expect(Foo.static_counter == last_counter + 2);
         try testing.expect(foo.counter == 2);
+    }
+}
+
+test "Zero-sized LambdaInvoker" {
+
+    // Zero-sized structs have no address, but they can appear in expressions like *T or &value
+    // This test asserts that structs of @sizeOf(T) == 0 can have any lambda function signature that a regular sized struct does.
+
+    const ZeroSize = struct {
+        var static_counter: u32 = 0;
+
+        pub fn staticFn(ctx: LambdaContext) void {
+            _ = ctx;
+            static_counter += 1;
+        }
+
+        pub fn selfFnValue(self: @This(), ctx: LambdaContext) void {
+            _ = self;
+            _ = ctx;
+            static_counter += 1;
+        }
+
+        pub fn selfFnConstPtr(self: *const @This(), ctx: LambdaContext) void {
+            _ = self;
+            _ = ctx;
+            static_counter += 1;
+        }
+
+        pub fn selfFnPtr(self: *@This(), ctx: LambdaContext) void {
+            _ = self;
+            _ = ctx;
+            static_counter += 1;
+        }
+    };
+
+    comptime assert(@sizeOf(ZeroSize) == 0);
+
+    {
+        const Impl = LambdaInvoker(void, @TypeOf(ZeroSize.staticFn));
+        var impl = Impl{ .bound_fn = ZeroSize.staticFn, .data = {} };
+
+        const last_counter = ZeroSize.static_counter;
+        try impl.invoke(undefined);
+        try testing.expect(ZeroSize.static_counter == last_counter + 1);
+
+        try impl.invoke(undefined);
+        try testing.expect(ZeroSize.static_counter == last_counter + 2);
+    }
+
+    {
+        const Impl = LambdaInvoker(ZeroSize, @TypeOf(ZeroSize.selfFnValue));
+        var dummy = ZeroSize{};
+        var impl = Impl{
+            .bound_fn = ZeroSize.selfFnValue,
+            .data = dummy,
+        };
+
+        const last_counter = ZeroSize.static_counter;
+        try impl.invoke(undefined);
+        try testing.expect(ZeroSize.static_counter == last_counter + 1);
+
+        try impl.invoke(undefined);
+        try testing.expect(ZeroSize.static_counter == last_counter + 2);
+    }
+
+    {
+        const Impl = LambdaInvoker(*ZeroSize, @TypeOf(ZeroSize.selfFnConstPtr));
+        var dummy = ZeroSize{};
+        var impl = Impl{
+            .bound_fn = ZeroSize.selfFnConstPtr,
+            .data = &dummy,
+        };
+
+        const last_counter = ZeroSize.static_counter;
+        try impl.invoke(undefined);
+        try testing.expect(ZeroSize.static_counter == last_counter + 1);
+
+        try impl.invoke(undefined);
+        try testing.expect(ZeroSize.static_counter == last_counter + 2);
+    }
+
+    {
+        const Impl = LambdaInvoker(*ZeroSize, @TypeOf(ZeroSize.selfFnPtr));
+        var dummy = ZeroSize{};
+        var impl = Impl{
+            .bound_fn = ZeroSize.selfFnPtr,
+            .data = &dummy,
+        };
+
+        const last_counter = ZeroSize.static_counter;
+        try impl.invoke(undefined);
+        try testing.expect(ZeroSize.static_counter == last_counter + 1);
+
+        try impl.invoke(undefined);
+        try testing.expect(ZeroSize.static_counter == last_counter + 2);
     }
 }

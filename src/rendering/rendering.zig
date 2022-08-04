@@ -3358,6 +3358,44 @@ const tests = struct {
             try expectRender(template_text, &data, "Name1: John Smith, Name2: John Smith");
         }
 
+        test "Lambda - Zero size" {
+            const Zero = struct {
+                const Self = @This();
+
+                pub fn a(ctx: LambdaContext) !void {
+                    try ctx.write("a");
+                }
+
+                pub fn b(self: Self, ctx: LambdaContext) !void {
+                    _ = self;
+                    try ctx.write("b");
+                }
+
+                pub fn c(self: *const Self, ctx: LambdaContext) !void {
+                    _ = self;
+                    try ctx.write("c");
+                }
+
+                pub fn d(self: *Self, ctx: LambdaContext) !void {
+                    _ = self;
+                    try ctx.write("d");
+                }
+            };
+
+            const template_text = "{{a}}{{b}}{{c}}{{d}}";
+            var data = Zero{};
+
+            // Value
+            try expectRender(template_text, data, "abc");
+
+            // Const pointer
+            const ptr: *const Zero = &data;
+            try expectRender(template_text, ptr, "abc");
+
+            // Mutable pointer
+            try expectRender(template_text, &data, "abcd");
+        }
+
         test "Lambda - processing" {
             const Header = struct {
                 id: u32,
