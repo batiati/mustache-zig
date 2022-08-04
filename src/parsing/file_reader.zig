@@ -93,9 +93,12 @@ test "FileReader.Slices" {
     const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "file_reader_slices.tmp" });
     defer allocator.free(absolute_file_path);
 
-    var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
-    try file.writeAll(content_text);
-    file.close();
+    {
+        var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
+        try file.writeAll(content_text);
+        defer file.close();
+    }
+
     defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
 
     var reader = try SlicedReader.init(absolute_file_path);

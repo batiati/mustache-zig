@@ -4258,10 +4258,12 @@ const tests = struct {
     }
 
     fn getTemplateFile(dir: std.fs.Dir, file_name: []const u8, template_text: []const u8) ![]const u8 {
-        var file = try dir.createFile(file_name, .{ .truncate = true });
-        defer file.close();
+        {
+            var file = try dir.createFile(file_name, .{ .truncate = true });
+            defer file.close();
 
-        try file.writeAll(template_text);
+            try file.writeAll(template_text);
+        }
 
         return try dir.realpathAlloc(testing.allocator, file_name);
     }

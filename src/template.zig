@@ -2246,9 +2246,12 @@ const tests = struct {
             const absolute_file_path = try std.fs.path.join(allocator, &.{ path, "temp.mustache" });
             defer allocator.free(absolute_file_path);
 
-            var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
-            try file.writeAll(template_text);
-            file.close();
+            {
+                var file = try std.fs.createFileAbsolute(absolute_file_path, .{ .truncate = true });
+                try file.writeAll(template_text);
+                defer file.close();
+            }
+
             defer std.fs.deleteFileAbsolute(absolute_file_path) catch {};
 
             // Read from a file, assuring that this text should read four times from the buffer
@@ -2450,14 +2453,20 @@ const tests = struct {
 
         test "parseFile API" {
             var result = result: {
+                var tmp = testing.tmpDir(.{});
+                defer tmp.cleanup();
+
                 var file_name = file_name: {
-                    var tmp = testing.tmpDir(.{});
-                    var file = try tmp.dir.createFile("parseFile.mustache", .{ .truncate = true });
-                    defer file.close();
+                    const name = "parseFile.mustache";
 
-                    try file.writeAll("{{hello}}world");
+                    {
+                        var file = try tmp.dir.createFile(name, .{ .truncate = true });
+                        defer file.close();
 
-                    break :file_name try tmp.dir.realpathAlloc(testing.allocator, "parseFile.mustache");
+                        try file.writeAll("{{hello}}world");
+                    }
+
+                    break :file_name try tmp.dir.realpathAlloc(testing.allocator, name);
                 };
                 defer testing.allocator.free(file_name);
                 break :result try parseFile(testing.allocator, file_name, .{}, .{});
