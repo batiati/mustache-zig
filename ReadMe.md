@@ -168,7 +168,7 @@ There are [some benchmark tests](benchmark/src/ramhorns_bench.zig) inspired by t
 
     |                                                               | Total time | ns/iter   | MB/s      
     ----------------------------------------------------------------|------------|-----------|-----------
-    |[Ramhorns 0.14.0](https://crates.io/crates/ramhorns)           |  0,040s    |    317 ns |  492 MB/s
+    |[Ramhorns 0.14.0](https://crates.io/crates/ramhorns)           |  0,317s    |    317 ns |  492 MB/s
     |[Mustache 0.9](https://crates.io/crates/mustache)              |  5,863s    |  5,863 ns |   26 MB/s
     |[Handlebars 3.1.0-beta.2](https://crates.io/crates/handlebars) | 11,797s    | 11,797 ns |   13 MB/s
 
