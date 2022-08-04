@@ -181,12 +181,16 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     // Path: "person.address.lambda" > "Resolved"
                     if (next_path_parts.len == 0) {
                         const Impl = if (args_len == 1) LambdaInvoker(void, TFn) else LambdaInvoker(TData, TFn);
+
+                        // TData is likely a pointer, or a primitive value (See Field.byValue)
+                        // This struct will be copied by value to the lambda context
+
                         var impl = Impl{
                             .bound_fn = bound_fn,
                             .data = if (args_len == 1) {} else data,
                         };
 
-                        return try find(.Leaf, action_param, &impl, next_path_parts, index);
+                        return try find(.Leaf, action_param, impl, next_path_parts, index);
                     } else {
                         return .chain_broken;
                     }

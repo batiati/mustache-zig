@@ -10,6 +10,7 @@ const Element = mustache.Element;
 
 const context = @import("../../context.zig");
 
+const lambda = @import("lambda.zig");
 const native_context = @import("context.zig");
 const FlattenedType = native_context.FlattenedType;
 
@@ -186,6 +187,7 @@ pub fn byValue(comptime TField: type) bool {
             \\Type:
         ++ @typeName(TField));
 
+        const max_size = @sizeOf(FlattenedType);
         const is_zero_size = @sizeOf(TField) == 0;
 
         const is_pointer = trait.isSlice(TField) or
@@ -193,7 +195,8 @@ pub fn byValue(comptime TField: type) bool {
 
         const is_json = TField == std.json.Value;
 
-        const max_size = @sizeOf(FlattenedType);
+        const is_lambda_invoker = @sizeOf(TField) <= max_size and lambda.isLambdaInvoker(TField);
+
         const can_embed = @sizeOf(TField) <= max_size and
             (trait.is(.Enum)(TField) or
             trait.is(.EnumLiteral)(TField) or
@@ -202,7 +205,7 @@ pub fn byValue(comptime TField: type) bool {
             trait.isFloat(TField) or
             (trait.is(.Optional)(TField) and byValue(meta.Child(TField))));
 
-        return is_json or is_zero_size or is_pointer or can_embed;
+        return is_json or is_zero_size or is_pointer or is_lambda_invoker or can_embed;
     }
 }
 
