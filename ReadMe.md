@@ -2,7 +2,7 @@
 # [{{mustache}}](https://mustache.github.io/) templates for [Zig](https://ziglang.org/).
 
 [![made with Zig](https://img.shields.io/badge/made%20with%20%E2%9D%A4%20-Zig-orange)](https://ziglang.org/)
-[![Docker Image CI](https://github.com/batiati/mustache-zig/actions/workflows/ci-codecov.yml/badge.svg)](https://github.com/batiati/mustache-zig/actions/workflows/ci-codecov.yml)
+[![Matrix Build](https://github.com/batiati/mustache-zig/actions/workflows/build.yml/badge.svg)](https://github.com/batiati/mustache-zig/actions/workflows/build.yml)
 [![codecov](https://codecov.io/gh/batiati/mustache-zig/branch/master/graph/badge.svg)](https://codecov.io/gh/batiati/mustache-zig)
 [![license mit](https://img.shields.io/github/license/batiati/mustache-zig)](https://github.com/batiati/mustache-zig/blob/master/LICENSE.txt)
 
