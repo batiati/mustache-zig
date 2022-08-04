@@ -10,8 +10,6 @@
 
 # ! Under development !
 
-- Windows support is broken at the moment
-
 ## Features
 
 ✓ [Comments](https://github.com/mustache/spec/blob/master/specs/comments.yml) `{{! Mustache is awesome }}`.
