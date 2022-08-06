@@ -25,6 +25,9 @@ const context = @import("context.zig");
 const Escape = context.Escape;
 const Fields = context.Fields;
 
+const ffi_context = @import("/context/ffi/context.zig");
+const ffi_extern_types = @import("/context/ffi/extern_types.zig");
+
 pub const LambdaContext = context.LambdaContext;
 
 const indent = @import("indent.zig");
@@ -36,6 +39,7 @@ const BufError = std.io.FixedBufferStream([]u8).WriteError;
 pub const ContextType = enum {
     native,
     json,
+    ffi,
 
     pub fn fromData(comptime Data: type) ContextType {
         if (Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
@@ -957,31 +961,28 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             }
         };
 
-        pub fn getContext(data: anytype) Context: {
-            const Data = @TypeOf(data);
-
-            if (context_type == .native) {
-                const by_value = Fields.byValue(Data);
-                if (!by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
-            }
-
-            break :Context Context;
-        } {
+        pub fn getContext(data: anytype) Context {
             const Data = @TypeOf(data);
             const ContextImpl = context.ContextImpl(context_type, Writer, Data, PartialsMap, options);
 
             switch (context_type) {
                 .native => {
+                    const by_value = comptime Fields.byValue(Data);
+                    if (comptime !by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
                     return ContextImpl.context(data);
                 },
                 .json => {
                     if (comptime Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
                         return ContextImpl.context(data);
-                    } else if (Data == json.ValueTree or (comptime trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
+                    } else if (comptime Data == json.ValueTree or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
                         return ContextImpl.context(data.root);
                     } else {
                         @compileError("Expected a std.json.Value or std.json.ValueTree");
                     }
+                },
+                .ffi => {
+                    if (comptime Data != ffi_extern_types.ffi_UserData) @compileError("Expected a FFI user data");
+                    return ContextImpl.context(data);
                 },
             }
         }

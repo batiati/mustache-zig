@@ -14,8 +14,9 @@ const Element = mustache.Element;
 const rendering = @import("rendering.zig");
 const ContextType = rendering.ContextType;
 
-const json_context = @import("contexts/json/context.zig");
 const native_context = @import("contexts/native/context.zig");
+const json_context = @import("contexts/json/context.zig");
+const ffi_context = @import("contexts/ffi/context.zig");
 
 pub const Fields = @import("contexts/native/Fields.zig");
 
@@ -64,6 +65,7 @@ pub fn Context(comptime context_type: ContextType, comptime Writer: type, compti
     return switch (context_type) {
         .native => native_context.ContextInterface(Writer, PartialsMap, options),
         .json => json_context.Context(Writer, PartialsMap, options),
+        .ffi => ffi_context.Context(Writer, PartialsMap, options),
     };
 }
 
@@ -73,6 +75,7 @@ pub fn ContextImpl(comptime context_type: ContextType, comptime Writer: type, co
     return switch (context_type) {
         .native => native_context.ContextImpl(Writer, Data, PartialsMap, options),
         .json => json_context.Context(Writer, PartialsMap, options),
+        .ffi => ffi_context.Context(Writer, PartialsMap, options),
     };
 }
 
