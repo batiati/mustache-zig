@@ -1,74 +1,78 @@
+/// Must be kept in sync with src/ffi/mustache.h
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-
 const assert = std.debug.assert;
-const testing = std.testing;
 
 const mustache = @import("../../../mustache.zig");
-const RenderOptions = mustache.options.RenderOptions;
-const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 
-const rendering = @import("../../rendering.zig");
-const ContextType = rendering.ContextType;
+pub const UserDataHandle = *const anyopaque;
+pub const WriterHandle = *const anyopaque;
+pub const LambdaHandle = *const anyopaque;
+pub const TemplateHandle = *const anyopaque;
 
-const context = @import("../../context.zig");
-const PathResolution = context.PathResolution;
-const Escape = context.Escape;
-const ContextIterator = context.ContextIterator;
-
-pub const ffi_Callbacks = struct {
-    get: fn (user_data: *const anyopaque, path: ffi_ElementPath, out_value: **anyopaque) callconv(.C) ffi_Ret,
-    capacityHint: fn (user_data: *const anyopaque, path: ffi_ElementPath, out_value: *u32) callconv(.C) ffi_Ret,
-    interpolate: fn (writer_handle: *const anyopaque, user_data: *anyopaque, path: ffi_ElementPath) callconv(.C) ffi_ErrRet,
-    expandLambda: fn (lambda_handle: *const anyopaque, user_data: *anyopaque, path: ffi_ElementPath) callconv(.C) ffi_ErrRet,
+pub const Status = enum(c_int) {
+    SUCCESS = 0,
+    INVALID_TEMPLATE = 1,
+    INVALID_USER_DATA = 2,
+    PARSE_ERROR = 3,
 };
 
-pub const ffi_UserData = extern struct {
-    value: *anyopaque,
-    callbacks: *const ffi_Callbacks,
+pub const PathResolution = enum(c_int) {
+    NOT_FOUND_IN_CONTEXT = 0,
+    CHAIN_BROKEN = 1,
+    ITERATOR_CONSUMED = 2,
+    LAMBDA = 3,
+    FIELD = 4,
 };
 
-pub const ffi_Ret = enum(u8) {
-    not_found_in_context = 0,
-    chain_broken = 1,
-    iterator_consumed = 2,
-    lambda = 3,
-    field = 4,
-};
-
-pub const ffi_ErrRet = extern struct {
-    value: ffi_Ret,
+pub const PathResolutionOrError = extern struct {
+    result: PathResolution,
     has_error: bool,
-    err: usize,
+    error_code: u64,
 };
 
-pub const ffi_ElementPath = extern struct {
-    path: [*c]const ffi_ElementPathPart,
+pub const PathPart = extern struct {
+    value: [*]const u8,
+    size: u32,
+};
+
+pub const Path = extern struct {
+    path: [*]PathPart,
     path_size: u32,
     index: u32,
     has_index: bool,
 
-    pub fn get(buffer: []ffi_ElementPathPart, path: Element.Path, index: ?usize) ffi_ElementPath {
+    pub fn get(buffer: []PathPart, path: Element.Path, index: ?usize) Path {
         assert(buffer.len >= path.len);
 
         for (path) |part, i| {
             buffer[i] = .{
                 .value = part.ptr,
-                .size = part.len,
+                .size = @intCast(u32, part.len),
             };
         }
 
-        return ffi_ElementPath{
+        return .{
             .path = buffer.ptr,
-            .path_size = path.len,
+            .path_size = @intCast(u32, path.len),
             .index = @intCast(u32, index orelse 0),
             .has_index = index != null,
         };
     }
 };
 
-pub const ffi_ElementPathPart = extern struct {
-    value: [*c]const u8,
-    size: usize,
+pub const Callbacks = extern struct {
+    get: fn (user_data_handle: UserDataHandle, path: Path, out_value: *UserData) callconv(.C) PathResolution,
+    capacityHint: fn (user_data_handle: UserDataHandle, path: Path, out_value: *u32) callconv(.C) PathResolution,
+    interpolate: fn (writer_handle: WriterHandle, user_data_handle: UserDataHandle, path: Path) callconv(.C) PathResolutionOrError,
+    expandLambda: fn (lambda_handle: LambdaHandle, user_data_handle: UserDataHandle, path: Path) callconv(.C) PathResolutionOrError,
 };
+
+pub const UserData = extern struct {
+    handle: UserDataHandle,
+    callbacks: Callbacks,
+};
+
+pub extern fn mustache_parse_template(template_text: [*]const u8, template_len: u32, out_template_handle: *TemplateHandle) callconv(.C) Status;
+
+pub extern fn mustache_render(template_handle: TemplateHandle, user_data: UserData) callconv(.C) Status;

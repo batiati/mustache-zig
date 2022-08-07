@@ -25,8 +25,8 @@ const context = @import("context.zig");
 const Escape = context.Escape;
 const Fields = context.Fields;
 
-const ffi_context = @import("/context/ffi/context.zig");
-const ffi_extern_types = @import("/context/ffi/extern_types.zig");
+const ffi_context = @import("/contexts/ffi/context.zig");
+const ffi_extern_types = @import("/contexts/ffi/extern_types.zig");
 
 pub const LambdaContext = context.LambdaContext;
 
@@ -46,6 +46,8 @@ pub const ContextType = enum {
             return .json;
         } else if (Data == json.ValueTree or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
             return .json;
+        } else if (Data == ffi_extern_types.UserData) {
+            return .ffi;
         } else {
             return .native;
         }
@@ -981,7 +983,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                     }
                 },
                 .ffi => {
-                    if (comptime Data != ffi_extern_types.ffi_UserData) @compileError("Expected a FFI user data");
+                    if (comptime Data != ffi_extern_types.UserData) @compileError("Expected a FFI user data");
                     return ContextImpl.context(data);
                 },
             }

@@ -10,6 +10,7 @@ const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 
 const rendering = @import("../../rendering.zig");
+const map = @import("../../partials_map.zig");
 const ContextType = rendering.ContextType;
 
 const context = @import("../../context.zig");
@@ -38,35 +39,27 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
         pub const Iterator = ContextIterator(Self);
 
-        user_data: extern_types.ffi_UserData = undefined,
+        user_data: extern_types.UserData = undefined,
 
-        pub fn context(user_data: extern_types.ffi_UserData) Self {
+        pub fn context(user_data: extern_types.UserData) Self {
             return .{
                 .user_data = user_data,
             };
         }
 
         pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
-            var ffi_parts: [PATH_MAX_PARTS]extern_types.ffi_ElementPathPart = undefined;
-            var ffi_path = extern_types.ffi_ElementPath.get(&ffi_parts, path, index);
+            var ffi_parts: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+            var ffi_path = extern_types.Path.get(&ffi_parts, path, index);
 
-            var out_value: *anyopaque = undefined;
-            var ret = self.user_data.callbacks.get(self.user_data.value, ffi_path, &out_value);
+            var out_value: extern_types.UserData = undefined;
+            var ret = self.user_data.callbacks.get(self.user_data.handle, ffi_path, &out_value);
 
             return switch (ret) {
-                .not_found_in_context => .not_found_in_context,
-                .chain_broken => .chain_broken,
-                .iterator_consumed => .iterator_consumed,
-                .field, .lambda => blk: {
-                    var ctx = RenderEngine.getContext(
-                        extern_types.ffi_UserData{
-                            .value = out_value,
-                            .ffi = self.user_data.callbacks,
-                        },
-                    );
-
-                    break :blk if (ret == .field) .{ .field = ctx } else .{ .lambda = ctx };
-                },
+                .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
+                .CHAIN_BROKEN => .chain_broken,
+                .ITERATOR_CONSUMED => .iterator_consumed,
+                .FIELD => .{ .field = RenderEngine.getContext(out_value) },
+                .LAMBDA => .{ .lambda = RenderEngine.getContext(out_value) },
             };
         }
 
@@ -75,19 +68,19 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             data_render: *DataRender,
             path: Element.Path,
         ) PathResolution(usize) {
-            var ffi_parts: [PATH_MAX_PARTS]extern_types.ffi_ElementPathPart = undefined;
-            var ffi_path = extern_types.ffi_ElementPath.get(&ffi_parts, path, null);
+            var ffi_parts: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+            var ffi_path = extern_types.Path.get(&ffi_parts, path, null);
 
             _ = data_render;
             var capacity: u32 = undefined;
-            var ret = self.user_data.callbacks.capacityHint(self.user_data.value, ffi_path, &capacity);
+            var ret = self.user_data.callbacks.capacityHint(self.user_data.handle, ffi_path, &capacity);
 
             return switch (ret) {
-                .not_found_in_context => .not_found_in_context,
-                .chain_broken => .chain_broken,
-                .iterator_consumed => .iterator_consumed,
-                .field => .{ .field = capacity },
-                .lambda => .{ .lambda = capacity },
+                .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
+                .CHAIN_BROKEN => .chain_broken,
+                .ITERATOR_CONSUMED => .iterator_consumed,
+                .FIELD => .{ .field = capacity },
+                .LAMBDA => .{ .lambda = capacity },
             };
         }
 
@@ -97,20 +90,23 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             path: Element.Path,
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            var ffi_parts: [PATH_MAX_PARTS]extern_types.ffi_ElementPathPart = undefined;
-            var ffi_path = extern_types.ffi_ElementPath.get(&ffi_parts, path, null);
+            const error_int = std.meta.Int(.unsigned, @sizeOf(anyerror) * 8);
+            comptime assert(@sizeOf(error_int) <= @sizeOf(u64));
+
+            var ffi_parts: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+            var ffi_path = extern_types.Path.get(&ffi_parts, path, null);
 
             _ = escape;
-            var ret = self.user_data.callbacks.interpolate(data_render, self.user_data.value, ffi_path);
+            var ret = self.user_data.callbacks.interpolate(data_render, self.user_data.handle, ffi_path);
 
             return if (ret.has_error)
-                @errSetCast(Allocator.Error || Writer.Error, ret.err)
-            else switch (ret.ret) {
-                .not_found_in_context => PathResolution(void).not_found_in_context,
-                .chain_broken => PathResolution(void).chain_broken,
-                .iterator_consumed => PathResolution(void).iterator_consumed,
-                .field => PathResolution(void).field,
-                .lambda => PathResolution(void).lambda,
+                @errSetCast(Allocator.Error || Writer.Error, @intToError(@intCast(error_int, ret.error_code)))
+            else switch (ret.result) {
+                .NOT_FOUND_IN_CONTEXT => PathResolution(void).not_found_in_context,
+                .CHAIN_BROKEN => PathResolution(void).chain_broken,
+                .ITERATOR_CONSUMED => PathResolution(void).iterator_consumed,
+                .FIELD => PathResolution(void).field,
+                .LAMBDA => PathResolution(void).lambda,
             };
         }
 
@@ -152,3 +148,200 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         }
     };
 }
+
+test {
+    _ = context_tests;
+}
+
+const context_tests = struct {
+    const dummy_options = RenderOptions{ .string = .{} };
+    const DummyPartialsMap = map.PartialsMap(void, dummy_options);
+    const DummyWriter = std.ArrayList(u8).Writer;
+    const DummyRenderEngine = rendering.RenderEngine(.ffi, DummyWriter, DummyPartialsMap, dummy_options);
+
+    const parsing = @import("../../../parsing/parser.zig");
+    const DummyParser = parsing.Parser(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
+    const dummy_map = DummyPartialsMap.init({});
+
+    fn expectPath(allocator: Allocator, path: []const u8) !Element.Path {
+        var parser = try DummyParser.init(allocator, "", .{});
+        defer parser.deinit();
+
+        return try parser.parsePath(path);
+    }
+
+    fn interpolateCtx(writer: anytype, ctx: DummyRenderEngine.Context, identifier: []const u8, escape: Escape) anyerror!void {
+        var stack = DummyRenderEngine.ContextStack{
+            .parent = null,
+            .ctx = ctx,
+        };
+
+        var data_render = DummyRenderEngine.DataRender{
+            .stack = &stack,
+            .out_writer = .{ .writer = writer },
+            .partials_map = undefined,
+            .indentation_queue = undefined,
+            .template_options = {},
+        };
+
+        var path = try expectPath(testing.allocator, identifier);
+        defer Element.destroyPath(testing.allocator, false, path);
+
+        switch (try ctx.interpolate(&data_render, path, escape)) {
+            .lambda => {
+                _ = try ctx.expandLambda(&data_render, path, "", escape, .{});
+            },
+            else => {},
+        }
+    }
+
+    const Person = struct {
+        const Self = @This();
+
+        id: u32,
+        name: []const u8,
+
+        pub fn get(user_data_handle: extern_types.UserDataHandle, path: extern_types.Path, out_value: *extern_types.UserData) callconv(.C) extern_types.PathResolution {
+            if (path.path_size != 1) return .NOT_FOUND_IN_CONTEXT;
+            var path_part = path.path[0];
+            var path_value = path_part.value[0..path_part.size];
+
+            var person = getSelf(user_data_handle);
+            if (std.mem.eql(u8, path_value, "id")) {
+                out_value.* = .{
+                    .handle = &person.id,
+                    .callbacks = getCallbacks(),
+                };
+                return .FIELD;
+            } else if (std.mem.eql(u8, path_value, "name")) {
+                out_value.* = .{
+                    .handle = person.name.ptr,
+                    .callbacks = getCallbacks(),
+                };
+                return .FIELD;
+            }
+
+            return .NOT_FOUND_IN_CONTEXT;
+        }
+
+        pub fn capacityHint(user_data_handle: extern_types.UserDataHandle, path: extern_types.Path, out_value: *u32) callconv(.C) extern_types.PathResolution {
+            _ = user_data_handle;
+            _ = path;
+            _ = out_value;
+            return .NOT_FOUND_IN_CONTEXT;
+        }
+
+        pub fn interpolate(writer_handle: extern_types.WriterHandle, user_data_handle: extern_types.UserDataHandle, path: extern_types.Path) callconv(.C) extern_types.PathResolutionOrError {
+            _ = writer_handle;
+            _ = user_data_handle;
+            _ = path;
+
+            return .{
+                .result = .NOT_FOUND_IN_CONTEXT,
+                .error_code = 0,
+                .has_error = false,
+            };
+        }
+
+        pub fn expandLambda(lambda_handle: extern_types.LambdaHandle, user_data_handle: extern_types.UserDataHandle, path: extern_types.Path) callconv(.C) extern_types.PathResolutionOrError {
+            _ = lambda_handle;
+            _ = user_data_handle;
+            _ = path;
+
+            return .{
+                .result = .NOT_FOUND_IN_CONTEXT,
+                .error_code = 0,
+                .has_error = false,
+            };
+        }
+
+        fn getSelf(user_data_handle: extern_types.UserDataHandle) *const Self {
+            return @ptrCast(*const Self, @alignCast(@alignOf(Self), user_data_handle));
+        }
+
+        pub fn getCallbacks() extern_types.Callbacks {
+            return .{
+                .get = get,
+                .capacityHint = capacityHint,
+                .interpolate = interpolate,
+                .expandLambda = expandLambda,
+            };
+        }
+    };
+
+    test "FFI path" {
+
+        // Asserts the correct representation of a FFI Path structure
+
+        const allocator = testing.allocator;
+        const path = try expectPath(allocator, "abc.de.f");
+        defer Element.destroyPath(allocator, false, path);
+
+        var buffer: [3]extern_types.PathPart = undefined;
+        var ffi_path = extern_types.Path.get(&buffer, path, 0);
+
+        try testing.expect(ffi_path.has_index == true);
+        try testing.expect(ffi_path.index == 0);
+
+        try testing.expect(ffi_path.path_size == 3);
+
+        try testing.expect(ffi_path.path[0].size == 3);
+        try testing.expectEqualStrings(ffi_path.path[0].value[0..3], "abc");
+
+        try testing.expect(ffi_path.path[1].size == 2);
+        try testing.expectEqualStrings(ffi_path.path[1].value[0..2], "de");
+
+        try testing.expect(ffi_path.path[2].size == 1);
+        try testing.expectEqualStrings(ffi_path.path[2].value[0..1], "f");
+    }
+
+    test "FFI context get" {
+        const allocator = testing.allocator;
+
+        var person = Person{
+            .id = 100,
+            .name = "Angus McGyver",
+        };
+
+        var user_data = extern_types.UserData{
+            .handle = &person,
+            .callbacks = Person.getCallbacks(),
+        };
+
+        var person_ctx = DummyRenderEngine.getContext(user_data);
+
+        var id_ctx = id_ctx: {
+            const path = try expectPath(allocator, "id");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (person_ctx.get(path, null)) {
+                .field => |found| break :id_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
+        };
+
+        // Expects that the context was set with the field address
+        // The context can be set with any value, this test sets a pointer
+        try testing.expectEqual(@ptrToInt(&person.id), @ptrToInt(id_ctx.user_data.handle));
+
+        var name_ctx = name_ctx: {
+            const path = try expectPath(allocator, "name");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (person_ctx.get(path, null)) {
+                .field => |found| break :name_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
+        };
+
+        // Expects that the context was set with the field address
+        // The context can be set with any value, this test sets a pointer
+        try testing.expectEqual(@ptrToInt(person.name.ptr), @ptrToInt(name_ctx.user_data.handle));
+    }
+};
