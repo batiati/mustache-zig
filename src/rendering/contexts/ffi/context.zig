@@ -18,7 +18,9 @@ const PathResolution = context.PathResolution;
 const Escape = context.Escape;
 const ContextIterator = context.ContextIterator;
 
-const extern_types = @import("extern_types.zig");
+const extern_types = @import("../../../ffi/extern_types.zig");
+const ffi_export = @import("../../../ffi/export.zig");
+const FfiWriter = @import("../../../ffi/Writer.zig");
 
 /// FFI context can resolve paths from foreign elements
 /// This struct implements the expected context interface using static dispatch.
@@ -31,6 +33,29 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
     return struct {
         const Self = @This();
+
+        pub const WriterImpl = struct {
+            const vtable = FfiWriter.VTable{
+                .write = write,
+            };
+
+            pub fn writer(data_render: *DataRender, escape: Escape) FfiWriter {
+                return .{
+                    .handle = data_render,
+                    .escape = escape,
+                    .vtable = &vtable,
+                };
+            }
+
+            fn write(ctx: *anyopaque, value: []const u8, escape: Escape) anyerror!void {
+                var data_render = getDataRender(ctx);
+                try data_render.write(value, escape);
+            }
+
+            inline fn getDataRender(ctx: *anyopaque) *DataRender {
+                return @ptrCast(*DataRender, @alignCast(@alignOf(DataRender), ctx));
+            }
+        };
 
         pub const ContextStack = struct {
             parent: ?*const @This(),
@@ -48,11 +73,12 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         }
 
         pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
-            var ffi_parts: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
-            var ffi_path = extern_types.Path.get(&ffi_parts, path, index);
+            var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+            var ffi_path: extern_types.Path = undefined;
+            convertPath(&ffi_path, &ffi_buffer, path, index);
 
             var out_value: extern_types.UserData = undefined;
-            var ret = self.user_data.callbacks.get(self.user_data.handle, ffi_path, &out_value);
+            var ret = self.user_data.callbacks.get(self.user_data.handle, &ffi_path, &out_value);
 
             return switch (ret) {
                 .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
@@ -68,12 +94,13 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             data_render: *DataRender,
             path: Element.Path,
         ) PathResolution(usize) {
-            var ffi_parts: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
-            var ffi_path = extern_types.Path.get(&ffi_parts, path, null);
+            var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+            var ffi_path: extern_types.Path = undefined;
+            convertPath(&ffi_path, &ffi_buffer, path, null);
 
             _ = data_render;
             var capacity: u32 = undefined;
-            var ret = self.user_data.callbacks.capacityHint(self.user_data.handle, ffi_path, &capacity);
+            var ret = self.user_data.callbacks.capacityHint(self.user_data.handle, &ffi_path, &capacity);
 
             return switch (ret) {
                 .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
@@ -93,11 +120,12 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             const error_int = std.meta.Int(.unsigned, @sizeOf(anyerror) * 8);
             comptime assert(@sizeOf(error_int) <= @sizeOf(u64));
 
-            var ffi_parts: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
-            var ffi_path = extern_types.Path.get(&ffi_parts, path, null);
+            var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+            var ffi_path: extern_types.Path = undefined;
+            convertPath(&ffi_path, &ffi_buffer, path, null);
 
-            _ = escape;
-            var ret = self.user_data.callbacks.interpolate(data_render, self.user_data.handle, ffi_path);
+            var writer = WriterImpl.writer(data_render, escape);
+            var ret = self.user_data.callbacks.interpolate(&writer, self.user_data.handle, &ffi_path);
 
             return if (ret.has_error)
                 @errSetCast(Allocator.Error || Writer.Error, @intToError(@intCast(error_int, ret.error_code)))
@@ -146,6 +174,24 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 .not_found_in_context => .not_found_in_context,
             };
         }
+    };
+}
+
+pub fn convertPath(out_path: *extern_types.Path, buffer: []extern_types.PathPart, path: Element.Path, index: ?usize) void {
+    assert(buffer.len >= path.len);
+
+    for (path) |part, i| {
+        buffer[i] = .{
+            .value = part.ptr,
+            .size = @intCast(u32, part.len),
+        };
+    }
+
+    out_path.* = .{
+        .path = buffer.ptr,
+        .path_size = @intCast(u32, path.len),
+        .index = @intCast(u32, index orelse 0),
+        .has_index = index != null,
     };
 }
 
@@ -201,7 +247,7 @@ const context_tests = struct {
         id: u32,
         name: []const u8,
 
-        pub fn get(user_data_handle: extern_types.UserDataHandle, path: extern_types.Path, out_value: *extern_types.UserData) callconv(.C) extern_types.PathResolution {
+        pub fn get(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *extern_types.UserData) callconv(.C) extern_types.PathResolution {
             if (path.path_size != 1) return .NOT_FOUND_IN_CONTEXT;
             var path_part = path.path[0];
             var path_value = path_part.value[0..path_part.size];
@@ -224,26 +270,64 @@ const context_tests = struct {
             return .NOT_FOUND_IN_CONTEXT;
         }
 
-        pub fn capacityHint(user_data_handle: extern_types.UserDataHandle, path: extern_types.Path, out_value: *u32) callconv(.C) extern_types.PathResolution {
-            _ = user_data_handle;
-            _ = path;
-            _ = out_value;
+        pub fn capacityHint(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *u32) callconv(.C) extern_types.PathResolution {
+            if (path.path_size == 1) {
+                var path_part = path.path[0];
+                var path_value = path_part.value[0..path_part.size];
+
+                var person = getSelf(user_data_handle);
+
+                if (std.mem.eql(u8, path_value, "id")) {
+                    out_value.* = @intCast(u32, std.fmt.count("{}", .{person.id}));
+                    return .FIELD;
+                } else if (std.mem.eql(u8, path_value, "name")) {
+                    out_value.* = @intCast(u32, person.name.len);
+                    return .FIELD;
+                }
+            }
             return .NOT_FOUND_IN_CONTEXT;
         }
 
-        pub fn interpolate(writer_handle: extern_types.WriterHandle, user_data_handle: extern_types.UserDataHandle, path: extern_types.Path) callconv(.C) extern_types.PathResolutionOrError {
-            _ = writer_handle;
-            _ = user_data_handle;
-            _ = path;
+        pub fn interpolate(writer_handle: extern_types.WriterHandle, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolutionOrError {
+            if (path.path_size == 1) {
+                var path_part = path.path[0];
+                var path_value = path_part.value[0..path_part.size];
+
+                // Using the FFI external function to interpolate,
+                // Just like a foreign language would do.
+
+                var person = getSelf(user_data_handle);
+
+                if (std.mem.eql(u8, path_value, "id")) {
+                    var buffer: [64]u8 = undefined;
+                    var len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
+
+                    var ret = ffi_export.mustache_interpolate(writer_handle, &buffer, @intCast(u32, len));
+
+                    return .{
+                        .result = .FIELD,
+                        .has_error = ret != .SUCCESS,
+                        .error_code = @enumToInt(ret),
+                    };
+                } else if (std.mem.eql(u8, path_value, "name")) {
+                    var ret = ffi_export.mustache_interpolate(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
+
+                    return .{
+                        .result = .FIELD,
+                        .has_error = ret != .SUCCESS,
+                        .error_code = @enumToInt(ret),
+                    };
+                }
+            }
 
             return .{
                 .result = .NOT_FOUND_IN_CONTEXT,
-                .error_code = 0,
                 .has_error = false,
+                .error_code = 0,
             };
         }
 
-        pub fn expandLambda(lambda_handle: extern_types.LambdaHandle, user_data_handle: extern_types.UserDataHandle, path: extern_types.Path) callconv(.C) extern_types.PathResolutionOrError {
+        pub fn expandLambda(lambda_handle: extern_types.LambdaHandle, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolutionOrError {
             _ = lambda_handle;
             _ = user_data_handle;
             _ = path;
@@ -277,8 +361,9 @@ const context_tests = struct {
         const path = try expectPath(allocator, "abc.de.f");
         defer Element.destroyPath(allocator, false, path);
 
-        var buffer: [3]extern_types.PathPart = undefined;
-        var ffi_path = extern_types.Path.get(&buffer, path, 0);
+        var ffi_buffer: [3]extern_types.PathPart = undefined;
+        var ffi_path: extern_types.Path = undefined;
+        convertPath(&ffi_path, &ffi_buffer, path, 0);
 
         try testing.expect(ffi_path.has_index == true);
         try testing.expect(ffi_path.index == 0);
@@ -343,5 +428,54 @@ const context_tests = struct {
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
         try testing.expectEqual(@ptrToInt(person.name.ptr), @ptrToInt(name_ctx.user_data.handle));
+    }
+
+    test "FFI Write" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = Person{
+            .id = 100,
+            .name = "Angus McGyver",
+        };
+
+        var user_data = extern_types.UserData{
+            .handle = &person,
+            .callbacks = Person.getCallbacks(),
+        };
+
+        var person_ctx = DummyRenderEngine.getContext(user_data);
+
+        var writer = list.writer();
+
+        try interpolateCtx(writer, person_ctx, "id", .Unescaped);
+        try testing.expectEqualStrings("100", list.items);
+
+        list.clearAndFree();
+
+        try interpolateCtx(writer, person_ctx, "name", .Unescaped);
+        try testing.expectEqualStrings("Angus McGyver", list.items);
+
+        list.clearAndFree();
+    }
+
+    test "FFI Render" {
+        const allocator = testing.allocator;
+
+        var person = Person{
+            .id = 42,
+            .name = "Peter",
+        };
+
+        var user_data = extern_types.UserData{
+            .handle = &person,
+            .callbacks = Person.getCallbacks(),
+        };
+
+        var text = try mustache.allocRenderText(allocator, "Hello {{name}}, your Id is {{id}}", user_data);
+        defer allocator.free(text);
+
+        try testing.expectEqualStrings("Hello Peter, your Id is 42", text);
     }
 };

@@ -18,7 +18,7 @@ const native_context = @import("contexts/native/context.zig");
 const json_context = @import("contexts/json/context.zig");
 const ffi_context = @import("contexts/ffi/context.zig");
 
-pub const Fields = @import("contexts/native/Fields.zig");
+pub const Fields = @import("Fields.zig");
 
 pub fn PathResolution(comptime Payload: type) type {
     return union(enum) {
