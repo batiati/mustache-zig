@@ -18,8 +18,8 @@ const PathResolution = context.PathResolution;
 const Escape = context.Escape;
 const ContextIterator = context.ContextIterator;
 
+const ffi_exports = @import("../../../exports.zig");
 const extern_types = @import("../../../ffi/extern_types.zig");
-const ffi_export = @import("../../../ffi/export.zig");
 const FfiWriter = @import("../../../ffi/Writer.zig");
 
 /// FFI context can resolve paths from foreign elements
@@ -64,29 +64,46 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
         pub const Iterator = ContextIterator(Self);
 
-        user_data: extern_types.UserData = undefined,
+        handle: extern_types.UserDataHandle = undefined,
+        callbacks: extern_types.Callbacks = undefined,
 
         pub fn context(user_data: extern_types.UserData) Self {
-            return .{
-                .user_data = user_data,
-            };
+            if (user_data.handle) |handle| {
+                return .{
+                    .handle = handle,
+                    .callbacks = user_data.callbacks,
+                };
+            } else {
+                assert(false);
+                unreachable;
+            }
         }
 
         pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
-            var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
-            var ffi_path: extern_types.Path = undefined;
-            convertPath(&ffi_path, &ffi_buffer, path, index);
+            if (self.callbacks.get) |callback| {
+                var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+                var ffi_path: extern_types.Path = undefined;
+                convertPath(&ffi_path, &ffi_buffer, path, index);
 
-            var out_value: extern_types.UserData = undefined;
-            var ret = self.user_data.callbacks.get(self.user_data.handle, &ffi_path, &out_value);
+                var out_value: extern_types.UserData = undefined;
+                var ret = callback(self.handle, &ffi_path, &out_value);
 
-            return switch (ret) {
-                .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
-                .CHAIN_BROKEN => .chain_broken,
-                .ITERATOR_CONSUMED => .iterator_consumed,
-                .FIELD => .{ .field = RenderEngine.getContext(out_value) },
-                .LAMBDA => .{ .lambda = RenderEngine.getContext(out_value) },
-            };
+                return switch (ret) {
+                    .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
+                    .CHAIN_BROKEN => .chain_broken,
+                    .ITERATOR_CONSUMED => .iterator_consumed,
+                    .FIELD, .LAMBDA => {
+
+                        // Dealing with FFI, it is possible to receive an NULL
+                        // Checking for it here
+                        if (out_value.handle == null) return .not_found_in_context;
+
+                        return if (ret == .FIELD) .{ .field = RenderEngine.getContext(out_value) } else .{ .lambda = RenderEngine.getContext(out_value) };
+                    },
+                };
+            } else {
+                return .not_found_in_context;
+            }
         }
 
         pub fn capacityHint(
@@ -94,21 +111,25 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             data_render: *DataRender,
             path: Element.Path,
         ) PathResolution(usize) {
-            var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
-            var ffi_path: extern_types.Path = undefined;
-            convertPath(&ffi_path, &ffi_buffer, path, null);
+            if (self.callbacks.capacityHint) |callback| {
+                var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+                var ffi_path: extern_types.Path = undefined;
+                convertPath(&ffi_path, &ffi_buffer, path, null);
 
-            _ = data_render;
-            var capacity: u32 = undefined;
-            var ret = self.user_data.callbacks.capacityHint(self.user_data.handle, &ffi_path, &capacity);
+                _ = data_render;
+                var capacity: u32 = undefined;
+                var ret = callback(self.handle, &ffi_path, &capacity);
 
-            return switch (ret) {
-                .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
-                .CHAIN_BROKEN => .chain_broken,
-                .ITERATOR_CONSUMED => .iterator_consumed,
-                .FIELD => .{ .field = capacity },
-                .LAMBDA => .{ .lambda = capacity },
-            };
+                return switch (ret) {
+                    .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
+                    .CHAIN_BROKEN => .chain_broken,
+                    .ITERATOR_CONSUMED => .iterator_consumed,
+                    .FIELD => .{ .field = capacity },
+                    .LAMBDA => .{ .lambda = capacity },
+                };
+            } else {
+                return .not_found_in_context;
+            }
         }
 
         pub inline fn interpolate(
@@ -118,24 +139,28 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const error_int = std.meta.Int(.unsigned, @sizeOf(anyerror) * 8);
-            comptime assert(@sizeOf(error_int) <= @sizeOf(u64));
+            comptime assert(@sizeOf(error_int) <= @sizeOf(u32));
 
-            var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
-            var ffi_path: extern_types.Path = undefined;
-            convertPath(&ffi_path, &ffi_buffer, path, null);
+            if (self.callbacks.interpolate) |callback| {
+                var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
+                var ffi_path: extern_types.Path = undefined;
+                convertPath(&ffi_path, &ffi_buffer, path, null);
 
-            var writer = WriterImpl.writer(data_render, escape);
-            var ret = self.user_data.callbacks.interpolate(&writer, self.user_data.handle, &ffi_path);
+                var writer = WriterImpl.writer(data_render, escape);
+                var ret = callback(&writer, self.handle, &ffi_path);
 
-            return if (ret.has_error)
-                @errSetCast(Allocator.Error || Writer.Error, @intToError(@intCast(error_int, ret.error_code)))
-            else switch (ret.result) {
-                .NOT_FOUND_IN_CONTEXT => PathResolution(void).not_found_in_context,
-                .CHAIN_BROKEN => PathResolution(void).chain_broken,
-                .ITERATOR_CONSUMED => PathResolution(void).iterator_consumed,
-                .FIELD => PathResolution(void).field,
-                .LAMBDA => PathResolution(void).lambda,
-            };
+                return if (ret.has_error)
+                    @errSetCast(Allocator.Error || Writer.Error, @intToError(@intCast(error_int, ret.error_code)))
+                else switch (ret.result) {
+                    .NOT_FOUND_IN_CONTEXT => PathResolution(void).not_found_in_context,
+                    .CHAIN_BROKEN => PathResolution(void).chain_broken,
+                    .ITERATOR_CONSUMED => PathResolution(void).iterator_consumed,
+                    .FIELD => PathResolution(void).field,
+                    .LAMBDA => PathResolution(void).lambda,
+                };
+            } else {
+                return PathResolution(void).not_found_in_context;
+            }
         }
 
         pub inline fn expandLambda(
@@ -302,7 +327,7 @@ const context_tests = struct {
                     var buffer: [64]u8 = undefined;
                     var len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
 
-                    var ret = ffi_export.mustache_interpolate(writer_handle, &buffer, @intCast(u32, len));
+                    var ret = ffi_exports.mustache_interpolate(writer_handle, &buffer, @intCast(u32, len));
 
                     return .{
                         .result = .FIELD,
@@ -310,7 +335,7 @@ const context_tests = struct {
                         .error_code = @enumToInt(ret),
                     };
                 } else if (std.mem.eql(u8, path_value, "name")) {
-                    var ret = ffi_export.mustache_interpolate(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
+                    var ret = ffi_exports.mustache_interpolate(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
 
                     return .{
                         .result = .FIELD,
@@ -410,7 +435,7 @@ const context_tests = struct {
 
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
-        try testing.expectEqual(@ptrToInt(&person.id), @ptrToInt(id_ctx.user_data.handle));
+        try testing.expectEqual(@ptrToInt(&person.id), @ptrToInt(id_ctx.handle));
 
         var name_ctx = name_ctx: {
             const path = try expectPath(allocator, "name");
@@ -427,7 +452,7 @@ const context_tests = struct {
 
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
-        try testing.expectEqual(@ptrToInt(person.name.ptr), @ptrToInt(name_ctx.user_data.handle));
+        try testing.expectEqual(@ptrToInt(person.name.ptr), @ptrToInt(name_ctx.handle));
     }
 
     test "FFI Write" {

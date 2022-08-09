@@ -14,11 +14,10 @@ typedef void* mustache_template_handle;
 
 typedef enum mustache_status {
     SUCCESS = 0,
-    INVALID_TEMPLATE = 1,
-    INVALID_USER_DATA = 2,
-    INVALID_WRITER = 3,
-    PARSE_ERROR = 4,
-    INTERPOLATION_ERROR = 5,
+    INVALID_ARGUMENT = 1,
+    PARSE_ERROR = 2,
+    INTERPOLATION_ERROR = 3,
+    OUT_OF_MEMORY = 4,
 } mustache_status;
 
 typedef enum mustache_path_resolution {
@@ -59,9 +58,10 @@ typedef struct mustache_userdata {
     const mustache_callbacks callbacks;
 } mustache_userdata;
 
-
-mustache_status mustache_parse_template(const char* template_text, uint32_t template_len, mustache_template_handle* out_template_handle);
-mustache_status mustache_render(mustache_template_handle template_handle, mustache_userdata user_data);
-mustache_status mustache_interpolate(mustache_writer_handle writer_handle, char* value, uint32_t len);
+mustache_status mustache_create_template(const char* template_text, uint32_t template_len, mustache_template_handle* out_template_handle);
+mustache_status mustache_free_template(mustache_template_handle template_handle);
+mustache_status mustache_render(mustache_template_handle template_handle, mustache_userdata user_data, char** out_buffer, uint32_t* out_buffer_len);
+mustache_status mustache_free_buffer(const char* buffer, uint32_t buffer_len);
+mustache_status mustache_interpolate(mustache_writer_handle writer_handle, const char* value, uint32_t len);
 
 #endif // MUSTACHE_C

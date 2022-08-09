@@ -8,15 +8,14 @@ const Element = mustache.Element;
 pub const UserDataHandle = *const anyopaque;
 pub const WriterHandle = *anyopaque;
 pub const LambdaHandle = *anyopaque;
-pub const TemplateHandle = *const anyopaque;
+pub const TemplateHandle = *anyopaque;
 
 pub const Status = enum(c_int) {
     SUCCESS = 0,
-    INVALID_TEMPLATE = 1,
-    INVALID_USER_DATA = 2,
-    INVALID_WRITER = 3,
-    PARSE_ERROR = 4,
-    INTERPOLATION_ERROR = 5,
+    INVALID_ARGUMENT = 1,
+    PARSE_ERROR = 2,
+    INTERPOLATION_ERROR = 3,
+    OUT_OF_MEMORY = 4,
 };
 
 pub const PathResolution = enum(c_int) {
@@ -46,19 +45,23 @@ pub const Path = extern struct {
 };
 
 pub const Callbacks = extern struct {
-    get: fn (user_data_handle: UserDataHandle, path: *const Path, out_value: *UserData) callconv(.C) PathResolution,
-    capacityHint: fn (user_data_handle: UserDataHandle, path: *const Path, out_value: *u32) callconv(.C) PathResolution,
-    interpolate: fn (writer_handle: WriterHandle, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolutionOrError,
-    expandLambda: fn (lambda_handle: LambdaHandle, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolutionOrError,
+    get: ?fn (user_data_handle: UserDataHandle, path: *const Path, out_value: *UserData) callconv(.C) PathResolution,
+    capacityHint: ?fn (user_data_handle: UserDataHandle, path: *const Path, out_value: *u32) callconv(.C) PathResolution,
+    interpolate: ?fn (writer_handle: WriterHandle, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolutionOrError,
+    expandLambda: ?fn (lambda_handle: LambdaHandle, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolutionOrError,
 };
 
 pub const UserData = extern struct {
-    handle: UserDataHandle,
+    handle: ?UserDataHandle,
     callbacks: Callbacks,
 };
 
-pub extern fn mustache_parse_template(template_text: [*]const u8, template_len: u32, out_template_handle: *TemplateHandle) callconv(.C) Status;
+pub extern fn mustache_create_template(template_text: ?[*]const u8, template_len: u32, out_template_handle: *TemplateHandle) callconv(.C) Status;
 
-pub extern fn mustache_render(template_handle: TemplateHandle, user_data: UserData) callconv(.C) Status;
+pub extern fn mustache_free_template(template_handle: ?TemplateHandle) callconv(.C) Status;
 
-pub extern fn mustache_interpolate(writer_handle: WriterHandle, value: [*]const u8, len: u32) callconv(.C) Status;
+pub extern fn mustache_render(template_handle: ?TemplateHandle, user_data: UserData, out_buffer: *[*]const u8, out_buffer_len: *u32) callconv(.C) Status;
+
+pub extern fn mustache_free_buffer(buffer: ?[*]const u8, buffer_len: u32) callconv(.C) Status;
+
+pub extern fn mustache_interpolate(writer_handle: ?WriterHandle, value: ?[*]const u8, len: u32) callconv(.C) Status;

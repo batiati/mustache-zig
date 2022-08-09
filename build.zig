@@ -4,7 +4,9 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     {
-        const lib = b.addStaticLibrary("mustache", "src/mustache.zig");
+        const lib = b.addStaticLibrary("mustache", "src/exports.zig");
+        lib.linkage = .dynamic;
+        lib.linkLibC();
         lib.setBuildMode(mode);
         lib.install();
     }
