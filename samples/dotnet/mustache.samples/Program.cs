@@ -24,25 +24,6 @@ public class Program
         var watcher = System.Diagnostics.Stopwatch.StartNew();
         for (int i = 0; i < 1_000_000; i++)
         {
-            /*
-            var t = mustache.Mustache.CreateTemplate(@"
-<html>
-    <head>
-        <title>{{title}}</title>
-    </head>
-    <body>
-        {{#posts}}
-            <h1>{{title}}</h1>
-            <em>{{date}}</em>
-            <article>
-                {{{body}}}
-            </article>
-        {{/posts}}
-    </body>
-</html>");
-
-            t.Dispose();
-*/
             _ = mustache.Mustache.Render(templete, data);
         }
         watcher.Stop();

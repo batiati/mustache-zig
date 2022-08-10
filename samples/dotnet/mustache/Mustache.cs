@@ -1,10 +1,20 @@
 using System.Text;
-using System.Runtime.InteropServices;
 
 namespace mustache;
+
+#region Documentation
+
+/// <summary>
+/// Mustache templating system
+/// </summary>
+
+#endregion Documentation
+
 public static class Mustache
 {
-    public static Template CreateTemplate(string content)
+	#region Methods
+
+	public static Template CreateTemplate(string content)
     {
         unsafe
         {
@@ -21,21 +31,24 @@ public static class Mustache
 
     public static string Render(Template template, object instance)
     {
-        var context = new Context(instance);
-
-        unsafe
+        using (var context = new Context(instance))
         {
-            var ret = Interop.mustache_render(template.Handle, context.GetUserData(), out byte* buffer, out int bufferLen);
-            if (ret != Interop.Status.SUCCESS) throw new Exception("TODO");
+            unsafe
+            {
+				var ret = Interop.mustache_render(template.Handle, context.GetUserData(), out byte* buffer, out int bufferLen);
+                if (ret != Interop.Status.SUCCESS) throw new Exception("TODO");
 
-            try
-            {
-                return Encoding.UTF8.GetString(buffer, bufferLen);
-            }
-            finally
-            {
-                Interop.mustache_free_buffer(buffer, bufferLen);
+                try
+                {
+                    return Encoding.UTF8.GetString(buffer, bufferLen);
+                }
+                finally
+                {
+                    Interop.mustache_free_buffer(buffer, bufferLen);
+                }
             }
         }
     }
+
+	#endregion Methods
 }

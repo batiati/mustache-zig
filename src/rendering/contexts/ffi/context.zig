@@ -64,24 +64,22 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
         pub const Iterator = ContextIterator(Self);
 
-        handle: extern_types.UserDataHandle = undefined,
-        callbacks: extern_types.Callbacks = undefined,
+        user_data: extern_types.UserData = undefined,
 
         pub fn context(user_data: extern_types.UserData) Self {
             return .{
-                .handle = user_data.handle,
-                .callbacks = user_data.callbacks,
+                .user_data = user_data,
             };
         }
 
         pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
-            if (self.callbacks.get) |callback| {
+            if (self.user_data.get) |callback| {
                 var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
                 var ffi_path: extern_types.Path = undefined;
                 convertPath(&ffi_path, &ffi_buffer, path, index);
 
                 var out_value: extern_types.UserData = undefined;
-                var ret = callback(self.handle, &ffi_path, &out_value);
+                var ret = callback(self.user_data.handle, &ffi_path, &out_value);
 
                 return switch (ret) {
                     .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
@@ -100,14 +98,14 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             data_render: *DataRender,
             path: Element.Path,
         ) PathResolution(usize) {
-            if (self.callbacks.capacityHint) |callback| {
+            if (self.user_data.capacityHint) |callback| {
                 var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
                 var ffi_path: extern_types.Path = undefined;
                 convertPath(&ffi_path, &ffi_buffer, path, null);
 
                 _ = data_render;
                 var capacity: u32 = undefined;
-                var ret = callback(self.handle, &ffi_path, &capacity);
+                var ret = callback(self.user_data.handle, &ffi_path, &capacity);
 
                 return switch (ret) {
                     .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
@@ -130,13 +128,13 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             const error_int = std.meta.Int(.unsigned, @sizeOf(anyerror) * 8);
             comptime assert(@sizeOf(error_int) <= @sizeOf(u32));
 
-            if (self.callbacks.interpolate) |callback| {
+            if (self.user_data.interpolate) |callback| {
                 var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
                 var ffi_path: extern_types.Path = undefined;
                 convertPath(&ffi_path, &ffi_buffer, path, null);
 
                 var writer = WriterImpl.writer(data_render, escape);
-                var ret = callback(&writer, self.handle, &ffi_path);
+                var ret = callback(&writer, self.user_data.handle, &ffi_path);
 
                 return if (ret.has_error)
                     @errSetCast(Allocator.Error || Writer.Error, @intToError(@intCast(error_int, ret.error_code)))

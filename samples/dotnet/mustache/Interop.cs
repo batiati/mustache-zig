@@ -1,9 +1,20 @@
 ﻿using System.Runtime.InteropServices;
 
 namespace mustache;
-internal unsafe static class Interop
+
+#region Documentation
+
+/// <summary>
+/// Native P/Invoke declarations
+/// </summary>
+
+#endregion Documentation
+
+internal static class Interop
 {
-    public enum Status : int
+	#region InnerTypes
+
+	public enum Status : int
     {
         SUCCESS = 0,
         INVALID_ARGUMENT = 1,
@@ -30,7 +41,7 @@ internal unsafe static class Interop
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct PathPart
+    public unsafe struct PathPart
     {
         public byte* value;
 
@@ -38,7 +49,7 @@ internal unsafe static class Interop
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct Path
+    public unsafe struct Path
     {
         public PathPart* path;
 
@@ -49,55 +60,54 @@ internal unsafe static class Interop
         public bool has_index;
     }
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public unsafe delegate PathResolution GetDelegate([In] IntPtr userDataHandle, [In] Path* path, [Out] out UserData out_value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public unsafe delegate PathResolution CapacityHintDelegate([In] IntPtr userDataHandle, [In] Path* path, [Out] out int out_value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public unsafe delegate PathResolutionOrError InterpolateDelegate([In] IntPtr writerHandle, [In] IntPtr userDataHandle, [In] Path* path);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public unsafe delegate PathResolutionOrError ExpandLambdaDelegate([In] IntPtr lambdaHandle, [In] IntPtr userDataHandle, [In] Path* path);
-
     [StructLayout(LayoutKind.Sequential)]
-    public struct Callbacks
-    {
-        [MarshalAs(UnmanagedType.FunctionPtr)]
-        public GetDelegate get;
-
-        [MarshalAs(UnmanagedType.FunctionPtr)]
-        public CapacityHintDelegate capacityHint;
-
-        [MarshalAs(UnmanagedType.FunctionPtr)]
-        public InterpolateDelegate interpolate;
-
-        [MarshalAs(UnmanagedType.FunctionPtr)]
-        public ExpandLambdaDelegate expandLambda;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct UserData
+    public unsafe struct UserData
     {
         public IntPtr handle;
 
-        public Callbacks callbacks;
-    }
+		[MarshalAs(UnmanagedType.FunctionPtr)]
+		public GetDelegate? get;
 
-    [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public static extern Status mustache_create_template([In] byte* templateText, [In] int templateLen, [Out] out IntPtr templateHandle);
+		[MarshalAs(UnmanagedType.FunctionPtr)]
+		public CapacityHintDelegate? capacityHint;
+
+		[MarshalAs(UnmanagedType.FunctionPtr)]
+		public InterpolateDelegate? interpolate;
+
+		[MarshalAs(UnmanagedType.FunctionPtr)]
+		public ExpandLambdaDelegate? expandLambda;
+	}
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+	public unsafe delegate PathResolution GetDelegate([In] IntPtr userDataHandle, [In] Path* path, [Out] out UserData out_value);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+	public unsafe delegate PathResolution CapacityHintDelegate([In] IntPtr userDataHandle, [In] Path* path, [Out] out int out_value);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+	public unsafe delegate PathResolutionOrError InterpolateDelegate([In] IntPtr writerHandle, [In] IntPtr userDataHandle, [In] Path* path);
+
+	[UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+	public unsafe delegate PathResolutionOrError ExpandLambdaDelegate([In] IntPtr lambdaHandle, [In] IntPtr userDataHandle, [In] Path* path);
+
+	#endregion InnerTypes
+
+	#region Methods
+
+	[DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    public static unsafe extern Status mustache_create_template([In] byte* templateText, [In] int templateLen, [Out] out IntPtr templateHandle);
 
     [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
     public static extern Status mustache_free_template([In] IntPtr templateHandle);
 
     [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public static extern Status mustache_render([In] IntPtr templateHandle, [In] UserData userData, [Out] out byte* outBuffer, [Out] out int outBufferLen);
+    public static unsafe extern Status mustache_render([In] IntPtr templateHandle, [In] UserData userData, [Out] out byte* outBuffer, [Out] out int outBufferLen);
 
     [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public static extern Status mustache_free_buffer([In] byte* buffer, [In] int bufferLen);
+    public static unsafe extern Status mustache_free_buffer([In] byte* buffer, [In] int bufferLen);
 
     [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public static extern Status mustache_interpolate([In] IntPtr writerHandle, [In] byte* str, [In] int strLen);
+    public static unsafe extern Status mustache_interpolate([In] IntPtr writerHandle, [In] byte* str, [In] int strLen);
 
+	#endregion Methods
 }

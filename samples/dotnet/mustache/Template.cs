@@ -1,4 +1,13 @@
 namespace mustache;
+
+#region Documentation
+
+/// <summary>
+/// Represents a parsed template, ready to be rendered
+/// </summary>
+
+#endregion Documentation
+
 public class Template : IDisposable
 {
     #region Properties
@@ -24,12 +33,13 @@ public class Template : IDisposable
 
     public void Dispose()
     {
-        Dispose(true);
-    }
+		Dispose(true);
+		GC.SuppressFinalize(this);
+	}
 
     private void Dispose(bool disposing)
     {
-        if (disposing) GC.SuppressFinalize(this);
+        _ = disposing;
 
         if (this.Handle != IntPtr.Zero)
         {
