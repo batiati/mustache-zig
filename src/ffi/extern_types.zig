@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const mustache = @import("../mustache.zig");
 const Element = mustache.Element;
 
-pub const UserDataHandle = *const anyopaque;
+pub const UserDataHandle = ?*const anyopaque;
 pub const WriterHandle = *anyopaque;
 pub const LambdaHandle = *anyopaque;
 pub const TemplateHandle = *anyopaque;
@@ -52,7 +52,7 @@ pub const Callbacks = extern struct {
 };
 
 pub const UserData = extern struct {
-    handle: ?UserDataHandle,
+    handle: UserDataHandle,
     callbacks: Callbacks,
 };
 

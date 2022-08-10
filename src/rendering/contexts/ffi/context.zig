@@ -68,15 +68,10 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         callbacks: extern_types.Callbacks = undefined,
 
         pub fn context(user_data: extern_types.UserData) Self {
-            if (user_data.handle) |handle| {
-                return .{
-                    .handle = handle,
-                    .callbacks = user_data.callbacks,
-                };
-            } else {
-                assert(false);
-                unreachable;
-            }
+            return .{
+                .handle = user_data.handle,
+                .callbacks = user_data.callbacks,
+            };
         }
 
         pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
@@ -92,14 +87,8 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
                     .CHAIN_BROKEN => .chain_broken,
                     .ITERATOR_CONSUMED => .iterator_consumed,
-                    .FIELD, .LAMBDA => {
-
-                        // Dealing with FFI, it is possible to receive an NULL
-                        // Checking for it here
-                        if (out_value.handle == null) return .not_found_in_context;
-
-                        return if (ret == .FIELD) .{ .field = RenderEngine.getContext(out_value) } else .{ .lambda = RenderEngine.getContext(out_value) };
-                    },
+                    .FIELD => .{ .field = RenderEngine.getContext(out_value) },
+                    .LAMBDA => .{ .lambda = RenderEngine.getContext(out_value) },
                 };
             } else {
                 return .not_found_in_context;
