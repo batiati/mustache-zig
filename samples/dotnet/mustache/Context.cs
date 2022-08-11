@@ -18,8 +18,8 @@ internal sealed class Context : IDisposable
 {
     #region Fields
 
-    private Context? parent;
-    private List<IntPtr>? handlers;
+    private readonly Context? parent;
+    private readonly List<IntPtr>? handlers;
 
     #endregion Fields
 
@@ -35,7 +35,7 @@ internal sealed class Context : IDisposable
     {
         this.Instance = instance;
         this.parent = null;
-        this.handlers = new List<IntPtr>(64);
+        this.handlers = new List<IntPtr>();
     }
 
     private Context(object instance, Context parent)
@@ -51,7 +51,7 @@ internal sealed class Context : IDisposable
 
     private IntPtr GetHandle()
     {
-        var handle = (IntPtr)GCHandle.Alloc(this, GCHandleType.Weak);
+        var handle = (IntPtr)GCHandle.Alloc(this);
 
         var list = handlers ?? parent?.handlers;
         list!.Add(handle);
@@ -67,7 +67,6 @@ internal sealed class Context : IDisposable
 			{
 				handle = GetHandle(),
 				get = &Get,
-				capacityHint = &CapacityHint,
 				interpolate = &Interpolate,
 				expandLambda = &ExpandLambda,
 			};
@@ -113,6 +112,10 @@ internal sealed class Context : IDisposable
                     instance = list[index];
                 }
             }
+            else if (instance == null)
+            {
+				return Interop.PathResolution.ITERATOR_CONSUMED;
+			}
             else if (index > 0)
             {
                 return Interop.PathResolution.ITERATOR_CONSUMED;
@@ -131,7 +134,7 @@ internal sealed class Context : IDisposable
     )
     {
         var context = GetContext(userDataHandle);
-        if (context == null) return Interop.PathResolution.CHAIN_BROKEN;
+        if (context == null) return PathResolution.CHAIN_BROKEN;
 
         var instance = context.Instance;
         var ret = ResolvePath(path, ref instance);
@@ -145,41 +148,7 @@ internal sealed class Context : IDisposable
         return ret;
     }
 
-    [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
-    private static unsafe PathResolution CapacityHint
-    (
-        IntPtr userDataHandle, 
-        Interop.Path* path, 
-        int* out_value
-    )
-    {
-        var context = GetContext(userDataHandle);
-        if (context == null) return PathResolution.CHAIN_BROKEN;
-
-        var instance = context.Instance;
-        var ret = ResolvePath(path, ref instance);
-
-        if (instance != null)
-        {
-            const int NUMBER_HINT = 16;
-
-            *out_value = instance switch
-            {
-                string str => str.Length,
-                bool => 5,
-                int => NUMBER_HINT,
-                long => NUMBER_HINT,
-                float => NUMBER_HINT,
-                double => NUMBER_HINT,
-                decimal => NUMBER_HINT,
-                _ => 0,
-            };
-        }
-
-        return ret;
-    }
-
-    [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
+	[UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
     private static unsafe PathResolution Interpolate
     (
         IntPtr writerHandle,
@@ -188,7 +157,7 @@ internal sealed class Context : IDisposable
         Interop.Path* path
     )
     {
-        var context = GetContext(userDataHandle);
+		var context = GetContext(userDataHandle);
         if (context != null)
         {
             var instance = context!.Instance;
@@ -205,13 +174,30 @@ internal sealed class Context : IDisposable
 
                 if (value.Length > 0)
                 {
-                    unsafe
+					var encoder = Encoding.UTF8.GetEncoder();
+
+					unsafe
                     {
-                        var buffer = Encoding.UTF8.GetBytes(value);
-                        fixed (byte* ptr = &buffer[0])
+                        // Converts from UTF-16 directly on the writerFn
+                        const int BUFFER_LEN = 256;
+						byte* buffer = stackalloc byte[BUFFER_LEN];
+
+                        int charsOffSet = 0;
+                        int charsCount = value.Length;
+
+						fixed (char* input = value)
                         {
-                            var status = writeFn(writerHandle, ptr, value.Length);
-                            if (status != Status.SUCCESS) return PathResolution.CHAIN_BROKEN;
+                            for(;;)
+                            {
+                                encoder.Convert(input + charsOffSet, charsCount, buffer, BUFFER_LEN, true, out int charsUsed, out int bytesUsed, out bool completed);
+
+								var status = writeFn(writerHandle, buffer, bytesUsed);
+                                if (status != Status.SUCCESS) return PathResolution.CHAIN_BROKEN;
+
+                                if (completed) break;
+								charsCount -= charsUsed;
+								charsOffSet += charsUsed;
+							}
                         }
                     }
                 }

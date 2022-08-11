@@ -86,7 +86,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     .LAMBDA => .{ .lambda = RenderEngine.getContext(out_value) },
                 };
             } else {
-                return .not_found_in_context;
+                return .chain_broken;
             }
         }
 
@@ -112,7 +112,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     .LAMBDA => .{ .lambda = capacity },
                 };
             } else {
-                return .not_found_in_context;
+                return .chain_broken;
             }
         }
 
@@ -122,9 +122,6 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             path: Element.Path,
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            const error_int = std.meta.Int(.unsigned, @sizeOf(anyerror) * 8);
-            comptime assert(@sizeOf(error_int) <= @sizeOf(u32));
-
             if (self.user_data.interpolate) |callback| {
                 var ffi_buffer: [PATH_MAX_PARTS]extern_types.PathPart = undefined;
                 var ffi_path: extern_types.Path = undefined;
@@ -145,7 +142,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     .LAMBDA => PathResolution(void).lambda,
                 };
             } else {
-                return PathResolution(void).not_found_in_context;
+                return PathResolution(void).chain_broken;
             }
         }
 
@@ -311,7 +308,6 @@ const context_tests = struct {
                     if (ret != .SUCCESS) return .CHAIN_BROKEN;
 
                     return .FIELD;
-                    
                 } else if (std.mem.eql(u8, path_value, "name")) {
                     var ret = writer_fn(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
                     if (ret != .SUCCESS) return .CHAIN_BROKEN;

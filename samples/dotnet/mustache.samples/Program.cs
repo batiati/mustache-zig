@@ -104,7 +104,7 @@ Supported features:
         Console.WriteLine($"Total time {watcher.Elapsed.TotalSeconds:0.000}s");
         Console.WriteLine($"{1_000_000d / watcher.Elapsed.TotalSeconds:0} ops/s");
         Console.WriteLine($"{watcher.ElapsedMilliseconds:0} ns/iter");
-        Console.WriteLine($"{(total / 1024d / 10124d) / watcher.Elapsed.TotalSeconds:0} MB/s");
+        Console.WriteLine($"{((double)total / 1024d / 1024d) / watcher.Elapsed.TotalSeconds:0} MB/s");
     }
 
 }

@@ -3,11 +3,18 @@ const std = @import("std");
 pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .cpu_model = .baseline,
+        },
+    });
+
     {
         const lib = b.addStaticLibrary("mustache", "src/exports.zig");
         lib.linkage = .dynamic;
         lib.linkLibC();
         lib.setBuildMode(mode);
+        lib.setTarget(target);
         lib.install();
     }
 
