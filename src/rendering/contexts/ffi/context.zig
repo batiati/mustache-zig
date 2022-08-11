@@ -34,22 +34,18 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
     return struct {
         const Self = @This();
 
+        /// Implements a FfiWriter using the @fieldParentPtr approach
+        /// This is an advantage for passing just one pointer as the "writer_handler"
         pub const WriterImpl = struct {
-            pub fn writer(data_render: *DataRender, escape: Escape) FfiWriter {
-                return .{
-                    .handle = data_render,
-                    .escape = escape,
-                    .writeFn = write,
-                };
-            }
+            data_render: *DataRender,
+            escape: Escape,
+            interface: FfiWriter = .{
+                .writeFn = write,
+            },
 
-            fn write(ctx: *anyopaque, value: []const u8, escape: Escape) anyerror!void {
-                var data_render = getDataRender(ctx);
-                try data_render.write(value, escape);
-            }
-
-            inline fn getDataRender(ctx: *anyopaque) *DataRender {
-                return @ptrCast(*DataRender, @alignCast(@alignOf(DataRender), ctx));
+            fn write(ctx: *FfiWriter, value: []const u8) anyerror!void {
+                var self = @fieldParentPtr(@This(), "interface", ctx);
+                try self.data_render.write(value, self.escape);
             }
         };
 
@@ -129,8 +125,12 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 var ffi_path: extern_types.Path = undefined;
                 convertPath(&ffi_path, &ffi_buffer, path, null);
 
-                var writer = WriterImpl.writer(data_render, escape);
-                var ret = callback(&writer, self.user_data.handle, &ffi_path);
+                var writer = WriterImpl{
+                    .data_render = data_render,
+                    .escape = escape,
+                };
+
+                var ret = callback(&writer.interface, self.user_data.handle, &ffi_path);
 
                 return if (ret.has_error)
                     @errSetCast(Allocator.Error || Writer.Error, @intToError(@intCast(error_int, ret.error_code)))
@@ -262,16 +262,10 @@ const context_tests = struct {
 
             var person = getSelf(user_data_handle);
             if (std.mem.eql(u8, path_value, "id")) {
-                out_value.* = .{
-                    .handle = &person.id,
-                    .callbacks = getCallbacks(),
-                };
+                out_value.* = Person.getUserData(&person.id);
                 return .FIELD;
             } else if (std.mem.eql(u8, path_value, "name")) {
-                out_value.* = .{
-                    .handle = person.name.ptr,
-                    .callbacks = getCallbacks(),
-                };
+                out_value.* = Person.getUserData(person.name.ptr);
                 return .FIELD;
             }
 
@@ -351,8 +345,9 @@ const context_tests = struct {
             return @ptrCast(*const Self, @alignCast(@alignOf(Self), user_data_handle));
         }
 
-        pub fn getCallbacks() extern_types.Callbacks {
+        pub fn getUserData(handle: *const anyopaque) extern_types.UserData {
             return .{
+                .handle = handle,
                 .get = get,
                 .capacityHint = capacityHint,
                 .interpolate = interpolate,
@@ -396,11 +391,7 @@ const context_tests = struct {
             .name = "Angus McGyver",
         };
 
-        var user_data = extern_types.UserData{
-            .handle = &person,
-            .callbacks = Person.getCallbacks(),
-        };
-
+        var user_data = Person.getUserData(&person);
         var person_ctx = DummyRenderEngine.getContext(user_data);
 
         var id_ctx = id_ctx: {
@@ -418,7 +409,7 @@ const context_tests = struct {
 
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
-        try testing.expectEqual(@ptrToInt(&person.id), @ptrToInt(id_ctx.handle));
+        try testing.expectEqual(@ptrToInt(&person.id), @ptrToInt(id_ctx.user_data.handle));
 
         var name_ctx = name_ctx: {
             const path = try expectPath(allocator, "name");
@@ -435,7 +426,7 @@ const context_tests = struct {
 
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
-        try testing.expectEqual(@ptrToInt(person.name.ptr), @ptrToInt(name_ctx.handle));
+        try testing.expectEqual(@ptrToInt(person.name.ptr), @ptrToInt(name_ctx.user_data.handle));
     }
 
     test "FFI Write" {
@@ -448,11 +439,7 @@ const context_tests = struct {
             .name = "Angus McGyver",
         };
 
-        var user_data = extern_types.UserData{
-            .handle = &person,
-            .callbacks = Person.getCallbacks(),
-        };
-
+        var user_data = Person.getUserData(&person);
         var person_ctx = DummyRenderEngine.getContext(user_data);
 
         var writer = list.writer();
@@ -476,11 +463,7 @@ const context_tests = struct {
             .name = "Peter",
         };
 
-        var user_data = extern_types.UserData{
-            .handle = &person,
-            .callbacks = Person.getCallbacks(),
-        };
-
+        var user_data = Person.getUserData(&person);
         var text = try mustache.allocRenderText(allocator, "Hello {{name}}, your Id is {{id}}", user_data);
         defer allocator.free(text);
 

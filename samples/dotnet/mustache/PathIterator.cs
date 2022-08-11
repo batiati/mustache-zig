@@ -11,7 +11,7 @@ namespace mustache;
 /// </summary>
 
 #endregion Documentation
-internal class PathIterator
+internal struct PathIterator
 {
     #region Fields
     private int current = 0;
@@ -53,7 +53,7 @@ internal class PathIterator
         {
             if (current >= path->path_size) return null;
 
-            var pathPart = (Interop.PathPart*)(path->path + current);
+            var pathPart = path->path + current;
             var str = Encoding.UTF8.GetString(pathPart->value, pathPart->size);
             current += 1;
 

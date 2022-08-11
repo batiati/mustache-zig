@@ -2,7 +2,7 @@
 public class Program
 {
     // Mustache template
-    const string template_text = 
+    const string template_text =
 
 @"{{! This is a spec-compliant mustache template }}
 Hello {{name}} from Zig
@@ -41,7 +41,7 @@ Supported features:
     {
         public string? title;
         public string? body;
-    }    
+    }
 
     public static void Main()
     {
