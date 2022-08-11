@@ -1,5 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Collections;
+using System.Runtime.CompilerServices;
+using static mustache.Interop;
+using System.Text;
 
 namespace mustache;
 
@@ -18,11 +21,6 @@ internal sealed class Context : IDisposable
     private Context? parent;
     private List<IntPtr>? handlers;
 
-    private static readonly Interop.GetDelegate GetCallback;
-    private static readonly Interop.CapacityHintDelegate CapacityHintCallback;
-    private static readonly Interop.InterpolateDelegate InterpolateCallback;
-    private static readonly Interop.ExpandLambdaDelegate ExpandLambdaCallback;
-
     #endregion Fields
 
     #region Properties
@@ -32,17 +30,6 @@ internal sealed class Context : IDisposable
     #endregion Properties
 
     #region Constructor
-
-    static Context()
-    {
-        unsafe
-        {
-            GetCallback = new Interop.GetDelegate(Get);
-            CapacityHintCallback = new Interop.CapacityHintDelegate(CapacityHint);
-            InterpolateCallback = new Interop.InterpolateDelegate(Interpolate);
-            ExpandLambdaCallback = new Interop.ExpandLambdaDelegate(ExpandLambda);
-        }
-    }
 
     public Context(object instance)
     {
@@ -72,18 +59,18 @@ internal sealed class Context : IDisposable
         return handle;
     }
 
-    public Interop.UserData GetUserData()
+    public UserData GetUserData()
     {
         unsafe
         {
-            return new Interop.UserData
-            {
-                handle = GetHandle(),
-                get = GetCallback,
-                capacityHint = CapacityHintCallback,
-                interpolate = InterpolateCallback,
-                expandLambda = ExpandLambdaCallback,
-            };
+			return new UserData
+			{
+				handle = GetHandle(),
+				get = &Get,
+				capacityHint = &CapacityHint,
+				interpolate = &Interpolate,
+				expandLambda = &ExpandLambda,
+			};
         }
     }
 
@@ -92,7 +79,7 @@ internal sealed class Context : IDisposable
         return GCHandle.FromIntPtr(handle).Target as Context;
     }
 
-    private unsafe static Interop.PathResolution ResolvePath(Interop.Path* path, ref object? instance)
+    private unsafe static PathResolution ResolvePath(Interop.Path* path, ref object? instance)
     {
         var it = new PathIterator(path);
         while (it.GetNext() is string name)
@@ -135,12 +122,14 @@ internal sealed class Context : IDisposable
         return instance == null ? Interop.PathResolution.CHAIN_BROKEN : Interop.PathResolution.FIELD;
     }
 
-
-
-    private static unsafe Interop.PathResolution Get(IntPtr userDataHandle, Interop.Path* path, out Interop.UserData out_value)
+    [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
+    private static unsafe PathResolution Get
+    (
+        IntPtr userDataHandle, 
+        Interop.Path* path, 
+        UserData* out_value
+    )
     {
-        out_value = default(Interop.UserData);
-
         var context = GetContext(userDataHandle);
         if (context == null) return Interop.PathResolution.CHAIN_BROKEN;
 
@@ -150,18 +139,22 @@ internal sealed class Context : IDisposable
         if (instance != null)
         {
             var nextContext = new Context(instance, context);
-            out_value = nextContext.GetUserData();
+            *out_value = nextContext.GetUserData();
         }
 
         return ret;
     }
 
-    private static unsafe Interop.PathResolution CapacityHint(IntPtr userDataHandle, Interop.Path* path, out int out_value)
+    [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
+    private static unsafe PathResolution CapacityHint
+    (
+        IntPtr userDataHandle, 
+        Interop.Path* path, 
+        int* out_value
+    )
     {
-        out_value = 0;
-
         var context = GetContext(userDataHandle);
-        if (context == null) return Interop.PathResolution.CHAIN_BROKEN;
+        if (context == null) return PathResolution.CHAIN_BROKEN;
 
         var instance = context.Instance;
         var ret = ResolvePath(path, ref instance);
@@ -170,7 +163,7 @@ internal sealed class Context : IDisposable
         {
             const int NUMBER_HINT = 16;
 
-            out_value = instance switch
+            *out_value = instance switch
             {
                 string str => str.Length,
                 bool => 5,
@@ -186,42 +179,59 @@ internal sealed class Context : IDisposable
         return ret;
     }
 
-    private static unsafe Interop.PathResolutionOrError Interpolate(IntPtr writerHandle, IntPtr userDataHandle, Interop.Path* path)
+    [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
+    private static unsafe PathResolution Interpolate
+    (
+        IntPtr writerHandle,
+        delegate* unmanaged[Cdecl]<IntPtr, byte*, int, Status> writeFn,
+        IntPtr userDataHandle,
+        Interop.Path* path
+    )
     {
         var context = GetContext(userDataHandle);
-        if (context == null) new Interop.PathResolutionOrError { result = Interop.PathResolution.CHAIN_BROKEN };
-
-        var instance = context!.Instance;
-        var ret = ResolvePath(path, ref instance);
-
-        if (instance != null)
+        if (context != null)
         {
-            var value = instance switch
-            {
-                string str => str,
-                object any => any.ToString() ?? string.Empty,
-                null => String.Empty,
-            };
+            var instance = context!.Instance;
+            var ret = ResolvePath(path, ref instance);
 
-            if (value.Length > 0)
+            if (instance != null)
             {
-                unsafe
+                var value = instance switch
                 {
-                    fixed (char* ptr = value)
+                    string str => str,
+                    object any => any.ToString() ?? string.Empty,
+                    null => String.Empty,
+                };
+
+                if (value.Length > 0)
+                {
+                    unsafe
                     {
-                        var status = Interop.mustache_interpolateW(writerHandle, ptr, value.Length);
-                        if (status != Interop.Status.SUCCESS) return new Interop.PathResolutionOrError { has_error = true, error_code = (int)ret };
+                        var buffer = Encoding.UTF8.GetBytes(value);
+                        fixed (byte* ptr = &buffer[0])
+                        {
+                            var status = writeFn(writerHandle, ptr, value.Length);
+                            if (status != Status.SUCCESS) return PathResolution.CHAIN_BROKEN;
+                        }
                     }
                 }
             }
+
+            return ret;
         }
 
-        return new Interop.PathResolutionOrError { result = ret };
+        return PathResolution.CHAIN_BROKEN;
     }
 
-    private static unsafe Interop.PathResolutionOrError ExpandLambda(IntPtr lambdaHandle, IntPtr userDataHandle, Interop.Path* path)
+    [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
+    private static unsafe PathResolution ExpandLambda
+    (
+        IntPtr lambdaHandle, 
+        IntPtr userDataHandle, 
+        Interop.Path* path
+    )
     {
-        return new Interop.PathResolutionOrError { result = Interop.PathResolution.NOT_FOUND_IN_CONTEXT };
+        return PathResolution.NOT_FOUND_IN_CONTEXT;
     }
 
     #endregion Methods

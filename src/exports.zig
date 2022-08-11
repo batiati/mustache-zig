@@ -7,7 +7,6 @@ const Allocator = std.mem.Allocator;
 const mustache = @import("mustache.zig");
 
 const extern_types = @import("ffi/extern_types.zig");
-const Writer = @import("ffi/Writer.zig");
 
 pub export fn mustache_create_template(template_text: ?[*]const u8, template_len: u32, out_template_handle: *extern_types.TemplateHandle) callconv(.C) extern_types.Status {
     if (template_text) |buffer| {
@@ -67,38 +66,6 @@ pub export fn mustache_free_buffer(buffer: ?[*]const u8, buffer_len: u32) callco
         var allocator = if (comptime builtin.link_libc) std.heap.c_allocator else testing.allocator;
         allocator.free(ptr[0..buffer_len]);
 
-        return .SUCCESS;
-    } else {
-        return .INVALID_ARGUMENT;
-    }
-}
-
-pub export fn mustache_interpolate(writer_handle: ?extern_types.WriterHandle, value: ?[*]const u8, len: u32) callconv(.C) extern_types.Status {
-    if (writer_handle) |handle| {
-        if (value) |buffer| {
-            var writer = @ptrCast(*Writer, @alignCast(@alignOf(Writer), handle));
-            writer.write(buffer[0..len]) catch {
-                return .INTERPOLATION_ERROR;
-            };
-        }
-        return .SUCCESS;
-    } else {
-        return .INVALID_ARGUMENT;
-    }
-}
-
-pub export fn mustache_interpolateW(writer_handle: ?extern_types.WriterHandle, value: ?[*]const u16, len: u32) callconv(.C) extern_types.Status {
-    if (writer_handle) |handle| {
-        if (value) |buffer| {
-            var allocator = if (comptime builtin.link_libc) std.heap.c_allocator else testing.allocator;
-            var str = std.unicode.utf16leToUtf8Alloc(allocator, buffer[0..len]) catch return .OUT_OF_MEMORY;
-            defer allocator.free(str);
-
-            var writer = @ptrCast(*Writer, @alignCast(@alignOf(Writer), handle));
-            writer.write(str) catch {
-                return .INTERPOLATION_ERROR;
-            };
-        }
         return .SUCCESS;
     } else {
         return .INVALID_ARGUMENT;

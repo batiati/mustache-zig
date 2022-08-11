@@ -20,7 +20,6 @@ const ContextIterator = context.ContextIterator;
 
 const ffi_exports = @import("../../../exports.zig");
 const extern_types = @import("../../../ffi/extern_types.zig");
-const FfiWriter = @import("../../../ffi/Writer.zig");
 
 /// FFI context can resolve paths from foreign elements
 /// This struct implements the expected context interface using static dispatch.
@@ -34,18 +33,24 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
     return struct {
         const Self = @This();
 
-        /// Implements a FfiWriter using the @fieldParentPtr approach
-        /// This is an advantage for passing just one pointer as the "writer_handler"
-        pub const WriterImpl = struct {
+        /// Implements a Writer exposing a function pointer to be called from the FFI side
+        pub const FfiWriter = struct {
             data_render: *DataRender,
             escape: Escape,
-            interface: FfiWriter = .{
-                .writeFn = write,
-            },
 
-            fn write(ctx: *FfiWriter, value: []const u8) anyerror!void {
-                var self = @fieldParentPtr(@This(), "interface", ctx);
-                try self.data_render.write(value, self.escape);
+            fn write(ctx: ?*anyopaque, value: ?[*]const u8, len: u32) callconv(.C) extern_types.Status {
+                if (ctx) |handle| {
+                    if (value) |buffer| {
+                        var self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), handle));
+                        self.data_render.write(buffer[0..len], self.escape) catch {
+                            return .INTERPOLATION_ERROR;
+                        };
+
+                        return .SUCCESS;
+                    }
+                }
+
+                return .INVALID_ARGUMENT;
             }
         };
 
@@ -125,16 +130,14 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 var ffi_path: extern_types.Path = undefined;
                 convertPath(&ffi_path, &ffi_buffer, path, null);
 
-                var writer = WriterImpl{
+                var writer = FfiWriter{
                     .data_render = data_render,
                     .escape = escape,
                 };
 
-                var ret = callback(&writer.interface, self.user_data.handle, &ffi_path);
+                var ret = callback(&writer, FfiWriter.write, self.user_data.handle, &ffi_path);
 
-                return if (ret.has_error)
-                    @errSetCast(Allocator.Error || Writer.Error, @intToError(@intCast(error_int, ret.error_code)))
-                else switch (ret.result) {
+                return switch (ret) {
                     .NOT_FOUND_IN_CONTEXT => PathResolution(void).not_found_in_context,
                     .CHAIN_BROKEN => PathResolution(void).chain_broken,
                     .ITERATOR_CONSUMED => PathResolution(void).iterator_consumed,
@@ -290,7 +293,7 @@ const context_tests = struct {
             return .NOT_FOUND_IN_CONTEXT;
         }
 
-        pub fn interpolate(writer_handle: extern_types.WriterHandle, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolutionOrError {
+        pub fn interpolate(writer_handle: extern_types.WriterHandle, writer_fn: extern_types.WriteFn, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolution {
             if (path.path_size == 1) {
                 var path_part = path.path[0];
                 var path_value = path_part.value[0..path_part.size];
@@ -304,41 +307,28 @@ const context_tests = struct {
                     var buffer: [64]u8 = undefined;
                     var len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
 
-                    var ret = ffi_exports.mustache_interpolate(writer_handle, &buffer, @intCast(u32, len));
+                    var ret = writer_fn(writer_handle, &buffer, @intCast(u32, len));
+                    if (ret != .SUCCESS) return .CHAIN_BROKEN;
 
-                    return .{
-                        .result = .FIELD,
-                        .has_error = ret != .SUCCESS,
-                        .error_code = @enumToInt(ret),
-                    };
+                    return .FIELD;
+                    
                 } else if (std.mem.eql(u8, path_value, "name")) {
-                    var ret = ffi_exports.mustache_interpolate(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
+                    var ret = writer_fn(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
+                    if (ret != .SUCCESS) return .CHAIN_BROKEN;
 
-                    return .{
-                        .result = .FIELD,
-                        .has_error = ret != .SUCCESS,
-                        .error_code = @enumToInt(ret),
-                    };
+                    return .FIELD;
                 }
             }
 
-            return .{
-                .result = .NOT_FOUND_IN_CONTEXT,
-                .has_error = false,
-                .error_code = 0,
-            };
+            return .NOT_FOUND_IN_CONTEXT;
         }
 
-        pub fn expandLambda(lambda_handle: extern_types.LambdaHandle, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolutionOrError {
+        pub fn expandLambda(lambda_handle: extern_types.LambdaHandle, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolution {
             _ = lambda_handle;
             _ = user_data_handle;
             _ = path;
 
-            return .{
-                .result = .NOT_FOUND_IN_CONTEXT,
-                .error_code = 0,
-                .has_error = false,
-            };
+            return .NOT_FOUND_IN_CONTEXT;
         }
 
         fn getSelf(user_data_handle: extern_types.UserDataHandle) *const Self {

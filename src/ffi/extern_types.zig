@@ -44,12 +44,14 @@ pub const Path = extern struct {
     has_index: bool,
 };
 
+pub const WriteFn = fn (writer_handle: ?WriterHandle, value: ?[*]const u8, len: u32) callconv(.C) Status;
+
 pub const UserData = extern struct {
     handle: UserDataHandle,
     get: ?fn (user_data_handle: UserDataHandle, path: *const Path, out_value: *UserData) callconv(.C) PathResolution,
     capacityHint: ?fn (user_data_handle: UserDataHandle, path: *const Path, out_value: *u32) callconv(.C) PathResolution,
-    interpolate: ?fn (writer_handle: WriterHandle, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolutionOrError,
-    expandLambda: ?fn (lambda_handle: LambdaHandle, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolutionOrError,
+    interpolate: ?fn (writer_handle: WriterHandle, write_fn: WriteFn, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolution,
+    expandLambda: ?fn (lambda_handle: LambdaHandle, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolution,
 };
 
 pub extern fn mustache_create_template(template_text: ?[*]const u8, template_len: u32, out_template_handle: *TemplateHandle) callconv(.C) Status;
@@ -59,7 +61,3 @@ pub extern fn mustache_free_template(template_handle: ?TemplateHandle) callconv(
 pub extern fn mustache_render(template_handle: ?TemplateHandle, user_data: UserData, out_buffer: *[*]const u8, out_buffer_len: *u32) callconv(.C) Status;
 
 pub extern fn mustache_free_buffer(buffer: ?[*]const u8, buffer_len: u32) callconv(.C) Status;
-
-pub extern fn mustache_interpolate(writer_handle: ?WriterHandle, value: ?[*]const u8, len: u32) callconv(.C) Status;
-
-pub extern fn mustache_interpolateW(writer_handle: ?WriterHandle, value: ?[*]const u16, len: u32) callconv(.C) Status;
