@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace mustache;
@@ -12,9 +13,9 @@ namespace mustache;
 
 public static class Mustache
 {
-	#region Methods
+    #region Methods
 
-	public static Template CreateTemplate(string content)
+    public static Template CreateTemplate(string content)
     {
         unsafe
         {
@@ -35,20 +36,16 @@ public static class Mustache
         {
             unsafe
             {
-				var ret = Interop.mustache_render(template.Handle, context.GetUserData(), out byte* buffer, out int bufferLen);
+                var ret = Interop.mustache_render(template.Handle, context.GetUserData(), out IntPtr buffer, out int bufferLen);
                 if (ret != Interop.Status.SUCCESS) throw new Exception("TODO");
 
-                try
-                {
-                    return Encoding.UTF8.GetString(buffer, bufferLen);
-                }
-                finally
-                {
-                    Interop.mustache_free_buffer(buffer, bufferLen);
-                }
+                var str = Marshal.PtrToStringUTF8(buffer, bufferLen);
+                Interop.mustache_free_buffer(buffer, bufferLen);
+
+                return str;
             }
         }
     }
 
-	#endregion Methods
+    #endregion Methods
 }

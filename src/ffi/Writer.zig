@@ -9,12 +9,8 @@ const Self = @This();
 
 handle: *anyopaque,
 escape: Escape,
-vtable: *const VTable,
-
-pub const VTable = struct {
-    write: fn (*anyopaque, []const u8, Escape) anyerror!void,
-};
+writeFn: fn (*anyopaque, []const u8, Escape) anyerror!void,
 
 pub inline fn write(self: Self, value: []const u8) anyerror!void {
-    try self.vtable.write(self.handle, value, self.escape);
+    try self.writeFn(self.handle, value, self.escape);
 }

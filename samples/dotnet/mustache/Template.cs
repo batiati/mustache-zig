@@ -33,9 +33,9 @@ public class Template : IDisposable
 
     public void Dispose()
     {
-		Dispose(true);
-		GC.SuppressFinalize(this);
-	}
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
 
     private void Dispose(bool disposing)
     {

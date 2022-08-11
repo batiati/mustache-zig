@@ -63,5 +63,6 @@ mustache_status mustache_free_template(mustache_template_handle template_handle)
 mustache_status mustache_render(mustache_template_handle template_handle, mustache_userdata user_data, char** out_buffer, uint32_t* out_buffer_len);
 mustache_status mustache_free_buffer(const char* buffer, uint32_t buffer_len);
 mustache_status mustache_interpolate(mustache_writer_handle writer_handle, const char* value, uint32_t len);
+mustache_status mustache_interpolateW(mustache_writer_handle writer_handle, const wchar_t* value, uint32_t len);
 
 #endif // MUSTACHE_C

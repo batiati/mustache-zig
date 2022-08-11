@@ -1,207 +1,246 @@
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Collections;
 
-namespace mustache
+namespace mustache;
+
+#region Documentation
+
+/// <summary>
+/// Represents a context being evaluated
+/// </summary>
+
+#endregion Documentation
+
+internal sealed class Context : IDisposable
 {
-	#region Documentation
+    #region Fields
 
-	/// <summary>
-	/// Represents a context being evaluated
-	/// </summary>
+    private Context? parent;
+    private List<IntPtr>? handlers;
 
-	#endregion Documentation
+    private static readonly Interop.GetDelegate GetCallback;
+    private static readonly Interop.CapacityHintDelegate CapacityHintCallback;
+    private static readonly Interop.InterpolateDelegate InterpolateCallback;
+    private static readonly Interop.ExpandLambdaDelegate ExpandLambdaCallback;
 
-	internal sealed class Context : IDisposable
+    #endregion Fields
+
+    #region Properties
+
+    public object Instance { get; private set; }
+
+    #endregion Properties
+
+    #region Constructor
+
+    static Context()
     {
-		#region Fields
+        unsafe
+        {
+            GetCallback = new Interop.GetDelegate(Get);
+            CapacityHintCallback = new Interop.CapacityHintDelegate(CapacityHint);
+            InterpolateCallback = new Interop.InterpolateDelegate(Interpolate);
+            ExpandLambdaCallback = new Interop.ExpandLambdaDelegate(ExpandLambda);
+        }
+    }
 
-		private Context? parent;
-		private List<GCHandle>? handlers;
+    public Context(object instance)
+    {
+        this.Instance = instance;
+        this.parent = null;
+        this.handlers = new List<IntPtr>(64);
+    }
 
-		private static readonly Interop.GetDelegate GetCallback;
-		private static readonly Interop.CapacityHintDelegate CapacityHintCallback;
-		private static readonly Interop.InterpolateDelegate InterpolateCallback;
-		private static readonly Interop.ExpandLambdaDelegate ExpandLambdaCallback;
+    private Context(object instance, Context parent)
+    {
+        this.Instance = instance;
+        this.parent = parent;
+        this.handlers = null;
+    }
 
-		#endregion Fields
+    #endregion Constructor
 
-		#region Properties
+    #region Methods
 
-		public object Instance { get; private set; }
+    private IntPtr GetHandle()
+    {
+        var handle = (IntPtr)GCHandle.Alloc(this, GCHandleType.Weak);
 
-		#endregion Properties
+        var list = handlers ?? parent?.handlers;
+        list!.Add(handle);
 
-		#region Constructor
+        return handle;
+    }
 
-		static Context()
-        {   
-            unsafe
+    public Interop.UserData GetUserData()
+    {
+        unsafe
+        {
+            return new Interop.UserData
             {
-                GetCallback = new Interop.GetDelegate(Get);
-                CapacityHintCallback = new Interop.CapacityHintDelegate(CapacityHint);
-                InterpolateCallback = new Interop.InterpolateDelegate(Interpolate);
-                ExpandLambdaCallback = new Interop.ExpandLambdaDelegate(ExpandLambda);   
-			}
+                handle = GetHandle(),
+                get = GetCallback,
+                capacityHint = CapacityHintCallback,
+                interpolate = InterpolateCallback,
+                expandLambda = ExpandLambdaCallback,
+            };
         }
+    }
 
-		public Context(object instance)
-		{
-			this.Instance = instance;
-			this.parent = null;
-			this.handlers = new List<GCHandle>();
-		}
+    private static Context? GetContext(IntPtr handle)
+    {
+        return GCHandle.FromIntPtr(handle).Target as Context;
+    }
 
-        private Context(object instance, Context parent)
+    private unsafe static Interop.PathResolution ResolvePath(Interop.Path* path, ref object? instance)
+    {
+        var it = new PathIterator(path);
+        while (it.GetNext() is string name)
         {
-            this.Instance = instance;
-            this.parent = parent;
-            this.handlers = null;
-        }
-
-		#endregion Constructor
-
-		#region Methods
-
-		private IntPtr GetHandle()
-        {
-			var list = handlers ?? parent?.handlers;
-			var handle = GCHandle.Alloc(this);
-			list!.Add(handle);
-
-            return (IntPtr)handle;
-		}
-
-        public Interop.UserData GetUserData()
-        {
-			unsafe
-            {
-                return new Interop.UserData
-                {
-                    handle = GetHandle(),
-					get = GetCallback,
-					capacityHint = CapacityHintCallback,
-					interpolate = InterpolateCallback,
-					expandLambda = ExpandLambdaCallback,
-				};
-            }
-        }
-
-        private static Context? GetContext(IntPtr handle)
-        {
-            return GCHandle.FromIntPtr(handle).Target as Context;
-        }
-
-        private static object? GetValue(object? instance, string key)
-        {
-            if (instance == null) return null;
-
             if (instance is IDictionary dictionary)
             {
-                return dictionary.Contains(key) ? dictionary[key] : null;
+                instance = dictionary.Contains(name) ? dictionary[name] : null;
             }
-            else
+            else if (instance != null)
             {
-                return TypeDescriptor.Get(instance, key);
+                instance = TypeDescriptor.Get(instance, name);
             }
+
+            if (instance == null) break;
         }
 
-        private static unsafe string[] GetPath(Interop.Path* path)
+        if (it.Index is int index)
         {
-            var array = new string[path->path_size];
-            for (int i = 0; i < path->path_size; i++)
+            if (instance is bool value)
             {
-                var pathPart = (Interop.PathPart*)(path->path + i);
-                array[i] = Encoding.UTF8.GetString(pathPart->value, pathPart->size);
+                if (value == false || index > 0) return Interop.PathResolution.ITERATOR_CONSUMED;
             }
-
-            return array;
-        }
-
-        private static unsafe Interop.PathResolution Get(IntPtr userDataHandle, Interop.Path* path, out Interop.UserData out_value)
-        {
-            var array = GetPath(path);
-            if (array.Length == 1)
+            else if (instance is IList list)
             {
-                var context = GetContext(userDataHandle);
-                if (context != null)
+                if (index >= list.Count)
                 {
-                    var next = GetValue(context.Instance, array[0]);
+                    return Interop.PathResolution.ITERATOR_CONSUMED;
+                }
+                else
+                {
+                    instance = list[index];
+                }
+            }
+            else if (index > 0)
+            {
+                return Interop.PathResolution.ITERATOR_CONSUMED;
+            }
+        }
 
-                    if (next != null)
+        return instance == null ? Interop.PathResolution.CHAIN_BROKEN : Interop.PathResolution.FIELD;
+    }
+
+
+
+    private static unsafe Interop.PathResolution Get(IntPtr userDataHandle, Interop.Path* path, out Interop.UserData out_value)
+    {
+        out_value = default(Interop.UserData);
+
+        var context = GetContext(userDataHandle);
+        if (context == null) return Interop.PathResolution.CHAIN_BROKEN;
+
+        var instance = context.Instance;
+        var ret = ResolvePath(path, ref instance);
+
+        if (instance != null)
+        {
+            var nextContext = new Context(instance, context);
+            out_value = nextContext.GetUserData();
+        }
+
+        return ret;
+    }
+
+    private static unsafe Interop.PathResolution CapacityHint(IntPtr userDataHandle, Interop.Path* path, out int out_value)
+    {
+        out_value = 0;
+
+        var context = GetContext(userDataHandle);
+        if (context == null) return Interop.PathResolution.CHAIN_BROKEN;
+
+        var instance = context.Instance;
+        var ret = ResolvePath(path, ref instance);
+
+        if (instance != null)
+        {
+            const int NUMBER_HINT = 16;
+
+            out_value = instance switch
+            {
+                string str => str.Length,
+                bool => 5,
+                int => NUMBER_HINT,
+                long => NUMBER_HINT,
+                float => NUMBER_HINT,
+                double => NUMBER_HINT,
+                decimal => NUMBER_HINT,
+                _ => 0,
+            };
+        }
+
+        return ret;
+    }
+
+    private static unsafe Interop.PathResolutionOrError Interpolate(IntPtr writerHandle, IntPtr userDataHandle, Interop.Path* path)
+    {
+        var context = GetContext(userDataHandle);
+        if (context == null) new Interop.PathResolutionOrError { result = Interop.PathResolution.CHAIN_BROKEN };
+
+        var instance = context!.Instance;
+        var ret = ResolvePath(path, ref instance);
+
+        if (instance != null)
+        {
+            var value = instance switch
+            {
+                string str => str,
+                object any => any.ToString() ?? string.Empty,
+                null => String.Empty,
+            };
+
+            if (value.Length > 0)
+            {
+                unsafe
+                {
+                    fixed (char* ptr = value)
                     {
-                        var nextContext = new Context(next, context);
-                        out_value = nextContext.GetUserData();
-                        return Interop.PathResolution.FIELD;
+                        var status = Interop.mustache_interpolateW(writerHandle, ptr, value.Length);
+                        if (status != Interop.Status.SUCCESS) return new Interop.PathResolutionOrError { has_error = true, error_code = (int)ret };
                     }
                 }
             }
-
-            out_value = default(Interop.UserData);
-            return Interop.PathResolution.NOT_FOUND_IN_CONTEXT;
         }
 
-        private static unsafe Interop.PathResolution CapacityHint(IntPtr userDataHandle, Interop.Path* path, out int out_value)
-        {
-            out_value = 100;
-            return Interop.PathResolution.FIELD;
-        }
+        return new Interop.PathResolutionOrError { result = ret };
+    }
 
-        private static unsafe Interop.PathResolutionOrError Interpolate(IntPtr writerHandle, IntPtr userDataHandle, Interop.Path* path)
+    private static unsafe Interop.PathResolutionOrError ExpandLambda(IntPtr lambdaHandle, IntPtr userDataHandle, Interop.Path* path)
+    {
+        return new Interop.PathResolutionOrError { result = Interop.PathResolution.NOT_FOUND_IN_CONTEXT };
+    }
+
+    #endregion Methods
+
+    #region IDisposable
+
+    public void Dispose()
+    {
+        if (handlers != null)
         {
-            var array = GetPath(path);
-            if (array.Length == 1)
+            foreach (var handle in handlers)
             {
-                var context = GetContext(userDataHandle);
-                if (context != null)
-                {
-                    var buffer = GetValue(context.Instance, array[0]) switch
-                    {
-                        string str => Encoding.UTF8.GetBytes(str),
-                        object any => Encoding.UTF8.GetBytes(any.ToString() ?? string.Empty),
-						null => Array.Empty<byte>(),
-                    };
-
-					if (buffer.Length > 0)
-                    {
-						unsafe
-                        {
-                            fixed (byte* ptr = &buffer[0])
-                            {
-                                var ret = Interop.mustache_interpolate(writerHandle, ptr, buffer.Length);
-                                if (ret != Interop.Status.SUCCESS) return new Interop.PathResolutionOrError { has_error = true, error_code = (int)ret };
-                                return new Interop.PathResolutionOrError { result = Interop.PathResolution.FIELD };
-                            }
-                        }
-                    }
-                }
+                var gcHandle = GCHandle.FromIntPtr(handle);
+                gcHandle.Free();
             }
 
-            return new Interop.PathResolutionOrError { result = Interop.PathResolution.NOT_FOUND_IN_CONTEXT };
+            handlers.Clear();
         }
-        
-        private static unsafe Interop.PathResolutionOrError ExpandLambda(IntPtr lambdaHandle, IntPtr userDataHandle, Interop.Path* path)
-        {
-            return new Interop.PathResolutionOrError { result = Interop.PathResolution.NOT_FOUND_IN_CONTEXT };
-        }
+    }
 
-		#endregion Methods
-
-		#region IDisposable
-
-		public void Dispose()
-		{
-			if (handlers != null)
-			{
-				foreach (var handle in handlers)
-				{
-					handle.Free();
-				}
-
-				handlers.Clear();
-			}
-		}
-
-		#endregion IDisposable
-	}
+    #endregion IDisposable
 }

@@ -61,3 +61,5 @@ pub extern fn mustache_render(template_handle: ?TemplateHandle, user_data: UserD
 pub extern fn mustache_free_buffer(buffer: ?[*]const u8, buffer_len: u32) callconv(.C) Status;
 
 pub extern fn mustache_interpolate(writer_handle: ?WriterHandle, value: ?[*]const u8, len: u32) callconv(.C) Status;
+
+pub extern fn mustache_interpolateW(writer_handle: ?WriterHandle, value: ?[*]const u16, len: u32) callconv(.C) Status;

@@ -35,15 +35,11 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         const Self = @This();
 
         pub const WriterImpl = struct {
-            const vtable = FfiWriter.VTable{
-                .write = write,
-            };
-
             pub fn writer(data_render: *DataRender, escape: Escape) FfiWriter {
                 return .{
                     .handle = data_render,
                     .escape = escape,
-                    .vtable = &vtable,
+                    .writeFn = write,
                 };
             }
 

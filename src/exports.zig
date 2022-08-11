@@ -86,3 +86,21 @@ pub export fn mustache_interpolate(writer_handle: ?extern_types.WriterHandle, va
         return .INVALID_ARGUMENT;
     }
 }
+
+pub export fn mustache_interpolateW(writer_handle: ?extern_types.WriterHandle, value: ?[*]const u16, len: u32) callconv(.C) extern_types.Status {
+    if (writer_handle) |handle| {
+        if (value) |buffer| {
+            var allocator = if (comptime builtin.link_libc) std.heap.c_allocator else testing.allocator;
+            var str = std.unicode.utf16leToUtf8Alloc(allocator, buffer[0..len]) catch return .OUT_OF_MEMORY;
+            defer allocator.free(str);
+
+            var writer = @ptrCast(*Writer, @alignCast(@alignOf(Writer), handle));
+            writer.write(str) catch {
+                return .INTERPOLATION_ERROR;
+            };
+        }
+        return .SUCCESS;
+    } else {
+        return .INVALID_ARGUMENT;
+    }
+}
