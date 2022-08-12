@@ -5,14 +5,16 @@ const trait = std.meta.trait;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const mustache = @import("../../../mustache.zig");
+const mustache = @import("../mustache.zig");
 const Element = mustache.Element;
 
-const context = @import("../../context.zig");
+const context = @import("context.zig");
 
-const lambda = @import("lambda.zig");
-const native_context = @import("context.zig");
+const lambda = @import("contexts/native/lambda.zig");
+const native_context = @import("contexts/native/context.zig");
 const FlattenedType = native_context.FlattenedType;
+
+const extern_types = @import("../ffi/extern_types.zig");
 
 pub fn getField(data: anytype, comptime field_name: []const u8) field_type: {
     const TField = FieldType(@TypeOf(data), field_name);
@@ -195,6 +197,8 @@ pub fn byValue(comptime TField: type) bool {
 
         const is_json = TField == std.json.Value;
 
+        const is_ffi_userdata = TField == extern_types.UserData;
+
         const is_lambda_invoker = @sizeOf(TField) <= max_size and lambda.isLambdaInvoker(TField);
 
         const can_embed = @sizeOf(TField) <= max_size and
@@ -205,7 +209,7 @@ pub fn byValue(comptime TField: type) bool {
             trait.isFloat(TField) or
             (trait.is(.Optional)(TField) and byValue(meta.Child(TField))));
 
-        return is_json or is_zero_size or is_pointer or is_lambda_invoker or can_embed;
+        return is_json or is_ffi_userdata or is_zero_size or is_pointer or is_lambda_invoker or can_embed;
     }
 }
 

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\mustache\mustache.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+      <Content Include="../../../lib/windows-x64/libmustache.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+      <Content Include="../../../lib/linux-x64/libmustache.so" Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+      <Content Include="../../../lib/osx-x64/libmustache.dylib" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+  </ItemGroup>  
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  
+
+</Project>
