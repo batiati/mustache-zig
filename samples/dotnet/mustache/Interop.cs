@@ -71,7 +71,7 @@ internal static class Interop
 
         public delegate* unmanaged[Cdecl]<nint, Path*, int*, PathResolution> capacityHint;
 
-        public delegate* unmanaged[Cdecl]<nint, delegate* unmanaged[Cdecl,SuppressGCTransition]<nint, byte*, int, Status>, nint, Path*, PathResolution> interpolate;
+        public delegate* unmanaged[Cdecl]<nint, delegate* unmanaged[Cdecl, SuppressGCTransition]<nint, byte*, int, Status>, nint, Path*, PathResolution> interpolate;
 
         public delegate* unmanaged[Cdecl]<nint, nint, Path*, PathResolution> expandLambda;
     }

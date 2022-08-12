@@ -150,7 +150,7 @@ internal sealed class Context : IDisposable
     private static unsafe PathResolution Interpolate
     (
         nint writerHandle,
-        delegate* unmanaged[Cdecl,SuppressGCTransition]<nint, byte*, int, Status> writeFn,
+        delegate* unmanaged[Cdecl, SuppressGCTransition]<nint, byte*, int, Status> writeFn,
         nint userDataHandle,
         Interop.Path* path
     )

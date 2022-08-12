@@ -1,9 +1,17 @@
 ﻿
 public class Program
 {
-    // Mustache template
-    const string template_text =
+    public static void Main()
+    {
+        Sample();
+        BenchTest();
+    }
 
+
+    private static void Sample()
+    {
+        // Mustache template
+        const string template_text =
 @"{{! This is a spec-compliant mustache template }}
 Hello {{name}} from Zig
 This template was generated with
@@ -16,45 +24,9 @@ Supported features:
 - {{name}} {{condition}}
 {{/features}}";
 
-    public class Feature
-    {
-        public string? name { get; set; }
-        public string? condition { get; set; }
-    }
-
-    public class Env
-    {
-        public string? zig_version { get; set; }
-        public string? mustache_version { get; set; }
-    }
-
-    public class Context
-    {
-        public string? name { get; set; }
-
-        public Env? env { get; set; }
-
-        public Feature[]? features { get; set; }
-    }
-
-    public class Data
-    {
-        public string? title;
-        public string? body;
-    }
-
-    public static void Main()
-    {
-        Sample();
-        BenchTest();
-    }
-
-
-    private static void Sample()
-    {
         using var template = mustache.Mustache.CreateTemplate(template_text);
 
-        // Context, can be any Zig struct, supporting optionals, slices, tuples, recursive types, pointers, etc.
+        // Context, can be any C# class, object, enum, array, collection, etc
         var ctx = new Context
         {
             name = "friends",
@@ -105,6 +77,33 @@ Supported features:
         Console.WriteLine($"{1_000_000d / watcher.Elapsed.TotalSeconds:0} ops/s");
         Console.WriteLine($"{watcher.ElapsedMilliseconds:0} ns/iter");
         Console.WriteLine($"{((double)total / 1024d / 1024d) / watcher.Elapsed.TotalSeconds:0} MB/s");
+    }
+
+    public class Feature
+    {
+        public string? name { get; set; }
+        public string? condition { get; set; }
+    }
+
+    public class Env
+    {
+        public string? zig_version { get; set; }
+        public string? mustache_version { get; set; }
+    }
+
+    public class Context
+    {
+        public string? name { get; set; }
+
+        public Env? env { get; set; }
+
+        public Feature[]? features { get; set; }
+    }
+
+    public class Data
+    {
+        public string? title;
+        public string? body;
     }
 
 }

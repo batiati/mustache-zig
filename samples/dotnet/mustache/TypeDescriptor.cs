@@ -25,7 +25,7 @@ namespace mustache
         public static object? Get(object instance, string name)
         {
             nint typeHandle = Type.GetTypeHandle(instance).Value;
-            
+
             if (!types.TryGetValue(typeHandle, out Dictionary<string, Func<object, object>>? delegates))
             {
                 lock (types)
