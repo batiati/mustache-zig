@@ -10,7 +10,9 @@ pub fn build(b: *std.build.Builder) void {
         },
     });
 
-    // Zig cross-target x Runtime Identifier
+    const ffi_libs = b.step("ffi", "Build FFI libs");
+
+    // Zig cross-target x folder names
     const platforms = .{
         .{ "x86_64-linux-gnu", "linux-x64" },
         .{ "x86_64-windows-gnu", "win-x64" },
@@ -22,9 +24,9 @@ pub fn build(b: *std.build.Builder) void {
             .arch_os_abi = platform[0],
         }) catch unreachable;
 
-        inline for (.{ .dynamic, .static}) |linkage| {
+        inline for (.{ .dynamic, .static }) |linkage| {
 
-            // Appends the name "lib" on windows, in order to generate the same name "libmustache" for all platforms 
+            // Appends the name "lib" on windows, in order to generate the same name "libmustache" for all platforms
             const lib_name = (if (std.mem.startsWith(u8, platform[1], "win")) "lib" else "") ++ "mustache";
 
             const dynamic_lib = b.addStaticLibrary(lib_name, "src/exports.zig");
@@ -34,6 +36,7 @@ pub fn build(b: *std.build.Builder) void {
             dynamic_lib.setBuildMode(mode);
             dynamic_lib.setTarget(cross_target);
             dynamic_lib.install();
+            ffi_libs.dependOn(&dynamic_lib.step);
         }
     }
 

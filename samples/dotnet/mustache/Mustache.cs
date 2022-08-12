@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -15,6 +16,7 @@ public static class Mustache
 {
     #region Methods
 
+    [SkipLocalsInit]
     public static Template CreateTemplate(string content)
     {
         unsafe
@@ -22,24 +24,25 @@ public static class Mustache
             var bytes = Encoding.UTF8.GetBytes(content);
             fixed (byte* ptr = &bytes[0])
             {
-                var ret = Interop.mustache_create_template(ptr, bytes.Length, out nint handle);
+                var ret = Interop.mustache_create_template(ptr, bytes.Length, out void* template);
                 if (ret != Interop.Status.SUCCESS) throw new Exception("TODO");
 
-                return new Template(handle);
+                return new Template(template);
             }
         }
     }
 
+    [SkipLocalsInit]
     public static string Render(Template template, object instance)
     {
         using (var context = new Context(instance))
         {
             unsafe
             {
-                var ret = Interop.mustache_render(template.Handle, context.GetUserData(), out nint buffer, out int bufferLen);
+                var ret = Interop.mustache_render(template.template, context.GetUserData(), out byte* buffer, out int bufferLen);
                 if (ret != Interop.Status.SUCCESS) throw new Exception("TODO");
 
-                var str = Marshal.PtrToStringUTF8(buffer, bufferLen);
+                var str = Encoding.UTF8.GetString(buffer, bufferLen);
                 Interop.mustache_free_buffer(buffer, bufferLen);
 
                 return str;

@@ -35,11 +35,11 @@ pub const PathResolutionOrError = extern struct {
 pub const PathPart = extern struct {
     value: [*]const u8,
     size: u32,
+    next: ?*const PathPart,
 };
 
 pub const Path = extern struct {
-    path: [*]const PathPart,
-    path_size: u32,
+    root: *const PathPart,
     index: u32,
     has_index: bool,
 };

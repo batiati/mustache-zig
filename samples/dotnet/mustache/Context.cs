@@ -49,14 +49,17 @@ internal sealed class Context : IDisposable
 
     #region Methods
 
-    private nint GetHandle()
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private unsafe void* GetHandle()
     {
-        nint handle = (IntPtr)GCHandle.Alloc(this);
+        var gcHandle = GCHandle.Alloc(this, GCHandleType.Normal);
+        var handle = GCHandle.ToIntPtr(gcHandle);
         handlers.Add(handle);
 
-        return handle;
+        return (void*)handle;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public UserData GetUserData()
     {
         unsafe
@@ -71,13 +74,18 @@ internal sealed class Context : IDisposable
         }
     }
 
-    private static Context? GetContext(nint handle)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe Context? GetContext(void* handle)
     {
-        return GCHandle.FromIntPtr(new IntPtr(handle)).Target as Context;
+        var gcHandle = GCHandle.FromIntPtr(new IntPtr(handle));
+        return gcHandle.Target as Context;
     }
 
-    private unsafe static PathResolution ResolvePath(Interop.Path* path, ref object? instance)
+    [SkipLocalsInit]
+    private unsafe static (PathResolution, object?) ResolvePath(Interop.Path* path, object context)
     {
+        object? instance = context;
+
         var it = new PathIterator(path);
         while (it.GetNext() is string name)
         {
@@ -97,13 +105,16 @@ internal sealed class Context : IDisposable
         {
             if (instance is bool value)
             {
-                if (value == false || index > 0) return Interop.PathResolution.ITERATOR_CONSUMED;
+                if (value == false || index > 0)
+                {
+                    return (PathResolution.ITERATOR_CONSUMED, null);
+                }
             }
             else if (instance is IList list)
             {
                 if (index >= list.Count)
                 {
-                    return Interop.PathResolution.ITERATOR_CONSUMED;
+                    return (PathResolution.ITERATOR_CONSUMED, null);
                 }
                 else
                 {
@@ -112,21 +123,36 @@ internal sealed class Context : IDisposable
             }
             else if (instance == null)
             {
-                return Interop.PathResolution.ITERATOR_CONSUMED;
+                return (PathResolution.ITERATOR_CONSUMED, null);
             }
             else if (index > 0)
             {
-                return Interop.PathResolution.ITERATOR_CONSUMED;
+                return (PathResolution.ITERATOR_CONSUMED, null);
             }
         }
 
-        return instance == null ? Interop.PathResolution.CHAIN_BROKEN : Interop.PathResolution.FIELD;
+        if (instance == null)
+        {
+            if (it.IsRoot)
+            {
+                return (PathResolution.NOT_FOUND_IN_CONTEXT, null);
+            }
+            else
+            {
+                return (PathResolution.CHAIN_BROKEN, null);
+            }
+        }
+        else
+        {
+            return (PathResolution.FIELD, instance);
+        }
     }
 
+    [SkipLocalsInit]
     [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
     private static unsafe PathResolution Get
     (
-        nint userDataHandle,
+        void* userDataHandle,
         Interop.Path* path,
         UserData* out_value
     )
@@ -134,8 +160,7 @@ internal sealed class Context : IDisposable
         var context = GetContext(userDataHandle);
         if (context == null) return PathResolution.CHAIN_BROKEN;
 
-        var instance = context.Instance;
-        var ret = ResolvePath(path, ref instance);
+        var (ret, instance) = ResolvePath(path, context.Instance);
 
         if (instance != null)
         {
@@ -146,20 +171,20 @@ internal sealed class Context : IDisposable
         return ret;
     }
 
+    [SkipLocalsInit]
     [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
     private static unsafe PathResolution Interpolate
     (
-        nint writerHandle,
-        delegate* unmanaged[Cdecl, SuppressGCTransition]<nint, byte*, int, Status> writeFn,
-        nint userDataHandle,
+        void* writerHandle,
+        delegate* unmanaged[Cdecl, SuppressGCTransition]<void*, byte*, int, Status> writeFn,
+        void* userDataHandle,
         Interop.Path* path
     )
     {
         var context = GetContext(userDataHandle);
         if (context != null)
         {
-            var instance = context!.Instance;
-            var ret = ResolvePath(path, ref instance);
+            var (ret, instance) = ResolvePath(path, context!.Instance);
 
             if (instance != null)
             {
@@ -177,7 +202,7 @@ internal sealed class Context : IDisposable
                     unsafe
                     {
                         // Converts from UTF-16 directly on the writerFn
-                        const int BUFFER_LEN = 256;
+                        const int BUFFER_LEN = 128;
                         byte* buffer = stackalloc byte[BUFFER_LEN];
 
                         int charsOffSet = 0;
@@ -207,11 +232,12 @@ internal sealed class Context : IDisposable
         return PathResolution.CHAIN_BROKEN;
     }
 
+    [SkipLocalsInit]
     [UnmanagedCallersOnly(CallConvs = new Type[] { typeof(CallConvCdecl) })]
     private static unsafe PathResolution ExpandLambda
     (
-        nint lambdaHandle,
-        nint userDataHandle,
+        void* lambdaHandle,
+        void* userDataHandle,
         Interop.Path* path
     )
     {

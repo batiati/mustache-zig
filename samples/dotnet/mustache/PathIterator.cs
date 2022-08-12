@@ -1,6 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using System.Text;
 using System.Collections;
+using System.Runtime.CompilerServices;
 
 namespace mustache;
 
@@ -11,11 +12,12 @@ namespace mustache;
 /// </summary>
 
 #endregion Documentation
+[SkipLocalsInit]
 internal struct PathIterator
 {
     #region Fields
-    private int current = 0;
     private unsafe Interop.Path* path;
+    private unsafe Interop.PathPart* part;
 
     #endregion Fields
 
@@ -27,7 +29,18 @@ internal struct PathIterator
         {
             unsafe
             {
-                return path->has_index ? path->index : null;
+                return path->has_index == 1 ? path->index : null;
+            }
+        }
+    }
+
+    public bool IsRoot
+    {
+        get
+        {
+            unsafe
+            {
+                return part == path->root;
             }
         }
     }
@@ -38,32 +51,35 @@ internal struct PathIterator
 
     public unsafe PathIterator(Interop.Path* path)
     {
-        current = 0;
         this.path = path;
+        this.part = path->root;
     }
-
 
     #endregion Constructor
 
     #region Methods
 
+    // [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string? GetNext()
     {
         unsafe
         {
-            if (current >= path->path_size) return null;
+            if (part == null) return null;
 
-            var pathPart = path->path + current;
-            var str = Encoding.UTF8.GetString(pathPart->value, pathPart->size);
-            current += 1;
+            var str = Encoding.UTF8.GetString(part->value, part->size);
+            part = part->next;
 
             return str;
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Reset()
     {
-        current = 0;
+        unsafe
+        {
+            part = path->root;
+        }
     }
 
     #endregion Methods

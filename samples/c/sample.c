@@ -17,9 +17,9 @@ mustache_path_resolution capacity_hint(const mustache_userdata_handle user_data_
 
     Data* data = (Data*)user_data_handle;
 
-    if (path->path_size == 1) {
+    if (path->root->next == NULL) {
 
-        const mustache_path_part* part = path->path;
+        const mustache_path_part* part = path->root;
         if (strncmp(part->value, "title", part->size) == 0) {
 
             *out_value = strlen(data->title);
@@ -39,9 +39,9 @@ mustache_path_resolution interpolate(const mustache_writer_handle writer_handle,
 
     Data* data = (Data*)user_data_handle;
     
-    if (path->path_size == 1) {
+    if (path->root->next == NULL) {
 
-        const mustache_path_part* part = path->path;
+        const mustache_path_part* part = path->root;
 
         if (strncmp(part->value, "title", part->size) == 0) {
 

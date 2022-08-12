@@ -11,15 +11,15 @@ namespace mustache;
 public class Template : IDisposable
 {
     #region Properties
-    public nint Handle { get; private set; }
+    internal unsafe void* template;
 
     #endregion Properties
 
     #region Constructor
 
-    internal Template(nint handle)
+    internal unsafe Template(void* template)
     {
-        Handle = handle;
+        this.template = template;
     }
 
     ~Template()
@@ -41,10 +41,13 @@ public class Template : IDisposable
     {
         _ = disposing;
 
-        if (this.Handle != 0)
+        unsafe
         {
-            _ = Interop.mustache_free_template(this.Handle);
-            this.Handle = 0;
+            if (template != null)
+            {
+                _ = Interop.mustache_free_template(template);
+                template = null;
+            }
         }
     }
 

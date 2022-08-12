@@ -28,20 +28,14 @@ typedef enum mustache_path_resolution {
     FIELD = 4,
 } mustache_path_resolution;
 
-typedef struct mustache_path_resolution_or_error {
-    mustache_path_resolution result;
-    bool has_error;
-    uint32_t error_code;
-} mustache_path_resolution_or_error;
-
 typedef struct mustache_path_part {
     const char* value;
     uint32_t size;
+    const struct mustache_path_part* next;
 } mustache_path_part;
 
 typedef struct mustache_path {
-    const mustache_path_part* path;
-    uint32_t path_size;
+    const mustache_path_part* root;
     uint32_t index;
     bool has_index;
 } mustache_path;

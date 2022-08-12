@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace mustache;
 
@@ -32,48 +33,41 @@ internal static class Interop
         FIELD = 4,
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct PathResolutionOrError
-    {
-        public PathResolution result;
-
-        public bool has_error;
-
-        public int error_code;
-    }
-
+    [SkipLocalsInit]
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct PathPart
     {
         public byte* value;
 
         public int size;
+
+        public PathPart* next;
     }
 
+    [SkipLocalsInit]
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct Path
     {
-        public PathPart* path;
-
-        public int path_size;
+        public PathPart* root;
 
         public int index;
 
-        public bool has_index;
+        public byte has_index;
     }
 
+    [SkipLocalsInit]
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct UserData
     {
-        public nint handle;
+        public void* handle;
 
-        public delegate* unmanaged[Cdecl]<nint, Path*, UserData*, PathResolution> get;
+        public delegate* unmanaged[Cdecl]<void*, Path*, UserData*, PathResolution> get;
 
-        public delegate* unmanaged[Cdecl]<nint, Path*, int*, PathResolution> capacityHint;
+        public delegate* unmanaged[Cdecl]<void*, Path*, int*, PathResolution> capacityHint;
 
-        public delegate* unmanaged[Cdecl]<nint, delegate* unmanaged[Cdecl, SuppressGCTransition]<nint, byte*, int, Status>, nint, Path*, PathResolution> interpolate;
+        public delegate* unmanaged[Cdecl]<void*, delegate* unmanaged[Cdecl, SuppressGCTransition]<void*, byte*, int, Status>, void*, Path*, PathResolution> interpolate;
 
-        public delegate* unmanaged[Cdecl]<nint, nint, Path*, PathResolution> expandLambda;
+        public delegate* unmanaged[Cdecl]<void*, void*, Path*, PathResolution> expandLambda;
     }
 
     #endregion InnerTypes
@@ -82,20 +76,24 @@ internal static class Interop
 
     #region Methods
 
+    [SkipLocalsInit]
     [SuppressGCTransition]
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern Status mustache_create_template(byte* templateText, int templateLen, out nint templateHandle);
+    public static unsafe extern Status mustache_create_template(byte* templateText, int templateLen, out void* templateHandle);
 
+    [SkipLocalsInit]
     [SuppressGCTransition]
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern Status mustache_free_template(nint templateHandle);
+    public static unsafe extern Status mustache_free_template(void* templateHandle);
 
+    [SkipLocalsInit]
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern Status mustache_render(nint templateHandle, UserData userData, out nint outBuffer, out int outBufferLen);
+    public static unsafe extern Status mustache_render(void* templateHandle, UserData userData, out byte* outBuffer, out int outBufferLen);
 
+    [SkipLocalsInit]
     [SuppressGCTransition]
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern Status mustache_free_buffer(nint buffer, int bufferLen);
+    public static unsafe extern Status mustache_free_buffer(void* buffer, int bufferLen);
 
     #endregion Methods
 }

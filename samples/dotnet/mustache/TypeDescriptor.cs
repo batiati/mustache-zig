@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 
 namespace mustache
 {
@@ -38,7 +39,7 @@ namespace mustache
                 }
             }
 
-            if (delegates!.TryGetValue(name, out Func<object, object>? get))
+            if (delegates.TryGetValue(name, out Func<object, object>? get))
             {
                 return get(instance);
             }
