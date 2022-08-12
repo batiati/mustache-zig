@@ -11,13 +11,13 @@ namespace mustache;
 public class Template : IDisposable
 {
     #region Properties
-    public IntPtr Handle { get; private set; }
+    public nint Handle { get; private set; }
 
     #endregion Properties
 
     #region Constructor
 
-    internal Template(IntPtr handle)
+    internal Template(nint handle)
     {
         Handle = handle;
     }
@@ -41,10 +41,10 @@ public class Template : IDisposable
     {
         _ = disposing;
 
-        if (this.Handle != IntPtr.Zero)
+        if (this.Handle != 0)
         {
             _ = Interop.mustache_free_template(this.Handle);
-            this.Handle = IntPtr.Zero;
+            this.Handle = 0;
         }
     }
 

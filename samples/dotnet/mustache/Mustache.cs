@@ -22,7 +22,7 @@ public static class Mustache
             var bytes = Encoding.UTF8.GetBytes(content);
             fixed (byte* ptr = &bytes[0])
             {
-                var ret = Interop.mustache_create_template(ptr, bytes.Length, out IntPtr handle);
+                var ret = Interop.mustache_create_template(ptr, bytes.Length, out nint handle);
                 if (ret != Interop.Status.SUCCESS) throw new Exception("TODO");
 
                 return new Template(handle);
@@ -36,7 +36,7 @@ public static class Mustache
         {
             unsafe
             {
-                var ret = Interop.mustache_render(template.Handle, context.GetUserData(), out IntPtr buffer, out int bufferLen);
+                var ret = Interop.mustache_render(template.Handle, context.GetUserData(), out nint buffer, out int bufferLen);
                 if (ret != Interop.Status.SUCCESS) throw new Exception("TODO");
 
                 var str = Marshal.PtrToStringUTF8(buffer, bufferLen);

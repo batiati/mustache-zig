@@ -65,15 +65,15 @@ internal static class Interop
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct UserData
     {
-        public IntPtr handle;
+        public nint handle;
 
-        public delegate* unmanaged[Cdecl]<IntPtr, Path*, UserData*, PathResolution> get;
+        public delegate* unmanaged[Cdecl]<nint, Path*, UserData*, PathResolution> get;
 
-        public delegate* unmanaged[Cdecl]<IntPtr, Path*, int*, PathResolution> capacityHint;
+        public delegate* unmanaged[Cdecl]<nint, Path*, int*, PathResolution> capacityHint;
 
-        public delegate* unmanaged[Cdecl]<IntPtr, delegate* unmanaged[Cdecl]<IntPtr, byte*, int, Status>, IntPtr, Path*, PathResolution> interpolate;
+        public delegate* unmanaged[Cdecl]<nint, delegate* unmanaged[Cdecl]<nint, byte*, int, Status>, nint, Path*, PathResolution> interpolate;
 
-        public delegate* unmanaged[Cdecl]<IntPtr, IntPtr, Path*, PathResolution> expandLambda;
+        public delegate* unmanaged[Cdecl]<nint, nint, Path*, PathResolution> expandLambda;
     }
 
     #endregion InnerTypes
@@ -81,16 +81,16 @@ internal static class Interop
     #region Methods
 
     [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern Status mustache_create_template(byte* templateText, int templateLen, out IntPtr templateHandle);
+    public static unsafe extern Status mustache_create_template(byte* templateText, int templateLen, out nint templateHandle);
 
     [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl)]
-    public static extern Status mustache_free_template(IntPtr templateHandle);
+    public static extern Status mustache_free_template(nint templateHandle);
 
     [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern Status mustache_render(IntPtr templateHandle, UserData userData, out IntPtr outBuffer, out int outBufferLen);
+    public static unsafe extern Status mustache_render(nint templateHandle, UserData userData, out nint outBuffer, out int outBufferLen);
 
     [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern Status mustache_free_buffer(IntPtr buffer, int bufferLen);
+    public static unsafe extern Status mustache_free_buffer(nint buffer, int bufferLen);
 
     #endregion Methods
 }

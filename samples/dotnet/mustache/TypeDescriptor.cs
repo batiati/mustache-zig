@@ -16,7 +16,7 @@ namespace mustache
     {
         #region Fields
 
-        private static readonly Dictionary<Type, Dictionary<string, Func<object, object>>> types = new();
+        private static readonly Dictionary<nint, Dictionary<string, Func<object, object>>> types = new();
 
         #endregion Fields
 
@@ -24,16 +24,16 @@ namespace mustache
 
         public static object? Get(object instance, string name)
         {
-            var type = instance.GetType();
-
-            if (!types.TryGetValue(type, out Dictionary<string, Func<object, object>>? delegates))
+            nint typeHandle = Type.GetTypeHandle(instance).Value;
+            
+            if (!types.TryGetValue(typeHandle, out Dictionary<string, Func<object, object>>? delegates))
             {
                 lock (types)
                 {
-                    if (!types.TryGetValue(type, out delegates))
+                    if (!types.TryGetValue(typeHandle, out delegates))
                     {
-                        delegates = GetDelegates(type);
-                        types.Add(type, delegates);
+                        delegates = GetDelegates(instance.GetType());
+                        types.Add(typeHandle, delegates);
                     }
                 }
             }
@@ -77,6 +77,7 @@ namespace mustache
             {
                 var getBody = Expression.Convert(Expression.Field(Expression.Convert(instance, type), fieldInfo), typeof(object));
                 var getParameters = new ParameterExpression[] { instance };
+
                 return Expression.Lambda<Func<object, object>>(getBody, getParameters).Compile();
             }
             else if (memberInfo is PropertyInfo propertyInfo)
