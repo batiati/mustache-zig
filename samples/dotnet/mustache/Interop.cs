@@ -71,25 +71,30 @@ internal static class Interop
 
         public delegate* unmanaged[Cdecl]<nint, Path*, int*, PathResolution> capacityHint;
 
-        public delegate* unmanaged[Cdecl]<nint, delegate* unmanaged[Cdecl]<nint, byte*, int, Status>, nint, Path*, PathResolution> interpolate;
+        public delegate* unmanaged[Cdecl]<nint, delegate* unmanaged[Cdecl,SuppressGCTransition]<nint, byte*, int, Status>, nint, Path*, PathResolution> interpolate;
 
         public delegate* unmanaged[Cdecl]<nint, nint, Path*, PathResolution> expandLambda;
     }
 
     #endregion InnerTypes
 
+    private const string DllName = "mustache";
+
     #region Methods
 
-    [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl)]
+    [SuppressGCTransition]
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static unsafe extern Status mustache_create_template(byte* templateText, int templateLen, out nint templateHandle);
 
-    [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl)]
+    [SuppressGCTransition]
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern Status mustache_free_template(nint templateHandle);
 
-    [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl)]
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static unsafe extern Status mustache_render(nint templateHandle, UserData userData, out nint outBuffer, out int outBufferLen);
 
-    [DllImport("libmustache.so", CallingConvention = CallingConvention.Cdecl)]
+    [SuppressGCTransition]
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static unsafe extern Status mustache_free_buffer(nint buffer, int bufferLen);
 
     #endregion Methods

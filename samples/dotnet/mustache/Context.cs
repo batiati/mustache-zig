@@ -85,7 +85,7 @@ internal sealed class Context : IDisposable
             {
                 instance = dictionary.Contains(name) ? dictionary[name] : null;
             }
-            if (instance != null)
+            else if (instance != null)
             {
                 instance = TypeDescriptor.Get(instance, name);
             }
@@ -150,7 +150,7 @@ internal sealed class Context : IDisposable
     private static unsafe PathResolution Interpolate
     (
         nint writerHandle,
-        delegate* unmanaged[Cdecl]<nint, byte*, int, Status> writeFn,
+        delegate* unmanaged[Cdecl,SuppressGCTransition]<nint, byte*, int, Status> writeFn,
         nint userDataHandle,
         Interop.Path* path
     )

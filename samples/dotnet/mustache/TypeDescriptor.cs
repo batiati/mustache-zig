@@ -40,7 +40,7 @@ namespace mustache
 
             if (delegates!.TryGetValue(name, out Func<object, object>? get))
             {
-                return get?.Invoke(instance);
+                return get(instance);
             }
 
             return null;
@@ -48,9 +48,12 @@ namespace mustache
 
         private static Dictionary<string, Func<object, object>> GetDelegates(Type type)
         {
-            var delegates = new Dictionary<string, Func<object, object>>();
+            var fields = type.GetFields();
+            var properties = type.GetProperties();
 
-            foreach (var field in type.GetFields())
+            var delegates = new Dictionary<string, Func<object, object>>(fields.Length + properties.Length);
+
+            foreach (var field in fields)
             {
                 var get = CreateAcessor(type, field);
                 if (get == null) continue;
@@ -58,12 +61,12 @@ namespace mustache
                 delegates.Add(field.Name, get);
             }
 
-            foreach (var field in type.GetProperties())
+            foreach (var property in properties)
             {
-                var get = CreateAcessor(type, field);
+                var get = CreateAcessor(type, property);
                 if (get == null) continue;
 
-                delegates.Add(field.Name, get);
+                delegates.Add(property.Name, get);
             }
 
             return delegates;

@@ -104,7 +104,7 @@ int main(int argc, char **argv)
 
     fprintf(stdout, "C FFI\n");
     fprintf(stdout, "Total time %.3f s\n", elapsed);
-    fprintf(stdout, "%.3f ops/s\n", (float)1000000 / elapsed);
+    fprintf(stdout, "%.0f ops/s\n", (float)1000000 / elapsed);
     fprintf(stdout, "%d ns/iter\n", (int)(elapsed * 1000));
     fprintf(stdout, "%.3f MB/s\n", (float)total / 1024 / 1024 / elapsed);
 
