@@ -18,6 +18,15 @@ pub fn build(b: *std.build.Builder) void {
         lib.install();
     }
 
+    {
+        const lib = b.addStaticLibrary("mustache", "src/exports.zig");
+        lib.linkage = .static;
+        lib.linkLibC();
+        lib.setBuildMode(mode);
+        lib.setTarget(target);
+        lib.install();
+    }    
+
     var comptime_tests = b.addOptions();
     const comptime_tests_enabled = b.option(bool, "comptime-tests", "Run comptime tests") orelse true;
     comptime_tests.addOption(bool, "comptime_tests_enabled", comptime_tests_enabled);

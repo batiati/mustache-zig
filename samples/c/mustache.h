@@ -46,23 +46,19 @@ typedef struct mustache_path {
     bool has_index;
 } mustache_path;
 
-typedef struct mustache_callbacks {
-    mustache_path_resolution (*get)(const mustache_userdata_handle user_data_handle, mustache_path* path, struct mustache_userdata* out_value);
-    mustache_path_resolution (*capacity_hint)(const mustache_userdata_handle user_data_handle, mustache_path* path, uint32_t* out_value);
-    mustache_path_resolution_or_error (*interpolate)(const mustache_writer_handle writer_handle, const mustache_userdata_handle user_data_handle, mustache_path* path);
-    mustache_path_resolution_or_error (*expand_lambda)(const mustache_lambda_handle lambda_handle, const mustache_userdata_handle user_data_handle, mustache_path* path);
-} mustache_callbacks;
+typedef mustache_status (*mustache_write_fn)(mustache_writer_handle writer_handle, const char* value, uint32_t len);
 
 typedef struct mustache_userdata {
-    const mustache_userdata_handle handle;
-    const mustache_callbacks callbacks;
-} mustache_userdata;
+    mustache_userdata_handle handle;
+    mustache_path_resolution (*get)(const mustache_userdata_handle user_data_handle, mustache_path* path, struct mustache_userdata* out_value);
+    mustache_path_resolution (*capacity_hint)(const mustache_userdata_handle user_data_handle, mustache_path* path, uint32_t* out_value);
+    mustache_path_resolution (*interpolate)(const mustache_writer_handle writer_handle, mustache_write_fn write_fn, const mustache_userdata_handle user_data_handle, mustache_path* path);
+    mustache_path_resolution (*expand_lambda)(const mustache_lambda_handle lambda_handle, const mustache_userdata_handle user_data_handle, mustache_path* path);
+} mustache_userdata;;
 
 mustache_status mustache_create_template(const char* template_text, uint32_t template_len, mustache_template_handle* out_template_handle);
 mustache_status mustache_free_template(mustache_template_handle template_handle);
 mustache_status mustache_render(mustache_template_handle template_handle, mustache_userdata user_data, char** out_buffer, uint32_t* out_buffer_len);
 mustache_status mustache_free_buffer(const char* buffer, uint32_t buffer_len);
-mustache_status mustache_interpolate(mustache_writer_handle writer_handle, const char* value, uint32_t len);
-mustache_status mustache_interpolateW(mustache_writer_handle writer_handle, const wchar_t* value, uint32_t len);
 
 #endif // MUSTACHE_C
