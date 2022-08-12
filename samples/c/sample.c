@@ -89,11 +89,13 @@ int main(int argc, char **argv)
     }
 
     fprintf(stdout, "Rendering this simple template 1 million times\n%s\n\n", buffer);
+    (void)mustache_free_buffer(buffer, buffer_len);
 
     long total = 0;
     clock_t start = clock();
     for(int i=0; i<1000000;i++) {
         status = mustache_render(template, user_data, &buffer, &buffer_len);
+        (void)mustache_free_buffer(buffer, buffer_len);
         if (status != SUCCESS) return 2;
         total += buffer_len;
     }
@@ -105,6 +107,8 @@ int main(int argc, char **argv)
     fprintf(stdout, "%.3f ops/s\n", (float)1000000 / elapsed);
     fprintf(stdout, "%d ns/iter\n", (int)(elapsed * 1000));
     fprintf(stdout, "%.3f MB/s\n", (float)total / 1024 / 1024 / elapsed);
+
+    (void)mustache_free_template(template);
 
     return 0;
 }

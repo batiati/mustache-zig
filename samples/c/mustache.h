@@ -54,7 +54,7 @@ typedef struct mustache_userdata {
     mustache_path_resolution (*capacity_hint)(const mustache_userdata_handle user_data_handle, mustache_path* path, uint32_t* out_value);
     mustache_path_resolution (*interpolate)(const mustache_writer_handle writer_handle, mustache_write_fn write_fn, const mustache_userdata_handle user_data_handle, mustache_path* path);
     mustache_path_resolution (*expand_lambda)(const mustache_lambda_handle lambda_handle, const mustache_userdata_handle user_data_handle, mustache_path* path);
-} mustache_userdata;;
+} mustache_userdata;
 
 mustache_status mustache_create_template(const char* template_text, uint32_t template_len, mustache_template_handle* out_template_handle);
 mustache_status mustache_free_template(mustache_template_handle template_handle);
