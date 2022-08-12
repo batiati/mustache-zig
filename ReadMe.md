@@ -39,7 +39,7 @@
 ## Examples
 
 Render from strings, files and pre-loaded templates.
-See the [source code](https://github.com/batiati/mustache-zig/blob/master/samples/src/main.zig) for more details.
+See the [source code](https://github.com/batiati/mustache-zig/blob/master/samples/zig/src/main.zig) for more details.
 
 ### Runtime parser
 
@@ -143,6 +143,16 @@ pub fn main() !void {
 }
 
 ```
+
+### FFI Interface
+
+Mustache-zig exports a FFI interface to be consumed by other languages
+
+For more details: 
+
+- [C sample](samples/c/sample.c)
+
+- [C# sample](samples/dotnet/mustache.samples/Program.cs)
 
 ## Customizable use
 
