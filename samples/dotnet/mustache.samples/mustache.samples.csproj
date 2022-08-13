@@ -5,7 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
-      <Content Include="../../../lib/windows-x64/libmustache.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+      <Content Include="../../../lib/win-x64/libmustache.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </Content>
       <Content Include="../../../lib/linux-x64/libmustache.so" Condition="$([MSBuild]::IsOSPlatform('Linux'))">

@@ -70,13 +70,17 @@ internal static class Interop
         public delegate* unmanaged[Cdecl]<void*, void*, Path*, PathResolution> expandLambda;
     }
 
-    #endregion InnerTypes
+	#endregion InnerTypes
 
-    private const string DllName = "mustache";
+	#region Fields
 
-    #region Methods
+	private const string DllName = "libmustache";
 
-    [SkipLocalsInit]
+	#endregion Fields
+
+	#region Methods
+
+	[SkipLocalsInit]
     [SuppressGCTransition]
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static unsafe extern Status mustache_create_template(byte* templateText, int templateLen, out void* templateHandle);
