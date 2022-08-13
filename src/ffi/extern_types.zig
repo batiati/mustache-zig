@@ -48,10 +48,10 @@ pub const WriteFn = fn (writer_handle: ?WriterHandle, value: ?[*]const u8, len: 
 
 pub const UserData = extern struct {
     handle: UserDataHandle,
-    get: ?fn (user_data_handle: UserDataHandle, path: ?*const Path, out_value: *UserData) callconv(.C) PathResolution,
-    capacityHint: ?fn (user_data_handle: UserDataHandle, path: ?*const Path, out_value: *u32) callconv(.C) PathResolution,
-    interpolate: ?fn (writer_handle: WriterHandle, write_fn: WriteFn, user_data_handle: UserDataHandle, path: ?*const Path) callconv(.C) PathResolution,
-    expandLambda: ?fn (lambda_handle: LambdaHandle, user_data_handle: UserDataHandle, path: ?*const Path) callconv(.C) PathResolution,
+    get: ?fn (user_data_handle: UserDataHandle, path: *const Path, out_value: *UserData) callconv(.C) PathResolution,
+    capacityHint: ?fn (user_data_handle: UserDataHandle, path: *const Path, out_value: *u32) callconv(.C) PathResolution,
+    interpolate: ?fn (writer_handle: WriterHandle, write_fn: WriteFn, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolution,
+    expandLambda: ?fn (lambda_handle: LambdaHandle, user_data_handle: UserDataHandle, path: *const Path) callconv(.C) PathResolution,
 };
 
 pub extern fn mustache_create_template(template_text: ?[*]const u8, template_len: u32, out_template_handle: *TemplateHandle) callconv(.C) Status;

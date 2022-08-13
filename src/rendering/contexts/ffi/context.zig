@@ -347,63 +347,69 @@ const context_tests = struct {
         name: []const u8,
 
         pub fn get(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *extern_types.UserData) callconv(.C) extern_types.PathResolution {
-            if (path.root.next != null) return .NOT_FOUND_IN_CONTEXT;
-            var path_part = path.root;
-            var path_value = path_part.value[0..path_part.size];
+            if (path.root) |root| {
+                if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
+                var path_part = root;
+                var path_value = path_part.value[0..path_part.size];
 
-            var person = getSelf(user_data_handle);
-            if (std.mem.eql(u8, path_value, "id")) {
-                out_value.* = Person.getUserData(&person.id);
-                return .FIELD;
-            } else if (std.mem.eql(u8, path_value, "name")) {
-                out_value.* = Person.getUserData(person.name.ptr);
-                return .FIELD;
+                var person = getSelf(user_data_handle);
+                if (std.mem.eql(u8, path_value, "id")) {
+                    out_value.* = Person.getUserData(&person.id);
+                    return .FIELD;
+                } else if (std.mem.eql(u8, path_value, "name")) {
+                    out_value.* = Person.getUserData(person.name.ptr);
+                    return .FIELD;
+                }
             }
 
             return .NOT_FOUND_IN_CONTEXT;
         }
 
         pub fn capacityHint(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *u32) callconv(.C) extern_types.PathResolution {
-            if (path.root.next == null) {
-                var path_part = path.root;
-                var path_value = path_part.value[0..path_part.size];
+            if (path.root) |root| {
+                if (root.next == null) {
+                    var path_part = root;
+                    var path_value = path_part.value[0..path_part.size];
 
-                var person = getSelf(user_data_handle);
+                    var person = getSelf(user_data_handle);
 
-                if (std.mem.eql(u8, path_value, "id")) {
-                    out_value.* = @intCast(u32, std.fmt.count("{}", .{person.id}));
-                    return .FIELD;
-                } else if (std.mem.eql(u8, path_value, "name")) {
-                    out_value.* = @intCast(u32, person.name.len);
-                    return .FIELD;
+                    if (std.mem.eql(u8, path_value, "id")) {
+                        out_value.* = @intCast(u32, std.fmt.count("{}", .{person.id}));
+                        return .FIELD;
+                    } else if (std.mem.eql(u8, path_value, "name")) {
+                        out_value.* = @intCast(u32, person.name.len);
+                        return .FIELD;
+                    }
                 }
             }
             return .NOT_FOUND_IN_CONTEXT;
         }
 
         pub fn interpolate(writer_handle: extern_types.WriterHandle, writer_fn: extern_types.WriteFn, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolution {
-            if (path.root.next == null) {
-                var path_part = path.root;
-                var path_value = path_part.value[0..path_part.size];
+            if (path.root) |root| {
+                if (root.next == null) {
+                    var path_part = root;
+                    var path_value = path_part.value[0..path_part.size];
 
-                // Using the FFI external function to interpolate,
-                // Just like a foreign language would do.
+                    // Using the FFI external function to interpolate,
+                    // Just like a foreign language would do.
 
-                var person = getSelf(user_data_handle);
+                    var person = getSelf(user_data_handle);
 
-                if (std.mem.eql(u8, path_value, "id")) {
-                    var buffer: [64]u8 = undefined;
-                    var len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
+                    if (std.mem.eql(u8, path_value, "id")) {
+                        var buffer: [64]u8 = undefined;
+                        var len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
 
-                    var ret = writer_fn(writer_handle, &buffer, @intCast(u32, len));
-                    if (ret != .SUCCESS) return .CHAIN_BROKEN;
+                        var ret = writer_fn(writer_handle, &buffer, @intCast(u32, len));
+                        if (ret != .SUCCESS) return .CHAIN_BROKEN;
 
-                    return .FIELD;
-                } else if (std.mem.eql(u8, path_value, "name")) {
-                    var ret = writer_fn(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
-                    if (ret != .SUCCESS) return .CHAIN_BROKEN;
+                        return .FIELD;
+                    } else if (std.mem.eql(u8, path_value, "name")) {
+                        var ret = writer_fn(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
+                        if (ret != .SUCCESS) return .CHAIN_BROKEN;
 
-                    return .FIELD;
+                        return .FIELD;
+                    }
                 }
             }
 

@@ -100,6 +100,7 @@ internal ref struct PathIterator
             else
             {
 				Path = new ReadOnlySpan<byte>(part->value, part->size);
+                part = part->next;
                 return true;
             }
         }

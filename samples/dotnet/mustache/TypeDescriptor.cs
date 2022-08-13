@@ -54,7 +54,7 @@ namespace mustache
             {
                 if (name.SequenceEqual(descriptor.name))
                 {
-                    return descriptor.get;
+                    return descriptor.get(instance);
                 }
             }
 
