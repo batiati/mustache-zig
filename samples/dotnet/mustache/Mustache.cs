@@ -16,7 +16,6 @@ public static class Mustache
 {
     #region Methods
 
-    [SkipLocalsInit]
     public static Template CreateTemplate(string content)
     {
         unsafe
@@ -32,7 +31,6 @@ public static class Mustache
         }
     }
 
-    [SkipLocalsInit]
     public static string Render(Template template, object instance)
     {
         using (var context = new Context(instance))

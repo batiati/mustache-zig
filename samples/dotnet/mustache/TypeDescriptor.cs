@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace mustache
 {
@@ -15,51 +16,64 @@ namespace mustache
 
     internal static class TypeDescriptor
     {
-        #region Fields
+        #region InnerTypes
 
-        private static readonly Dictionary<nint, Dictionary<string, Func<object, object>>> types = new();
+        private struct Descriptor
+        {
+            public byte[] name;
+            public Func<object, object> get;
+        }
+
+		#endregion InnerTypes
+
+		#region Fields
+
+		private static readonly Dictionary<nint, Descriptor[]> types = new();
 
         #endregion Fields
 
         #region Methods
 
-        public static object? Get(object instance, string name)
+        public static object? Get(object instance, ReadOnlySpan<byte> name)
         {
             nint typeHandle = Type.GetTypeHandle(instance).Value;
 
-            if (!types.TryGetValue(typeHandle, out Dictionary<string, Func<object, object>>? delegates))
+            if (!types.TryGetValue(typeHandle, out Descriptor[]? descriptors))
             {
                 lock (types)
                 {
-                    if (!types.TryGetValue(typeHandle, out delegates))
+                    if (!types.TryGetValue(typeHandle, out descriptors))
                     {
-                        delegates = GetDelegates(instance.GetType());
-                        types.Add(typeHandle, delegates);
+						descriptors = GetDelegates(instance.GetType());
+                        types.Add(typeHandle, descriptors);
                     }
                 }
             }
 
-            if (delegates.TryGetValue(name, out Func<object, object>? get))
+            foreach (var descriptor in descriptors)
             {
-                return get(instance);
+                if (name.SequenceEqual(descriptor.name))
+                {
+                    return descriptor.get;
+                }
             }
 
             return null;
         }
 
-        private static Dictionary<string, Func<object, object>> GetDelegates(Type type)
+        private static Descriptor[] GetDelegates(Type type)
         {
             var fields = type.GetFields();
             var properties = type.GetProperties();
 
-            var delegates = new Dictionary<string, Func<object, object>>(fields.Length + properties.Length);
+            var descriptors = new List<Descriptor>(fields.Length + properties.Length);
 
             foreach (var field in fields)
             {
                 var get = CreateAcessor(type, field);
                 if (get == null) continue;
 
-                delegates.Add(field.Name, get);
+                descriptors.Add(new Descriptor { name = Encoding.UTF8.GetBytes(field.Name), get = get });
             }
 
             foreach (var property in properties)
@@ -67,10 +81,10 @@ namespace mustache
                 var get = CreateAcessor(type, property);
                 if (get == null) continue;
 
-                delegates.Add(property.Name, get);
+                descriptors.Add(new Descriptor { name = Encoding.UTF8.GetBytes(property.Name), get = get });
             }
 
-            return delegates;
+            return descriptors.ToArray();
         }
 
         private static Func<object, object>? CreateAcessor(Type type, MemberInfo memberInfo)

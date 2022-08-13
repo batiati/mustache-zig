@@ -68,48 +68,61 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         }
 
         pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
-            if (path.len > 0 and self.user_data.get != null) {
-                var path_part = extern_types.PathPart{
-                    .value = path[0].ptr,
-                    .size = @intCast(u32, path[0].len),
-                    .next = null,
-                };
+            if (self.user_data.get != null) {
+                if (path.len > 0) {
+                    var root_path = extern_types.PathPart{
+                        .value = path[0].ptr,
+                        .size = @intCast(u32, path[0].len),
+                        .next = null,
+                    };
 
-                return self.callGet(&path_part, &path_part, path[1..], index);
+                    return self.getFromPath(&root_path, &root_path, path[1..], index);
+                } else {
+                    return self.callGet(null, index);
+                }
             }
 
             return .chain_broken;
         }
 
-        fn callGet(self: Self, root_path: *const extern_types.PathPart, current_path: *extern_types.PathPart, path: Element.Path, index: ?usize) PathResolution(Self) {
-            if (path.len == 0) {
-                var out_value: extern_types.UserData = undefined;
-                var ffi_path: extern_types.Path = .{
-                    .root = root_path,
-                    .index = @intCast(u32, index orelse 0),
-                    .has_index = index != null,
-                };
-
-                var ret = self.user_data.get.?(self.user_data.handle, &ffi_path, &out_value);
-
-                return switch (ret) {
-                    .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
-                    .CHAIN_BROKEN => .chain_broken,
-                    .ITERATOR_CONSUMED => .iterator_consumed,
-                    .FIELD => .{ .field = RenderEngine.getContext(out_value) },
-                    .LAMBDA => .{ .lambda = RenderEngine.getContext(out_value) },
-                };
-            } else {
-                var path_part = extern_types.PathPart{
+        fn getFromPath(self: Self, root_path: *const extern_types.PathPart, leaf_path: *extern_types.PathPart, path: Element.Path, index: ?usize) PathResolution(Self) {
+            var current_part: extern_types.PathPart = undefined;
+            if (path.len > 0) {
+                current_part = extern_types.PathPart{
                     .value = path[0].ptr,
                     .size = @intCast(u32, path[0].len),
                     .next = null,
                 };
 
-                current_path.next = &path_part;
-
-                return self.callGet(root_path, &path_part, path[1..], index);
+                leaf_path.next = &current_part;
+            } else {
+                leaf_path.next = null;
             }
+
+            if (path.len > 1) {
+                return self.getFromPath(root_path, &current_part, path[1..], index);
+            } else {
+                return self.callGet(root_path, index);
+            }
+        }
+
+        inline fn callGet(self: Self, root_path: ?*const extern_types.PathPart, index: ?usize) PathResolution(Self) {
+            var out_value: extern_types.UserData = undefined;
+            var ffi_path: extern_types.Path = .{
+                .root = root_path,
+                .index = @intCast(u32, index orelse 0),
+                .has_index = index != null,
+            };
+
+            var ret = self.user_data.get.?(self.user_data.handle, &ffi_path, &out_value);
+
+            return switch (ret) {
+                .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
+                .CHAIN_BROKEN => .chain_broken,
+                .ITERATOR_CONSUMED => .iterator_consumed,
+                .FIELD => .{ .field = RenderEngine.getContext(out_value) },
+                .LAMBDA => .{ .lambda = RenderEngine.getContext(out_value) },
+            };
         }
 
         pub fn capacityHint(
@@ -117,49 +130,62 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             data_render: *DataRender,
             path: Element.Path,
         ) PathResolution(usize) {
-            if (path.len > 0 and self.user_data.capacityHint != null) {
-                var path_part = extern_types.PathPart{
-                    .value = path[0].ptr,
-                    .size = @intCast(u32, path[0].len),
-                    .next = null,
-                };
+            _ = data_render;
+            if (self.user_data.capacityHint != null) {
+                if (path.len > 0) {
+                    var root_path = extern_types.PathPart{
+                        .value = path[0].ptr,
+                        .size = @intCast(u32, path[0].len),
+                        .next = null,
+                    };
 
-                return self.callCapacityHint(data_render, &path_part, &path_part, path[1..]);
+                    return self.capacityHintFromPath(&root_path, &root_path, path[1..]);
+                } else {
+                    return self.callCapacityHint(null);
+                }
             }
 
             return .chain_broken;
         }
 
-        fn callCapacityHint(self: Self, data_render: *DataRender, root_path: *const extern_types.PathPart, current_path: *extern_types.PathPart, path: Element.Path) PathResolution(usize) {
-            if (path.len == 0) {
-                _ = data_render;
-                var ffi_path: extern_types.Path = .{
-                    .root = root_path,
-                    .index = 0,
-                    .has_index = false,
-                };
-
-                var capacity: u32 = undefined;
-                var ret = self.user_data.capacityHint.?(self.user_data.handle, &ffi_path, &capacity);
-
-                return switch (ret) {
-                    .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
-                    .CHAIN_BROKEN => .chain_broken,
-                    .ITERATOR_CONSUMED => .iterator_consumed,
-                    .FIELD => .{ .field = capacity },
-                    .LAMBDA => .{ .lambda = capacity },
-                };
-            } else {
-                var path_part = extern_types.PathPart{
+        fn capacityHintFromPath(self: Self, root_path: *const extern_types.PathPart, leaf_path: *extern_types.PathPart, path: Element.Path) PathResolution(usize) {
+            var current_part: extern_types.PathPart = undefined;
+            if (path.len > 0) {
+                current_part = extern_types.PathPart{
                     .value = path[0].ptr,
                     .size = @intCast(u32, path[0].len),
                     .next = null,
                 };
 
-                current_path.next = &path_part;
-
-                return self.callCapacityHint(data_render, root_path, &path_part, path[1..]);
+                leaf_path.next = &current_part;
+            } else {
+                leaf_path.next = null;
             }
+
+            if (path.len > 1) {
+                return self.capacityHintFromPath(root_path, &current_part, path[1..]);
+            } else {
+                return self.callCapacityHint(root_path);
+            }
+        }
+
+        inline fn callCapacityHint(self: Self, root_path: ?*const extern_types.PathPart) PathResolution(usize) {
+            var ffi_path: extern_types.Path = .{
+                .root = root_path,
+                .index = 0,
+                .has_index = false,
+            };
+
+            var capacity: u32 = undefined;
+            var ret = self.user_data.capacityHint.?(self.user_data.handle, &ffi_path, &capacity);
+
+            return switch (ret) {
+                .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
+                .CHAIN_BROKEN => .chain_broken,
+                .ITERATOR_CONSUMED => .iterator_consumed,
+                .FIELD => .{ .field = capacity },
+                .LAMBDA => .{ .lambda = capacity },
+            };
         }
 
         pub inline fn interpolate(
@@ -168,52 +194,65 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             path: Element.Path,
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            if (path.len > 0 and self.user_data.interpolate != null) {
-                var path_part = extern_types.PathPart{
-                    .value = path[0].ptr,
-                    .size = @intCast(u32, path[0].len),
-                    .next = null,
-                };
+            if (self.user_data.interpolate != null) {
+                if (path.len > 0) {
+                    var root_path = extern_types.PathPart{
+                        .value = path[0].ptr,
+                        .size = @intCast(u32, path[0].len),
+                        .next = null,
+                    };
 
-                return try self.callInterpolate(data_render, &path_part, &path_part, path[1..], escape);
+                    return try self.interpolateFromPath(data_render, &root_path, &root_path, path[1..], escape);
+                } else {
+                    return try self.callInterpolate(data_render, null, escape);
+                }
             }
 
             return PathResolution(void).chain_broken;
         }
 
-        fn callInterpolate(self: Self, data_render: *DataRender, root_path: *const extern_types.PathPart, current_path: *extern_types.PathPart, path: Element.Path, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            if (path.len == 0) {
-                var ffi_path: extern_types.Path = .{
-                    .root = root_path,
-                    .index = 0,
-                    .has_index = false,
-                };
-
-                var writer = FfiWriter{
-                    .data_render = data_render,
-                    .escape = escape,
-                };
-
-                var ret = self.user_data.interpolate.?(&writer, FfiWriter.write, self.user_data.handle, &ffi_path);
-
-                return switch (ret) {
-                    .NOT_FOUND_IN_CONTEXT => PathResolution(void).not_found_in_context,
-                    .CHAIN_BROKEN => PathResolution(void).chain_broken,
-                    .ITERATOR_CONSUMED => PathResolution(void).iterator_consumed,
-                    .FIELD => PathResolution(void).field,
-                    .LAMBDA => PathResolution(void).lambda,
-                };
-            } else {
-                var path_part = extern_types.PathPart{
+        fn interpolateFromPath(self: Self, data_render: *DataRender, root_path: *const extern_types.PathPart, leaf_path: *extern_types.PathPart, path: Element.Path, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            var current_part: extern_types.PathPart = undefined;
+            if (path.len > 0) {
+                current_part = extern_types.PathPart{
                     .value = path[0].ptr,
                     .size = @intCast(u32, path[0].len),
                     .next = null,
                 };
 
-                current_path.next = &path_part;
-
-                return try self.callInterpolate(data_render, root_path, &path_part, path[1..], escape);
+                leaf_path.next = &current_part;
+            } else {
+                leaf_path.next = null;
             }
+
+            if (path.len > 1) {
+                return try self.interpolateFromPath(data_render, root_path, &current_part, path[1..], escape);
+            } else {
+                return try self.callInterpolate(data_render, root_path, escape);
+            }
+        }
+
+        inline fn callInterpolate(self: Self, data_render: *DataRender, root_path: ?*const extern_types.PathPart, escape: Escape) (Allocator.Error || Writer.Error)!PathResolution(void) {
+            var ffi_path: extern_types.Path = .{
+                .root = root_path,
+                .index = 0,
+                .has_index = false,
+            };
+
+            var writer = FfiWriter{
+                .data_render = data_render,
+                .escape = escape,
+            };
+
+            var ret = self.user_data.interpolate.?(&writer, FfiWriter.write, self.user_data.handle, &ffi_path);
+
+            return switch (ret) {
+                .NOT_FOUND_IN_CONTEXT => PathResolution(void).not_found_in_context,
+                .CHAIN_BROKEN => PathResolution(void).chain_broken,
+                .ITERATOR_CONSUMED => PathResolution(void).iterator_consumed,
+                .FIELD => PathResolution(void).field,
+                .LAMBDA => PathResolution(void).lambda,
+            };
         }
 
         pub inline fn expandLambda(

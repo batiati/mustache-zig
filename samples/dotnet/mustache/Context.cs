@@ -86,22 +86,23 @@ internal sealed class Context : IDisposable
     {
         object? instance = context;
 
-        var it = new PathIterator(path);
-        while (it.GetNext() is string name)
+        var iterator = new PathIterator(path);
+        while (iterator.MoveNext())
         {
             if (instance is IDictionary dictionary)
             {
-                instance = dictionary.Contains(name) ? dictionary[name] : null;
+                var key = Encoding.UTF8.GetString(iterator.Path);
+                instance = dictionary.Contains(key) ? dictionary[key] : null;
             }
             else if (instance != null)
             {
-                instance = TypeDescriptor.Get(instance, name);
+                instance = TypeDescriptor.Get(instance, iterator.Path);
             }
 
             if (instance == null) break;
         }
 
-        if (it.Index is int index)
+        if (iterator.Index is int index)
         {
             if (instance is bool value)
             {
@@ -133,7 +134,7 @@ internal sealed class Context : IDisposable
 
         if (instance == null)
         {
-            if (it.IsRoot)
+            if (iterator.IsRoot)
             {
                 return (PathResolution.NOT_FOUND_IN_CONTEXT, null);
             }

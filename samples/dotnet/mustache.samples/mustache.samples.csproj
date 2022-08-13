@@ -6,13 +6,13 @@
 
   <ItemGroup>
       <Content Include="../../../lib/win-x64/libmustache.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </Content>
       <Content Include="../../../lib/linux-x64/libmustache.so" Condition="$([MSBuild]::IsOSPlatform('Linux'))">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </Content>
       <Content Include="../../../lib/osx-x64/libmustache.dylib" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </Content>
   </ItemGroup>  
 

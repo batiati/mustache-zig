@@ -1,7 +1,4 @@
-﻿using System.Runtime.InteropServices;
-using System.Text;
-using System.Collections;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 
 namespace mustache;
 
@@ -13,17 +10,36 @@ namespace mustache;
 
 #endregion Documentation
 [SkipLocalsInit]
-internal struct PathIterator
+internal ref struct PathIterator
 {
     #region Fields
+
     private unsafe Interop.Path* path;
     private unsafe Interop.PathPart* part;
 
-    #endregion Fields
+	#endregion Fields
 
-    #region Properties
+	#region Properties
 
-    public int? Index
+	#region Documentation
+	
+    /// <summary>
+	/// UTF-8 encoded path name
+	/// </summary>
+	
+    #endregion Documentation
+
+	public ReadOnlySpan<byte> Path { get; private set; }
+
+	#region Documentation
+
+	/// <summary>
+	/// Index, in case of iterating over a section
+	/// </summary>
+
+	#endregion Documentation
+
+	public int? Index
     {
         get
         {
@@ -34,6 +50,15 @@ internal struct PathIterator
         }
     }
 
+	#region Documentation
+	
+    /// <summary>
+	/// Returns true case it is the root path
+	/// For example "a.b", returns true on "a" and false on "b"
+	/// </summary>
+	
+    #endregion Documentation
+	
     public bool IsRoot
     {
         get
@@ -53,23 +78,30 @@ internal struct PathIterator
     {
         this.path = path;
         this.part = path->root;
+
+        this.Path = ReadOnlySpan<byte>.Empty;
     }
 
     #endregion Constructor
 
     #region Methods
 
-    // [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public string? GetNext()
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool MoveNext()
     {
         unsafe
         {
-            if (part == null) return null;
 
-            var str = Encoding.UTF8.GetString(part->value, part->size);
-            part = part->next;
-
-            return str;
+            if (part == null)
+            {
+				Path = ReadOnlySpan<byte>.Empty;
+                return false;
+            }
+            else
+            {
+				Path = new ReadOnlySpan<byte>(part->value, part->size);
+                return true;
+            }
         }
     }
 
