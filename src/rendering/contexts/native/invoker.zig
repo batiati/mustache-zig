@@ -37,7 +37,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                 const Depth = enum { Root, Leaf };
 
-                pub fn call(
+                pub inline fn call(
                     action_param: anytype,
                     data: anytype,
                     path: Element.Path,
@@ -281,7 +281,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             };
         }
 
-        pub fn get(
+        pub inline fn get(
             data: anytype,
             path: Element.Path,
             index: ?usize,
@@ -295,7 +295,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             );
         }
 
-        pub fn interpolate(
+        pub inline fn interpolate(
             data_render: *DataRender,
             data: anytype,
             path: Element.Path,
@@ -310,7 +310,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             );
         }
 
-        pub fn capacityHint(
+        pub inline fn capacityHint(
             data_render: *DataRender,
             data: anytype,
             path: Element.Path,
@@ -324,7 +324,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             );
         }
 
-        pub fn expandLambda(
+        pub inline fn expandLambda(
             data_render: *DataRender,
             data: anytype,
             inner_text: []const u8,
@@ -341,12 +341,12 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             );
         }
 
-        fn getAction(param: void, value: anytype) error{}!Context {
+        inline fn getAction(param: void, value: anytype) error{}!Context {
             _ = param;
             return RenderEngine.getContext(value);
         }
 
-        fn interpolateAction(
+        inline fn interpolateAction(
             params: anytype,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
@@ -357,7 +357,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             _ = try data_render.write(value, escape);
         }
 
-        fn capacityHintAction(
+        inline fn capacityHintAction(
             params: anytype,
             value: anytype,
         ) error{}!usize {

@@ -91,12 +91,12 @@ internal sealed class Context : IDisposable
         {
             if (instance is IDictionary dictionary)
             {
-                var key = Encoding.UTF8.GetString(iterator.Path);
+                var key = Encoding.UTF8.GetString(iterator.partName);
                 instance = dictionary.Contains(key) ? dictionary[key] : null;
             }
             else if (instance != null)
             {
-                instance = TypeDescriptor.Get(instance, iterator.Path);
+                instance = TypeDescriptor.Get(instance, iterator.partName);
             }
 
             if (instance == null) break;

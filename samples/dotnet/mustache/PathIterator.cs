@@ -14,22 +14,14 @@ internal ref struct PathIterator
 {
     #region Fields
 
-    private unsafe Interop.Path* path;
+    private unsafe readonly Interop.Path* path;
     private unsafe Interop.PathPart* part;
+    public ReadOnlySpan<byte> partName;
 
 	#endregion Fields
 
 	#region Properties
 
-	#region Documentation
-	
-    /// <summary>
-	/// UTF-8 encoded path name
-	/// </summary>
-	
-    #endregion Documentation
-
-	public ReadOnlySpan<byte> Path { get; private set; }
 
 	#region Documentation
 
@@ -78,8 +70,7 @@ internal ref struct PathIterator
     {
         this.path = path;
         this.part = path->root;
-
-        this.Path = ReadOnlySpan<byte>.Empty;
+        this.partName = ReadOnlySpan<byte>.Empty;
     }
 
     #endregion Constructor
@@ -91,15 +82,14 @@ internal ref struct PathIterator
     {
         unsafe
         {
-
             if (part == null)
             {
-				Path = ReadOnlySpan<byte>.Empty;
+				partName = ReadOnlySpan<byte>.Empty;
                 return false;
             }
             else
             {
-				Path = new ReadOnlySpan<byte>(part->value, part->size);
+				partName = new ReadOnlySpan<byte>(part->value, part->size);
                 part = part->next;
                 return true;
             }
@@ -112,6 +102,7 @@ internal ref struct PathIterator
         unsafe
         {
             part = path->root;
+            partName = ReadOnlySpan<byte>.Empty;
         }
     }
 

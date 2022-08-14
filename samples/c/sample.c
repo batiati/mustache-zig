@@ -13,7 +13,7 @@ typedef struct Data {
     char* body;
 } Data;
 
-mustache_path_resolution capacity_hint(const mustache_userdata_handle user_data_handle, mustache_path* path, uint32_t* out_value) {
+static mustache_path_resolution capacity_hint(const mustache_userdata_handle user_data_handle, mustache_path* path, uint32_t* out_value) {
 
     Data* data = (Data*)user_data_handle;
 
@@ -35,7 +35,7 @@ mustache_path_resolution capacity_hint(const mustache_userdata_handle user_data_
     return NOT_FOUND_IN_CONTEXT;
 }
 
-mustache_path_resolution interpolate(const mustache_writer_handle writer_handle, mustache_write_fn write_fn, const mustache_userdata_handle user_data_handle, mustache_path* path) {
+static mustache_path_resolution interpolate(const mustache_writer_handle writer_handle, mustache_write_fn write_fn, const mustache_userdata_handle user_data_handle, mustache_path* path) {
 
     Data* data = (Data*)user_data_handle;
     

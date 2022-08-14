@@ -12,11 +12,11 @@ const context = @import("context.zig");
 
 const lambda = @import("contexts/native/lambda.zig");
 const native_context = @import("contexts/native/context.zig");
-const FlattenedType = native_context.FlattenedType;
+const ErasedType = native_context.ErasedType;
 
 const extern_types = @import("../ffi/extern_types.zig");
 
-pub fn getField(data: anytype, comptime field_name: []const u8) field_type: {
+pub inline fn getField(data: anytype, comptime field_name: []const u8) field_type: {
     const TField = FieldType(@TypeOf(data), field_name);
 
     if (TField == comptime_int) {
@@ -52,7 +52,7 @@ pub fn getField(data: anytype, comptime field_name: []const u8) field_type: {
     return if (is_by_value) @field(lhs(data), field_name) else &@field(lhs(data), field_name);
 }
 
-pub fn getRuntimeValue(ctx: anytype) context_type: {
+pub inline fn getRuntimeValue(ctx: anytype) context_type: {
     const TContext = @TypeOf(ctx);
 
     if (TContext == comptime_int) {
@@ -85,7 +85,7 @@ pub fn getRuntimeValue(ctx: anytype) context_type: {
     }
 }
 
-pub fn getTupleElement(ctx: anytype, comptime index: usize) element_type: {
+pub inline fn getTupleElement(ctx: anytype, comptime index: usize) element_type: {
     const T = @TypeOf(ctx);
     assert(trait.isTuple(T));
 
@@ -123,7 +123,7 @@ pub fn getTupleElement(ctx: anytype, comptime index: usize) element_type: {
     }
 }
 
-pub fn getElement(ctx: anytype, index: usize) element_type: {
+pub inline fn getElement(ctx: anytype, index: usize) element_type: {
     const T = @TypeOf(ctx);
 
     const is_indexable = trait.isIndexable(T) and !trait.isTuple(T);
@@ -158,7 +158,7 @@ fn Lhs(comptime T: type) type {
     }
 }
 
-pub fn lhs(value: anytype) Lhs(@TypeOf(value)) {
+pub inline fn lhs(value: anytype) Lhs(@TypeOf(value)) {
     const T = @TypeOf(value);
 
     if (comptime trait.is(.Optional)(T)) {
@@ -170,7 +170,7 @@ pub fn lhs(value: anytype) Lhs(@TypeOf(value)) {
     }
 }
 
-pub fn needsDerref(comptime T: type) bool {
+pub inline fn needsDerref(comptime T: type) bool {
     comptime {
         if (trait.isSingleItemPtr(T)) {
             const Child = meta.Child(T);
@@ -189,7 +189,7 @@ pub fn byValue(comptime TField: type) bool {
             \\Type:
         ++ @typeName(TField));
 
-        const max_size = @sizeOf(FlattenedType);
+        const max_size = @sizeOf(ErasedType);
         const is_zero_size = @sizeOf(TField) == 0;
 
         const is_pointer = trait.isSlice(TField) or
@@ -213,7 +213,7 @@ pub fn byValue(comptime TField: type) bool {
     }
 }
 
-pub fn isNull(data: anytype) bool {
+pub inline fn isNull(data: anytype) bool {
     return switch (@typeInfo(@TypeOf(data))) {
         .Pointer => |info| switch (info.size) {
             .One => return isNull(data.*),
@@ -226,7 +226,7 @@ pub fn isNull(data: anytype) bool {
     };
 }
 
-pub fn lenOf(data: anytype) ?usize {
+pub inline fn lenOf(data: anytype) ?usize {
     return switch (@typeInfo(@TypeOf(data))) {
         .Pointer => |info| switch (info.size) {
             .One => return null,

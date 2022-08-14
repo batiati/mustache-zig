@@ -505,7 +505,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                 try self.renderLevel(elements);
             }
 
-            inline fn lambdasSupported(self: *Self) bool {
+            inline fn lambdasSupported(self: Self) bool {
                 return switch (options) {
                     .template => self.template_options.features.lambdas == .enabled,
                     .string => |string| string.features.lambdas == .enabled,
@@ -513,7 +513,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                 };
             }
 
-            inline fn preseveLineBreaksAndIndentation(self: *Self) bool {
+            inline fn preseveLineBreaksAndIndentation(self: Self) bool {
                 return !PartialsMap.isEmpty() and
                     switch (options) {
                     .template => self.template_options.features.preseve_line_breaks_and_indentation,
@@ -552,13 +552,15 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                                 }
 
                                 while (iterator.next()) |item_ctx| {
-                                    var current_level = self.stack;
-                                    self.stack = &ContextStack{
+                                    const current_level = self.stack;
+                                    const next_level = ContextStack{
                                         .parent = current_level,
                                         .ctx = item_ctx,
                                     };
 
+                                    self.stack = &next_level;
                                     defer self.stack = current_level;
+
                                     try self.renderLevel(section_children);
                                 }
                             }
@@ -686,7 +688,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                 return null;
             }
 
-            pub fn write(
+            pub inline fn write(
                 self: *Self,
                 value: anytype,
                 escape: Escape,
@@ -703,7 +705,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                 }
             }
 
-            pub fn countWrite(
+            pub inline fn countWrite(
                 self: *Self,
                 value: anytype,
                 escape: Escape,
@@ -785,7 +787,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                 value: []const u8,
                 comptime escape: Escape,
             ) @TypeOf(writer).Error!void {
-                const escaped = escape == .Escaped;
+                const escaped = comptime escape == .Escaped;
                 const indentation_supported = comptime !PartialsMap.isEmpty();
 
                 if (comptime escaped or indentation_supported) {
@@ -866,12 +868,13 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
 
                             if (self.getIterator(section.path)) |*iterator| {
                                 while (iterator.next()) |item_ctx| {
-                                    var current_level = self.stack;
-                                    self.stack = &ContextStack{
+                                    const current_level = self.stack;
+                                    const next_level = ContextStack{
                                         .parent = current_level,
                                         .ctx = item_ctx,
                                     };
 
+                                    self.stack = &next_level;
                                     defer self.stack = current_level;
 
                                     size += self.levelCapacityHint(section_children);
@@ -963,7 +966,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             }
         };
 
-        pub fn getContext(data: anytype) Context {
+        pub inline fn getContext(data: anytype) Context {
             const Data = @TypeOf(data);
             const ContextImpl = context.ContextImpl(context_type, Writer, Data, PartialsMap, options);
 
@@ -996,13 +999,15 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             const by_value = comptime Fields.byValue(Data);
 
             var indentation_queue = IndentationQueue{};
+            const context_stack = ContextStack{
+                .parent = null,
+                .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
+            };
+
             var data_render = DataRender{
                 .out_writer = .{ .writer = writer },
                 .partials_map = partials_map,
-                .stack = &ContextStack{
-                    .parent = null,
-                    .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
-                },
+                .stack = &context_stack,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
             };
@@ -1017,13 +1022,15 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             const by_value = comptime Fields.byValue(Data);
 
             var indentation_queue = IndentationQueue{};
+            const context_stack = ContextStack{
+                .parent = null,
+                .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
+            };
+
             var data_render = DataRender{
                 .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
-                .stack = &ContextStack{
-                    .parent = null,
-                    .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
-                },
+                .stack = &context_stack,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
             };
@@ -1038,13 +1045,15 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             const by_value = comptime Fields.byValue(Data);
 
             var indentation_queue = IndentationQueue{};
+            const context_stack = ContextStack{
+                .parent = null,
+                .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
+            };
+
             var data_render = DataRender{
                 .out_writer = .{ .writer = writer },
                 .partials_map = partials_map,
-                .stack = &ContextStack{
-                    .parent = null,
-                    .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
-                },
+                .stack = &context_stack,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
             };
@@ -1059,13 +1068,15 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             const by_value = comptime Fields.byValue(Data);
 
             var indentation_queue = IndentationQueue{};
+            const context_stack = ContextStack{
+                .parent = null,
+                .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
+            };
+
             var data_render = DataRender{
                 .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
-                .stack = &ContextStack{
-                    .parent = null,
-                    .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
-                },
+                .stack = &context_stack,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
             };

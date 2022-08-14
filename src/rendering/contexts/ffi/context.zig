@@ -67,7 +67,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             };
         }
 
-        pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
+        pub inline fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
             if (self.user_data.get != null) {
                 if (path.len > 0) {
                     var root_path = extern_types.PathPart{
@@ -76,7 +76,12 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         .next = null,
                     };
 
-                    return self.getFromPath(&root_path, &root_path, path[1..], index);
+                    if (path.len == 1) {
+                        return self.callGet(&root_path, index);
+                    } else {
+                        @setCold(true);
+                        return self.getFromPath(&root_path, &root_path, path[1..], index);
+                    }
                 } else {
                     return self.callGet(null, index);
                 }
@@ -125,7 +130,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             };
         }
 
-        pub fn capacityHint(
+        pub inline fn capacityHint(
             self: Self,
             data_render: *DataRender,
             path: Element.Path,
@@ -139,7 +144,12 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         .next = null,
                     };
 
-                    return self.capacityHintFromPath(&root_path, &root_path, path[1..]);
+                    if (path.len == 1) {
+                        return self.callCapacityHint(&root_path);
+                    } else {
+                        @setCold(true);
+                        return self.capacityHintFromPath(&root_path, &root_path, path[1..]);
+                    }
                 } else {
                     return self.callCapacityHint(null);
                 }
@@ -202,7 +212,12 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         .next = null,
                     };
 
-                    return try self.interpolateFromPath(data_render, &root_path, &root_path, path[1..], escape);
+                    if (path.len == 1) {
+                        return try self.callInterpolate(data_render, &root_path, escape);
+                    } else {
+                        @setCold(true);
+                        return try self.interpolateFromPath(data_render, &root_path, &root_path, path[1..], escape);
+                    }
                 } else {
                     return try self.callInterpolate(data_render, null, escape);
                 }

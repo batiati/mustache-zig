@@ -32,7 +32,7 @@
             "name": "debug samples",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/samples/zig-out/bin/samples",
+            "program": "${workspaceFolder}/samples/zig/zig-out/bin/samples",
             "args": [ "." ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

@@ -20,10 +20,7 @@ pub fn build(b: *std.build.Builder) void {
     };
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
-            .arch_os_abi = platform[0],
-            .cpu_features = "baseline"
-        }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
         inline for (.{ .dynamic, .static }) |linkage| {
 

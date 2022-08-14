@@ -59,7 +59,7 @@ namespace mustache
                 var span = descriptor.names.AsSpan(lastPos, descriptor.sizes[i]);
                 lastPos += descriptor.sizes[i];
 
-                if (name.SequenceEqual(span))
+                if (MemoryExtensions.SequenceEqual(span, name))
                 {
                     var get = descriptor.getters[i];
                     return get(instance);
@@ -132,7 +132,7 @@ namespace mustache
 
         private static Getter? CreateGetter(Type type, MemberInfo memberInfo)
         {
-            var instance = Expression.Parameter(typeof(object));
+            var instance = Expression.Parameter(type);
             var getParameters = new ParameterExpression[] { instance };
             
             // No need for type-checking here, we assure that this delegate is obtained after checking the instance's type

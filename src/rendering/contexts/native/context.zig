@@ -21,9 +21,70 @@ const map = @import("../../partials_map.zig");
 const lambda = @import("lambda.zig");
 const invoker = @import("invoker.zig");
 
-/// This type is large enough to hold some context data such as a pointer, a slice, a nullable pointer/slice
+/// This type is a type-erasure container
+/// It is large enough to hold some context data such as a pointer, a slice, a nullable pointer/slice
 /// and some common primitives passed by value like enums, integers, floats and nullable integer/floats
-pub const FlattenedType = [4]usize;
+pub const ErasedType = struct {
+    const Self = @This();
+    const Content = [4]usize;
+
+    content: Content,
+
+    pub inline fn put(data: anytype) Self {
+        const Data = @TypeOf(data);
+        const data_size = @sizeOf(Data);
+
+        if (comptime data_size > @sizeOf(Content)) @compileError(std.fmt.comptimePrint("Type {s} size {} exceeds the maxinum by-val size of {}", .{ data_size, data_size, @sizeOf(Content) }));
+        if (comptime data_size == 0) {
+            return undefined;
+        } else {
+
+            // No need for cast checks here
+            // We can assure that this pointer will always be the correct type,
+            // since the context holds the type into the concrete implementation
+            @setRuntimeSafety(false);
+
+            var value: Self = undefined;
+            if (comptime std.meta.trait.isSingleItemPtr(Data)) {
+                value.content[0] = @ptrToInt(data);
+            } else if (comptime std.meta.trait.isSlice(Data)) {
+                value.content[0] = @ptrToInt(data.ptr);
+                value.content[1] = data.len;
+            } else {
+                var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &value.content));
+                ptr.* = data;
+            }
+
+            return value;
+        }
+    }
+
+    pub inline fn get(self: *const Self, comptime Data: type) Data {
+        const data_size = @sizeOf(Data);
+
+        if (comptime data_size == 0) {
+            return undefined;
+        } else {
+
+            // No need for cast checks here
+            // We can assure that this pointer will always be the correct type,
+            // since the context holds the type into the concrete implementation
+            @setRuntimeSafety(false);
+
+            if (comptime std.meta.trait.isSingleItemPtr(Data)) {
+                return @intToPtr(Data, self.content[0]);
+            } else if (comptime std.meta.trait.isSlice(Data)) {
+                const Ptr = [*]std.meta.Child(Data);
+                const ptr = @intToPtr(Ptr, self.content[0]);
+                const size = self.content[1];
+                return ptr[0..size];
+            } else {
+                const ptr = @ptrCast(*const Data, @alignCast(@alignOf(*const Data), &self.content));
+                return ptr.*;
+            }
+        }
+    }
+};
 
 /// Native context can resolve paths for zig structs and values
 /// This struct implements the expected context interface using dynamic dispatch.
@@ -41,15 +102,15 @@ pub fn ContextInterface(comptime Writer: type, comptime PartialsMap: type, compt
         };
 
         const VTable = struct {
-            get: fn (*const anyopaque, Element.Path, ?usize) PathResolution(Self),
-            capacityHint: fn (*const anyopaque, *DataRender, Element.Path) PathResolution(usize),
-            interpolate: fn (*const anyopaque, *DataRender, Element.Path, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: fn (*const anyopaque, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            get: fn (*const ErasedType, Element.Path, ?usize) PathResolution(Self),
+            capacityHint: fn (*const ErasedType, *DataRender, Element.Path) PathResolution(usize),
+            interpolate: fn (*const ErasedType, *DataRender, Element.Path, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
+            expandLambda: fn (*const ErasedType, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = ContextIterator(Self);
 
-        ctx: FlattenedType = undefined,
+        ctx: ErasedType = undefined,
         vtable: *const VTable,
 
         pub inline fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
@@ -123,55 +184,48 @@ pub fn ContextImpl(comptime Writer: type, comptime Data: type, comptime Partials
         const Self = @This();
 
         pub fn context(data: Data) Interface {
-            var interface = Interface{
+            return .{
                 .vtable = &vtable,
+                .ctx = ErasedType.put(data),
             };
-
-            if (!is_zero_size) {
-                if (comptime @sizeOf(Data) > @sizeOf(FlattenedType)) @compileError(std.fmt.comptimePrint("Type {s} size {} exceeds the maxinum by-val size of {}", .{ @typeName(Data), @sizeOf(Data), @sizeOf(FlattenedType) }));
-                var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &interface.ctx));
-                ptr.* = data;
-            }
-
-            return interface;
         }
 
-        fn get(ctx: *const anyopaque, path: Element.Path, index: ?usize) PathResolution(Interface) {
+        fn get(ctx: *const ErasedType, path: Element.Path, index: ?usize) PathResolution(Interface) {
             return Invoker.get(
-                getData(ctx),
+                ctx.get(Data),
                 path,
                 index,
             );
         }
 
         fn capacityHint(
-            ctx: *const anyopaque,
+            ctx: *const ErasedType,
             data_render: *DataRender,
             path: Element.Path,
         ) PathResolution(usize) {
             return Invoker.capacityHint(
                 data_render,
-                getData(ctx),
+                ctx.get(Data),
                 path,
             );
         }
 
         fn interpolate(
-            ctx: *const anyopaque,
+            ctx: *const ErasedType,
             data_render: *DataRender,
             path: Element.Path,
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             return try Invoker.interpolate(
                 data_render,
-                getData(ctx),
+                ctx.get(Data),
                 path,
                 escape,
             );
         }
 
         fn expandLambda(
-            ctx: *const anyopaque,
+            ctx: *const ErasedType,
             data_render: *DataRender,
             path: Element.Path,
             inner_text: []const u8,
@@ -180,16 +234,12 @@ pub fn ContextImpl(comptime Writer: type, comptime Data: type, comptime Partials
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             return try Invoker.expandLambda(
                 data_render,
-                getData(ctx),
+                ctx.get(Data),
                 inner_text,
                 escape,
                 delimiters,
                 path,
             );
-        }
-
-        inline fn getData(ctx: *const anyopaque) Data {
-            return if (is_zero_size) undefined else (@ptrCast(*const Data, @alignCast(@alignOf(Data), ctx))).*;
         }
     };
 }

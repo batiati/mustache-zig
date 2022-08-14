@@ -23,7 +23,7 @@
             "label": "build samples",
             "type": "shell",
             "command": "zig",
-            "args": ["build", "--build-file", "samples/build.zig"],
+            "args": ["build", "--build-file", "samples/zig/build.zig"],
             "problemMatcher": [],
             "group": "build",
         },               
