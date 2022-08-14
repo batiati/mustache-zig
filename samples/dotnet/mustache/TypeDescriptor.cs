@@ -18,94 +18,138 @@ namespace mustache
     {
         #region InnerTypes
 
+        private delegate object? Getter(object instance);
+
+        #region Documentation
+
+        /// <summary>
+        /// Represents a SOA (struct of arrays) containing an array of all names, sizes and delegates
+        /// This approach sppeds up the match process, by reducing the walk into different regions of memory for each name
+        /// </summary>
+
+        #endregion Documentation
+
         private struct Descriptor
         {
-            public byte[] name;
-            public Func<object, object> get;
+            public byte[] names;
+
+            public int[] sizes;
+            
+            public Getter[] getters;
         }
 
 		#endregion InnerTypes
 
 		#region Fields
 
-		private static readonly Dictionary<nint, Descriptor[]> types = new();
+		private static readonly Dictionary<nint, Descriptor> types = new();
 
         #endregion Fields
 
         #region Methods
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static object? Get(object instance, ReadOnlySpan<byte> name)
         {
-            nint typeHandle = Type.GetTypeHandle(instance).Value;
+            var descriptor = GetDescriptor(instance);
 
-            if (!types.TryGetValue(typeHandle, out Descriptor[]? descriptors))
+            int lastPos = 0;
+            for (int i = 0; i < descriptor.names.Length; i++)
             {
-                lock (types)
-                {
-                    if (!types.TryGetValue(typeHandle, out descriptors))
-                    {
-						descriptors = GetDelegates(instance.GetType());
-                        types.Add(typeHandle, descriptors);
-                    }
-                }
-            }
+                var span = descriptor.names.AsSpan(lastPos, descriptor.sizes[i]);
+                lastPos += descriptor.sizes[i];
 
-            foreach (var descriptor in descriptors)
-            {
-                if (name.SequenceEqual(descriptor.name))
+                if (name.SequenceEqual(span))
                 {
-                    return descriptor.get(instance);
+                    var get = descriptor.getters[i];
+                    return get(instance);
                 }
             }
 
             return null;
         }
 
-        private static Descriptor[] GetDelegates(Type type)
+        private static Descriptor GetDescriptor(object instance)
+        {
+            nint typeHandle = Type.GetTypeHandle(instance).Value;
+
+            if (!types.TryGetValue(typeHandle, out Descriptor descriptor))
+            {
+                lock (types)
+                {
+                    if (!types.TryGetValue(typeHandle, out descriptor))
+                    {
+                        descriptor = CreateDescriptor(instance.GetType());
+                        types.Add(typeHandle, descriptor);
+                    }
+                }
+            }
+
+            return descriptor;
+        }
+
+        private static Descriptor CreateDescriptor(Type type)
         {
             var fields = type.GetFields();
             var properties = type.GetProperties();
 
-            var descriptors = new List<Descriptor>(fields.Length + properties.Length);
+            var bufferSize = fields.Select(x => x.Name.Length).Sum() + properties.Select(x => x.Name.Length).Sum();
+            var names = new List<byte>(bufferSize);
+            
+            var capacity = fields.Length + properties.Length;
+            var sizes = new List<int>(capacity);
+            var getters = new List<Getter>(capacity);
 
             foreach (var field in fields)
             {
-                var get = CreateAcessor(type, field);
+                var get = CreateGetter(type, field);
                 if (get == null) continue;
 
-                descriptors.Add(new Descriptor { name = Encoding.UTF8.GetBytes(field.Name), get = get });
+                var bytes = Encoding.UTF8.GetBytes(field.Name);
+                names.AddRange(bytes);
+                sizes.Add(bytes.Length);
+                getters.Add(get);
             }
 
             foreach (var property in properties)
             {
-                var get = CreateAcessor(type, property);
+                var get = CreateGetter(type, property);
                 if (get == null) continue;
 
-                descriptors.Add(new Descriptor { name = Encoding.UTF8.GetBytes(property.Name), get = get });
+                var bytes = Encoding.UTF8.GetBytes(property.Name);
+                names.AddRange(bytes);
+                sizes.Add(bytes.Length);
+                getters.Add(get);
             }
 
-            return descriptors.ToArray();
+            return new Descriptor 
+            {
+                names = names.ToArray(),
+                sizes = sizes.ToArray(),
+                getters = getters.ToArray(),
+            };
         }
 
-        private static Func<object, object>? CreateAcessor(Type type, MemberInfo memberInfo)
+        private static Getter? CreateGetter(Type type, MemberInfo memberInfo)
         {
             var instance = Expression.Parameter(typeof(object));
-
+            var getParameters = new ParameterExpression[] { instance };
+            
+            // No need for type-checking here, we assure that this delegate is obtained after checking the instance's type
+            var unsafeCast = Expression.Call(typeof(Unsafe), nameof(Unsafe.As), new[] { type }, instance);
+        
             if (memberInfo is FieldInfo fieldInfo)
             {
-                var getBody = Expression.Convert(Expression.Field(Expression.Convert(instance, type), fieldInfo), typeof(object));
-                var getParameters = new ParameterExpression[] { instance };
-
-                return Expression.Lambda<Func<object, object>>(getBody, getParameters).Compile();
+                var getBody = Expression.Convert(Expression.Field(unsafeCast, fieldInfo), typeof(object));
+                return Expression.Lambda<Getter>(getBody, getParameters).Compile();
             }
             else if (memberInfo is PropertyInfo propertyInfo)
             {
                 var getMethod = propertyInfo.GetGetMethod(nonPublic: true);
                 if (getMethod != null)
                 {
-                    var getBody = Expression.Convert(Expression.Call(Expression.Convert(instance, type), getMethod), typeof(object));
-                    var getParameters = new ParameterExpression[] { instance };
-                    return Expression.Lambda<Func<object, object>>(getBody, getParameters).Compile();
+                    var getBody = Expression.Convert(Expression.Call(unsafeCast, getMethod), typeof(object));
+                    return Expression.Lambda<Getter>(getBody, getParameters).Compile();
                 }
             }
 
