@@ -688,7 +688,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                 return null;
             }
 
-            pub inline fn write(
+            pub fn write(
                 self: *Self,
                 value: anytype,
                 escape: Escape,
@@ -705,7 +705,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                 }
             }
 
-            pub inline fn countWrite(
+            pub fn countWrite(
                 self: *Self,
                 value: anytype,
                 escape: Escape,

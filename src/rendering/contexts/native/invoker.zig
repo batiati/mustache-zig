@@ -43,7 +43,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     path: Element.Path,
                     index: ?usize,
                 ) TError!Result {
-                    return try find(.Root, action_param, data, path, index);
+                    return find(.Root, action_param, data, path, index);
                 }
 
                 fn find(
@@ -62,9 +62,9 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                         return Result{ .lambda = try action_fn(action_param, ctx) };
                     } else {
                         if (path.len > 0) {
-                            return try recursiveFind(depth, Data, action_param, ctx, path[0], path[1..], index);
+                            return recursiveFind(depth, Data, action_param, ctx, path[0], path[1..], index);
                         } else if (index) |current_index| {
-                            return try iterateAt(Data, action_param, ctx, current_index);
+                            return iterateAt(Data, action_param, ctx, current_index);
                         } else {
                             return Result{ .field = try action_fn(action_param, ctx) };
                         }
@@ -82,9 +82,9 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 ) TError!Result {
                     const typeInfo = @typeInfo(TValue);
 
-                    switch (typeInfo) {
+                    switch (comptime typeInfo) {
                         .Struct => {
-                            return try findFieldPath(depth, TValue, action_param, data, current_path_part, next_path_parts, index);
+                            return findFieldPath(depth, TValue, action_param, data, current_path_part, next_path_parts, index);
                         },
                         .Pointer => |info| switch (info.size) {
                             .One => return try recursiveFind(depth, info.child, action_param, data, current_path_part, next_path_parts, index),
@@ -92,7 +92,11 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                                 //Slice supports the "len" field,
                                 if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
-                                    return try find(.Leaf, action_param, Fields.lenOf(data), next_path_parts, index);
+
+                                    return if (next_path_parts.len == 0)
+                                        Result{ .field = try action_fn(action_param, Fields.lenOf(data)) }
+                                    else
+                                        .chain_broken;
                                 }
                             },
 
@@ -108,7 +112,11 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                             //Slice supports the "len" field,
                             if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
-                                return try find(.Leaf, action_param, Fields.lenOf(data), next_path_parts, index);
+
+                                return if (next_path_parts.len == 0)
+                                    Result{ .field = try action_fn(action_param, Fields.lenOf(data)) }
+                                else
+                                    .chain_broken;                                
                             }
                         },
                         else => {},
@@ -284,12 +292,12 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             index: ?usize,
         ) PathResolution(Context) {
             const Get = PathInvoker(error{}, Context, getAction);
-            return try Get.call(
+            return Get.call(
                 {},
                 data,
                 path,
                 index,
-            );
+            ) catch unreachable;
         }
 
         pub inline fn interpolate(
@@ -299,7 +307,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
             const Interpolate = PathInvoker(Allocator.Error || Writer.Error, void, interpolateAction);
-            return try Interpolate.call(
+            return Interpolate.call(
                 .{ data_render, escape },
                 data,
                 path,
@@ -313,12 +321,12 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             path: Element.Path,
         ) PathResolution(usize) {
             const CapacityHint = PathInvoker(error{}, usize, capacityHintAction);
-            return try CapacityHint.call(
+            return CapacityHint.call(
                 data_render,
                 data,
                 path,
                 null,
-            );
+            ) catch unreachable;
         }
 
         pub inline fn expandLambda(
@@ -329,8 +337,8 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             delimiters: Delimiters,
             path: Element.Path,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            const ExpandLambdaAction = PathInvoker(Allocator.Error || Writer.Error, void, expandLambdaAction);
-            return try ExpandLambdaAction.call(
+            const ExpandLambda = PathInvoker(Allocator.Error || Writer.Error, void, expandLambdaAction);
+            return ExpandLambda.call(
                 .{ data_render, inner_text, escape, delimiters },
                 data,
                 path,
@@ -338,12 +346,12 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             );
         }
 
-        inline fn getAction(param: void, value: anytype) error{}!Context {
+        fn getAction(param: void, value: anytype) error{}!Context {
             _ = param;
             return RenderEngine.getContext(value);
         }
 
-        inline fn interpolateAction(
+        fn interpolateAction(
             params: anytype,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
@@ -354,7 +362,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             _ = try data_render.write(value, escape);
         }
 
-        inline fn capacityHintAction(
+        fn capacityHintAction(
             params: anytype,
             value: anytype,
         ) error{}!usize {

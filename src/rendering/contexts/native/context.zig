@@ -216,7 +216,7 @@ pub fn ContextImpl(comptime Writer: type, comptime Data: type, comptime Partials
             path: Element.Path,
             escape: Escape,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try Invoker.interpolate(
+            return Invoker.interpolate(
                 data_render,
                 ctx.get(Data),
                 path,
@@ -232,7 +232,7 @@ pub fn ContextImpl(comptime Writer: type, comptime Data: type, comptime Partials
             escape: Escape,
             delimiters: Delimiters,
         ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try Invoker.expandLambda(
+            return Invoker.expandLambda(
                 data_render,
                 ctx.get(Data),
                 inner_text,
