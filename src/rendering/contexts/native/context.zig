@@ -39,18 +39,17 @@ pub const ErasedType = struct {
             return undefined;
         } else {
 
-            // No need for cast checks here
-            // We can assure that this pointer will always be the correct type,
-            // since the context holds the type into the concrete implementation
-            @setRuntimeSafety(false);
-
             var value: Self = undefined;
+            
             if (comptime std.meta.trait.isSingleItemPtr(Data)) {
                 value.content[0] = @ptrToInt(data);
-            } else if (comptime std.meta.trait.isSlice(Data)) {
-                value.content[0] = @ptrToInt(data.ptr);
-                value.content[1] = data.len;
             } else {
+
+                // No need for cast checks here
+                // We can assure that this pointer will always be the correct type,
+                // since the context holds the type into the concrete implementation
+                @setRuntimeSafety(false);      
+
                 var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &value.content));
                 ptr.* = data;
             }
@@ -66,19 +65,15 @@ pub const ErasedType = struct {
             return undefined;
         } else {
 
-            // No need for cast checks here
-            // We can assure that this pointer will always be the correct type,
-            // since the context holds the type into the concrete implementation
-            @setRuntimeSafety(false);
-
             if (comptime std.meta.trait.isSingleItemPtr(Data)) {
                 return @intToPtr(Data, self.content[0]);
-            } else if (comptime std.meta.trait.isSlice(Data)) {
-                const Ptr = [*]std.meta.Child(Data);
-                const ptr = @intToPtr(Ptr, self.content[0]);
-                const size = self.content[1];
-                return ptr[0..size];
             } else {
+
+                // No need for cast checks here
+                // We can assure that this pointer will always be the correct type,
+                // since the context holds the type into the concrete implementation
+                @setRuntimeSafety(false);
+                                
                 const ptr = @ptrCast(*const Data, @alignCast(@alignOf(*const Data), &self.content));
                 return ptr.*;
             }
