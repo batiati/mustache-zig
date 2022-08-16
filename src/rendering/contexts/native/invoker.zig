@@ -132,7 +132,11 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             return try find(.Leaf, action_param, Fields.getField(data, field.name), next_path_parts, index);
                         }
                     } else {
-                        return try findLambdaPath(depth, TValue, action_param, data, current_path_part, next_path_parts, index);
+                        if (next_path_parts.len == 0) {
+                            return try findLambdaPath(depth, TValue, action_param, data, current_path_part);
+                        } else {
+                            return if (depth == .Root) .not_found_in_context else .chain_broken;
+                        }
                     }
                 }
 
@@ -142,8 +146,6 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     action_param: anytype,
                     data: anytype,
                     current_path_part: []const u8,
-                    next_path_parts: Element.Path,
-                    index: ?usize,
                 ) TError!Result {
                     const decls = comptime std.meta.declarations(TValue);
                     inline for (decls) |decl| {
@@ -153,7 +155,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
-                                    return try getLambda(action_param, Fields.lhs(data), bound_fn, next_path_parts, index);
+                                    return try getLambda(action_param, Fields.lhs(data), bound_fn);
                                 } else {
                                     return .chain_broken;
                                 }
@@ -168,8 +170,6 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     action_param: anytype,
                     data: anytype,
                     bound_fn: anytype,
-                    next_path_parts: Element.Path,
-                    index: ?usize,
                 ) TError!Result {
                     const TData = @TypeOf(data);
                     const TFn = @TypeOf(bound_fn);
@@ -179,21 +179,18 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     // Examples:
                     // Path: "person.lambda.address" > Returns "chain_broken"
                     // Path: "person.address.lambda" > "Resolved"
-                    if (next_path_parts.len == 0) {
-                        const Impl = if (args_len == 1) LambdaInvoker(void, TFn) else LambdaInvoker(TData, TFn);
 
-                        // TData is likely a pointer, or a primitive value (See Field.byValue)
-                        // This struct will be copied by value to the lambda context
+                    const Impl = if (args_len == 1) LambdaInvoker(void, TFn) else LambdaInvoker(TData, TFn);
 
-                        var impl = Impl{
-                            .bound_fn = bound_fn,
-                            .data = if (args_len == 1) {} else data,
-                        };
+                    // TData is likely a pointer, or a primitive value (See Field.byValue)
+                    // This struct will be copied by value to the lambda context
 
-                        return try find(.Leaf, action_param, impl, next_path_parts, index);
-                    } else {
-                        return .chain_broken;
-                    }
+                    const impl = Impl{
+                        .bound_fn = bound_fn,
+                        .data = if (args_len == 1) {} else data,
+                    };
+
+                    return Result{ .lambda = try action_fn(action_param, impl) };
                 }
 
                 fn iterateAt(
