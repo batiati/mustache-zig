@@ -92,7 +92,6 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                                 //Slice supports the "len" field,
                                 if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
-
                                     return if (next_path_parts.len == 0)
                                         Result{ .field = try action_fn(action_param, Fields.lenOf(data)) }
                                     else
@@ -112,11 +111,10 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
                             //Slice supports the "len" field,
                             if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
-
                                 return if (next_path_parts.len == 0)
                                     Result{ .field = try action_fn(action_param, Fields.lenOf(data)) }
                                 else
-                                    .chain_broken;                                
+                                    .chain_broken;
                             }
                         },
                         else => {},

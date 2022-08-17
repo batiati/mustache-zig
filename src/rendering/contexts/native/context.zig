@@ -38,9 +38,8 @@ pub const ErasedType = struct {
         if (comptime data_size == 0) {
             return undefined;
         } else {
-
             var value: Self = undefined;
-            
+
             if (comptime std.meta.trait.isSingleItemPtr(Data)) {
                 value.content[0] = @ptrToInt(data);
             } else {
@@ -48,7 +47,7 @@ pub const ErasedType = struct {
                 // No need for cast checks here
                 // We can assure that this pointer will always be the correct type,
                 // since the context holds the type into the concrete implementation
-                @setRuntimeSafety(false);      
+                @setRuntimeSafety(false);
 
                 var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &value.content));
                 ptr.* = data;
@@ -64,7 +63,6 @@ pub const ErasedType = struct {
         if (comptime data_size == 0) {
             return undefined;
         } else {
-
             if (comptime std.meta.trait.isSingleItemPtr(Data)) {
                 return @intToPtr(Data, self.content[0]);
             } else {
@@ -73,7 +71,7 @@ pub const ErasedType = struct {
                 // We can assure that this pointer will always be the correct type,
                 // since the context holds the type into the concrete implementation
                 @setRuntimeSafety(false);
-                                
+
                 const ptr = @ptrCast(*const Data, @alignCast(@alignOf(*const Data), &self.content));
                 return ptr.*;
             }

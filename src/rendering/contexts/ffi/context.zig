@@ -360,20 +360,41 @@ const context_tests = struct {
 
         id: u32,
         name: []const u8,
+        boss: ?*Person = null,
 
         pub fn get(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *extern_types.UserData) callconv(.C) extern_types.PathResolution {
             if (path.root) |root| {
-                if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
                 var path_part = root;
                 var path_value = path_part.value[0..path_part.size];
 
                 var person = getSelf(user_data_handle);
                 if (std.mem.eql(u8, path_value, "id")) {
+                    if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
                     out_value.* = Person.getUserData(&person.id);
                     return .FIELD;
                 } else if (std.mem.eql(u8, path_value, "name")) {
+                    if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
                     out_value.* = Person.getUserData(person.name.ptr);
                     return .FIELD;
+                } else if (std.mem.eql(u8, path_value, "boss")) {
+                    if (path.has_index) {
+                        if (person.boss == null or path.index > 0) return .ITERATOR_CONSUMED;
+                    } else if (person.boss == null) {
+                        return .CHAIN_BROKEN;
+                    }
+
+                    if (root.next == null) {
+                        out_value.* = Person.getUserData(person.boss.?);
+                        return .FIELD;
+                    } else {
+                        var next_path = extern_types.Path{
+                            .root = root.next,
+                            .index = path.index,
+                            .has_index = path.has_index,
+                        };
+
+                        return get(person.boss.?, &next_path, out_value);
+                    }
                 }
             }
 
@@ -382,48 +403,77 @@ const context_tests = struct {
 
         pub fn capacityHint(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *u32) callconv(.C) extern_types.PathResolution {
             if (path.root) |root| {
-                if (root.next == null) {
-                    var path_part = root;
-                    var path_value = path_part.value[0..path_part.size];
+                var path_part = root;
+                var path_value = path_part.value[0..path_part.size];
 
-                    var person = getSelf(user_data_handle);
+                var person = getSelf(user_data_handle);
 
-                    if (std.mem.eql(u8, path_value, "id")) {
-                        out_value.* = @intCast(u32, std.fmt.count("{}", .{person.id}));
+                if (std.mem.eql(u8, path_value, "id")) {
+                    if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
+                    out_value.* = @intCast(u32, std.fmt.count("{}", .{person.id}));
+                    return .FIELD;
+                } else if (std.mem.eql(u8, path_value, "name")) {
+                    if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
+                    out_value.* = @intCast(u32, person.name.len);
+                    return .FIELD;
+                } else if (std.mem.eql(u8, path_value, "boss")) {
+                    if (person.boss == null) return .CHAIN_BROKEN;
+                    if (root.next == null) {
+                        out_value.* = 0;
                         return .FIELD;
-                    } else if (std.mem.eql(u8, path_value, "name")) {
-                        out_value.* = @intCast(u32, person.name.len);
-                        return .FIELD;
+                    } else {
+                        var next_path = extern_types.Path{
+                            .root = root.next,
+                            .index = path.index,
+                            .has_index = path.has_index,
+                        };
+
+                        return capacityHint(person.boss.?, &next_path, out_value);
                     }
                 }
             }
+
             return .NOT_FOUND_IN_CONTEXT;
         }
 
         pub fn interpolate(writer_handle: extern_types.WriterHandle, writer_fn: extern_types.WriteFn, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolution {
             if (path.root) |root| {
-                if (root.next == null) {
-                    var path_part = root;
-                    var path_value = path_part.value[0..path_part.size];
+                var path_part = root;
+                var path_value = path_part.value[0..path_part.size];
 
-                    // Using the FFI external function to interpolate,
-                    // Just like a foreign language would do.
+                // Using the FFI external function to interpolate,
+                // Just like a foreign language would do.
 
-                    var person = getSelf(user_data_handle);
+                var person = getSelf(user_data_handle);
 
-                    if (std.mem.eql(u8, path_value, "id")) {
-                        var buffer: [64]u8 = undefined;
-                        var len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
+                if (std.mem.eql(u8, path_value, "id")) {
+                    if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
+                    var buffer: [64]u8 = undefined;
+                    var len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
 
-                        var ret = writer_fn(writer_handle, &buffer, @intCast(u32, len));
-                        if (ret != .SUCCESS) return .CHAIN_BROKEN;
+                    var ret = writer_fn(writer_handle, &buffer, @intCast(u32, len));
+                    if (ret != .SUCCESS) return .CHAIN_BROKEN;
 
+                    return .FIELD;
+                } else if (std.mem.eql(u8, path_value, "name")) {
+                    if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
+
+                    var ret = writer_fn(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
+                    if (ret != .SUCCESS) return .CHAIN_BROKEN;
+
+                    return .FIELD;
+                } else if (std.mem.eql(u8, path_value, "boss")) {
+                    if (person.boss == null) return .CHAIN_BROKEN;
+                    if (root.next == null) {
                         return .FIELD;
-                    } else if (std.mem.eql(u8, path_value, "name")) {
-                        var ret = writer_fn(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
-                        if (ret != .SUCCESS) return .CHAIN_BROKEN;
+                    } else {
+                        var next_path = extern_types.Path{
+                            .root = root.next,
+                            .index = path.index,
+                            .has_index = path.has_index,
+                        };
 
-                        return .FIELD;
+                        return interpolate(writer_handle, writer_fn, person.boss.?, &next_path);
                     }
                 }
             }
@@ -500,6 +550,59 @@ const context_tests = struct {
         try testing.expectEqual(@ptrToInt(person.name.ptr), @ptrToInt(name_ctx.user_data.handle));
     }
 
+    test "FFI context get children" {
+        const allocator = testing.allocator;
+
+        var person = Person{
+            .id = 100,
+            .name = "Angus McGyver",
+        };
+
+        var next_person = Person{
+            .id = 101,
+            .name = "Peter Thornton",
+        };
+
+        person.boss = &next_person;
+
+        var user_data = Person.getUserData(&person);
+        var person_ctx = DummyRenderEngine.getContext(user_data);
+
+        var id_ctx = id_ctx: {
+            const path = try expectPath(allocator, "boss.id");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (person_ctx.get(path, null)) {
+                .field => |found| break :id_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
+        };
+
+        // Expects that the context was set with the field address
+        // The context can be set with any value, this test sets a pointer
+        try testing.expectEqual(@ptrToInt(&person.boss.?.id), @ptrToInt(id_ctx.user_data.handle));
+
+        var name_ctx = name_ctx: {
+            const path = try expectPath(allocator, "boss.name");
+            defer Element.destroyPath(allocator, false, path);
+
+            switch (person_ctx.get(path, null)) {
+                .field => |found| break :name_ctx found,
+                else => {
+                    try testing.expect(false);
+                    unreachable;
+                },
+            }
+        };
+
+        // Expects that the context was set with the field address
+        // The context can be set with any value, this test sets a pointer
+        try testing.expectEqual(@ptrToInt(person.boss.?.name.ptr), @ptrToInt(name_ctx.user_data.handle));
+    }
+
     test "FFI Write" {
         const allocator = testing.allocator;
         var list = std.ArrayList(u8).init(allocator);
@@ -526,18 +629,117 @@ const context_tests = struct {
         list.clearAndFree();
     }
 
+    test "FFI Write children" {
+        const allocator = testing.allocator;
+        var list = std.ArrayList(u8).init(allocator);
+        defer list.deinit();
+
+        var person = Person{
+            .id = 100,
+            .name = "Angus McGyver",
+        };
+
+        var next_person = Person{
+            .id = 101,
+            .name = "Peter Thornton",
+        };
+
+        person.boss = &next_person;
+        var user_data = Person.getUserData(&person);
+        var person_ctx = DummyRenderEngine.getContext(user_data);
+
+        var writer = list.writer();
+
+        try interpolateCtx(writer, person_ctx, "boss.id", .Unescaped);
+        try testing.expectEqualStrings("101", list.items);
+
+        list.clearAndFree();
+
+        try interpolateCtx(writer, person_ctx, "boss.name", .Unescaped);
+        try testing.expectEqualStrings("Peter Thornton", list.items);
+
+        list.clearAndFree();
+    }
+
     test "FFI Render" {
         const allocator = testing.allocator;
 
         var person = Person{
-            .id = 42,
-            .name = "Peter",
+            .id = 100,
+            .name = "Angus McGyver",
         };
 
+        const template_text = "Hello {{name}}, your Id is {{id}}";
+        const expected_text = "Hello Angus McGyver, your Id is 100";
+
         var user_data = Person.getUserData(&person);
-        var text = try mustache.allocRenderText(allocator, "Hello {{name}}, your Id is {{id}}", user_data);
+        var text = try mustache.allocRenderText(allocator, template_text, user_data);
         defer allocator.free(text);
 
-        try testing.expectEqualStrings("Hello Peter, your Id is 42", text);
+        try testing.expectEqualStrings(expected_text, text);
+    }
+
+    test "FFI children render" {
+        const allocator = testing.allocator;
+
+        var person = Person{
+            .id = 100,
+            .name = "Angus McGyver",
+        };
+
+        var next_person = Person{
+            .id = 101,
+            .name = "Peter Thornton",
+        };
+
+        person.boss = &next_person;
+
+        const template_text =
+            \\Hello {{name}}, your Id is {{id}}
+            \\your boss is {{boss.name}}, Id {{boss.id}}
+        ;
+
+        const expected_text =
+            \\Hello Angus McGyver, your Id is 100
+            \\your boss is Peter Thornton, Id 101
+        ;
+
+        var user_data = Person.getUserData(&person);
+        var text = try mustache.allocRenderText(allocator, template_text, user_data);
+        defer allocator.free(text);
+
+        try testing.expectEqualStrings(expected_text, text);
+    }
+
+    test "FFI Section render" {
+        const allocator = testing.allocator;
+
+        var person = Person{
+            .id = 100,
+            .name = "Angus McGyver",
+        };
+
+        var next_person = Person{
+            .id = 101,
+            .name = "Peter Thornton",
+        };
+
+        person.boss = &next_person;
+
+        const template_text =
+            \\Hello {{name}}, your Id is {{id}}
+            \\your boss is {{#boss}}{{name}}, Id {{id}}{{/boss}}
+        ;
+
+        const expected_text =
+            \\Hello Angus McGyver, your Id is 100
+            \\your boss is Peter Thornton, Id 101
+        ;
+
+        var user_data = Person.getUserData(&person);
+        var text = try mustache.allocRenderText(allocator, template_text, user_data);
+        defer allocator.free(text);
+
+        try testing.expectEqualStrings(expected_text, text);
     }
 };
