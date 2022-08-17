@@ -11,11 +11,11 @@ const RenderOptions = mustache.options.RenderOptions;
 
 /// Partials map from a comptime known type
 /// It works like a HashMap, but can be initialized from a tuple, slice or Hashmap
-pub fn PartialsMap(comptime TPartials: type, comptime options: RenderOptions) type {
+pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOptions) type {
     return struct {
         const Self = @This();
 
-        pub const options: RenderOptions = options;
+        pub const options: RenderOptions = comptime_options;
 
         pub const Template = switch (options) {
             .template => mustache.Template,

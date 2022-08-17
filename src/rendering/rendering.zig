@@ -427,11 +427,11 @@ fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: an
 }
 
 /// Group functions and structs that are denpendent of Writer and RenderOptions
-pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, comptime TPartialsMap: type, comptime options: RenderOptions) type {
     return struct {
         pub const Context = context.Context(context_type, Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
-        pub const PartialsMap = PartialsMap;
+        pub const PartialsMap = TPartialsMap;
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
 
         /// Provides the ability to choose between two writers
