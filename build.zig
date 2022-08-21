@@ -25,7 +25,7 @@ pub fn build(b: *std.build.Builder) void {
         inline for (.{ .dynamic, .static }) |linkage| {
 
             // Appends the name "lib" on windows, in order to generate the same name "libmustache" for all platforms
-            const lib_name = (if (std.mem.startsWith(u8, platform[1], "win")) "lib" else "") ++ "mustache";
+            const lib_name = comptime (if (std.mem.startsWith(u8, platform[1], "win")) "lib" else "") ++ "mustache";
 
             const dynamic_lib = b.addStaticLibrary(lib_name, "src/exports.zig");
             dynamic_lib.linkage = linkage;
