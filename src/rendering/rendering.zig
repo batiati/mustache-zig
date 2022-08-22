@@ -539,7 +539,8 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
-                            if (self.getIterator(section.path)) |*iterator| {
+                            var resolve_path = self.getIterator(section.path);
+                            if (resolve_path) |*iterator| {
                                 if (self.lambdasSupported()) {
                                     if (iterator.lambda()) |lambda_ctx| {
                                         assert(section.inner_text != null);
@@ -549,8 +550,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                                         assert(expand_result == .lambda);
                                         continue;
                                     }
-                                }
-
+                                }                                
                                 while (iterator.next()) |item_ctx| {
                                     const current_level = self.stack;
                                     const next_level = ContextStack{
@@ -866,7 +866,8 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
-                            if (self.getIterator(section.path)) |*iterator| {
+                            var resolve_path = self.getIterator(section.path);
+                            if (resolve_path) |*iterator| {
                                 while (iterator.next()) |item_ctx| {
                                     const current_level = self.stack;
                                     const next_level = ContextStack{
@@ -1086,7 +1087,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
     };
 }
 
-const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
+const comptime_tests_enabled = false; //@import("build_comptime_tests").comptime_tests_enabled;
 
 test {
     _ = context;

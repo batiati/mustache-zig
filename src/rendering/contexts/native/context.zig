@@ -95,10 +95,10 @@ pub fn ContextInterface(comptime Writer: type, comptime PartialsMap: type, compt
         };
 
         const VTable = struct {
-            get: fn (*const ErasedType, Element.Path, ?usize) PathResolution(Self),
-            capacityHint: fn (*const ErasedType, *DataRender, Element.Path) PathResolution(usize),
-            interpolate: fn (*const ErasedType, *DataRender, Element.Path, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: fn (*const ErasedType, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            get: *const fn (*const ErasedType, Element.Path, ?usize) PathResolution(Self),
+            capacityHint: *const fn (*const ErasedType, *DataRender, Element.Path) PathResolution(usize),
+            interpolate: *const fn (*const ErasedType, *DataRender, Element.Path, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
+            expandLambda: *const fn (*const ErasedType, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = ContextIterator(Self);

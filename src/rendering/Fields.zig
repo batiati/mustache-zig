@@ -254,7 +254,7 @@ fn FieldRef(comptime T: type, comptime field_name: []const u8) type {
             return FieldRef(meta.Child(T), field_name);
         } else {
             const instance: T = undefined;
-            return @TypeOf(if (byValue(TField)) @field(instance, field_name) else &@field(instance, field_name));
+            return if (byValue(TField)) @TypeOf(@field(instance, field_name)) else @TypeOf(&@field(instance, field_name));
         }
     }
 }

@@ -196,9 +196,9 @@ pub const LambdaContext = struct {
     inner_text: []const u8,
 
     pub const VTable = struct {
-        renderAlloc: fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
-        render: fn (*const anyopaque, Allocator, []const u8) anyerror!void,
-        write: fn (*const anyopaque, []const u8) anyerror!usize,
+        renderAlloc: *const fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
+        render: *const fn (*const anyopaque, Allocator, []const u8) anyerror!void,
+        write: *const fn (*const anyopaque, []const u8) anyerror!usize,
     };
 
     /// Renders a template against the current context
