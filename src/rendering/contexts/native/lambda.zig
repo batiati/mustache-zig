@@ -95,7 +95,7 @@ pub fn isLambdaInvoker(comptime TValue: type) bool {
             @hasField(TValue, "data") and
             @hasField(TValue, "bound_fn") and
             blk: {
-            const TFn = meta.fieldInfo(TValue, .bound_fn).field_type;
+            const TFn = meta.Child(meta.fieldInfo(TValue, .bound_fn).field_type);
             const TData = meta.fieldInfo(TValue, .data).field_type;
 
             break :blk comptime isValidLambdaFunction(TData, TFn) and
@@ -235,7 +235,7 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
     return struct {
         const Self = @This();
 
-        bound_fn: TFn,
+        bound_fn: *const TFn,
         data: TData,
 
         pub fn invoke(self: *const Self, lambda_context: LambdaContext) anyerror!void {
