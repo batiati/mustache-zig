@@ -190,7 +190,8 @@ pub fn byValue(comptime TField: type) bool {
         ++ @typeName(TField));
 
         const max_size = @sizeOf(ErasedType);
-        const is_zero_size = @sizeOf(TField) == 0;
+        const size = if (TField == @TypeOf(null)) 0 else @sizeOf(TField);
+        const is_zero_size = size == 0;
 
         const is_pointer = trait.isSlice(TField) or
             trait.isSingleItemPtr(TField);
@@ -199,9 +200,9 @@ pub fn byValue(comptime TField: type) bool {
 
         const is_ffi_userdata = TField == extern_types.UserData;
 
-        const is_lambda_invoker = @sizeOf(TField) <= max_size and lambda.isLambdaInvoker(TField);
+        const is_lambda_invoker = size <= max_size and lambda.isLambdaInvoker(TField);
 
-        const can_embed = @sizeOf(TField) <= max_size and
+        const can_embed = size <= max_size and
             (trait.is(.Enum)(TField) or
             trait.is(.EnumLiteral)(TField) or
             TField == bool or
