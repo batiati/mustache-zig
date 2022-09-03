@@ -88,7 +88,8 @@ pub fn Node(comptime options: TemplateOptions) type {
                     }
                 }
 
-                if (text_part.trimRight()) |*indentation| {
+                var maybe_indentation = text_part.trimRight();
+                if (maybe_indentation) |*indentation| {
                     if (self.index == nodes.items.len - 1) {
                         // The last tag can't produce any meaningful indentation, so we discard it
                         indentation.ref_counter.unRef(allocator);

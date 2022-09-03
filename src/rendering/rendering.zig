@@ -550,7 +550,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                                         assert(expand_result == .lambda);
                                         continue;
                                     }
-                                }                                
+                                }
                                 while (iterator.next()) |item_ctx| {
                                     const current_level = self.stack;
                                     const next_level = ContextStack{
