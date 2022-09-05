@@ -28,7 +28,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
     const DataRender = RenderEngine.DataRender;
 
     return struct {
-        fn PathInvoker(comptime TError: type, TReturn: type, comptime action_fn: anytype) type {
+        fn PathInvoker(comptime TError: type, comptime TReturn: type, comptime action_fn: anytype) type {
             const action_type_info = @typeInfo(@TypeOf(action_fn));
             if (action_type_info != .Fn) @compileError("action_fn must be a function");
 

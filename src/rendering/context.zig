@@ -248,7 +248,7 @@ pub const LambdaContext = struct {
     }
 
     fn writeFn(self: LambdaContext, bytes: []const u8) anyerror!usize {
-        return try return self.vtable.write(self.ptr, bytes);
+        return try self.vtable.write(self.ptr, bytes);
     }
 };
 
