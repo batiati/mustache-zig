@@ -129,10 +129,8 @@ pub fn Parser(comptime options: TemplateOptions) type {
                 };
             }
 
-            while (true) {
-                
-                var text_part = (try self.inner_state.text_scanner.next(self.gpa)) orelse break;
-
+            var produced_text_part: ?TextPart = try self.inner_state.text_scanner.next(self.gpa);
+            while (produced_text_part) |*text_part| : (produced_text_part = try self.inner_state.text_scanner.next(self.gpa)) {
                 switch (text_part.part_type) {
                     .static_text => {
                         // TODO: Static text must be ignored if inside a "parent" tag
@@ -150,10 +148,10 @@ pub fn Parser(comptime options: TemplateOptions) type {
                     .delimiters => {
                         defer if (options.isRefCounted()) text_part.unRef(self.gpa);
 
-                        current_delimiters = text_part.parseDelimiters() orelse return self.abort(ParseError.InvalidDelimiters, &text_part);
+                        current_delimiters = text_part.parseDelimiters() orelse return self.abort(ParseError.InvalidDelimiters, text_part);
 
                         self.inner_state.text_scanner.setDelimiters(current_delimiters) catch |err| {
-                            return self.abort(err, &text_part);
+                            return self.abort(err, text_part);
                         };
 
                         self.checkIfLastNodeCanBeStandAlone(text_part.part_type);
@@ -165,15 +163,15 @@ pub fn Parser(comptime options: TemplateOptions) type {
                         defer if (options.isRefCounted()) text_part.unRef(self.gpa);
 
                         if (level == 0 or initial_index == 0) {
-                            return self.abort(ParseError.UnexpectedCloseSection, &text_part);
+                            return self.abort(ParseError.UnexpectedCloseSection, text_part);
                         }
 
                         var open_node: *Node = &nodes.items[initial_index - 1];
-                        const open_identifier = open_node.identifier orelse return self.abort(ParseError.UnexpectedCloseSection, &text_part);
-                        const close_identifier = (try self.parseIdentifier(&text_part)) orelse unreachable;
+                        const open_identifier = open_node.identifier orelse return self.abort(ParseError.UnexpectedCloseSection, text_part);
+                        const close_identifier = (try self.parseIdentifier(text_part)) orelse unreachable;
 
                         if (!std.mem.eql(u8, open_identifier, close_identifier)) {
-                            return self.abort(ParseError.ClosingTagMismatch, &text_part);
+                            return self.abort(ParseError.ClosingTagMismatch, text_part);
                         }
 
                         open_node.children_count = @intCast(u32, nodes.items.len - initial_index);
@@ -196,8 +194,8 @@ pub fn Parser(comptime options: TemplateOptions) type {
                     const index = @intCast(u32, nodes.items.len);
                     const node = Node{
                         .index = index,
-                        .identifier = try self.parseIdentifier(&text_part),
-                        .text_part = text_part,
+                        .identifier = try self.parseIdentifier(text_part),
+                        .text_part = text_part.*,
                         .delimiters = current_delimiters,
                     };
 
@@ -502,7 +500,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
     };
 }
 
-const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
+const comptime_tests_enabled = false; // @import("build_comptime_tests").comptime_tests_enabled;
 fn TesterParser(comptime load_mode: TemplateLoadMode) type {
     return Parser(.{ .source = .{ .string = .{} }, .output = .render, .load_mode = load_mode });
 }

@@ -35,7 +35,6 @@ pub const ParseResult = union(enum) {
 };
 
 pub const Element = union(enum) {
-
     /// Static text
     static_text: []const u8,
 
