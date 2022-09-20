@@ -2394,7 +2394,6 @@ const tests = struct {
                     for (string) |char| {
                         prev_char = prev_char +% char;
                     }
-                    _ = prev_char;
                 }
 
                 fn scanPath(value: Element.Path) void {
