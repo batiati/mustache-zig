@@ -132,11 +132,12 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
         else => return false,
     };
 
-    //TODO: deprecated
-    const Type = std.builtin.TypeInfo;
+    //TODO: deprecated in master, but still valid in 0.9.1
+    const Type = if (@hasDecl(std.builtin, "Type")) std.builtin.Type else std.builtin.TypeInfo;
+    const FnParam = if (@hasDecl(std.builtin, "Type")) Type.Fn.Param else Type.FnArg;
 
     const argIs = struct {
-        fn action(comptime arg: Type.FnArg, comptime types: []const type) bool {
+        fn action(comptime arg: FnParam, comptime types: []const type) bool {
             inline for (types) |compare_to| {
                 if (arg.arg_type) |arg_type| {
                     if (arg_type == compare_to) return true;
