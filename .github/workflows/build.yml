@@ -40,7 +40,7 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v1
         with:
-          version: master
+          version: 0.10.0
 
       - name: Download kcov
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.comptime == false }}
