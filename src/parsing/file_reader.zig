@@ -51,7 +51,7 @@ pub fn FileReader(comptime options: TemplateOptions) type {
                 const full_size = prepend.len + size;
 
                 assert(full_size < buffer.len);
-                buffer = allocator.shrink(buffer, full_size);
+                buffer = try allocator.realloc(buffer, full_size);
                 self.eof = true;
             } else {
                 self.eof = false;

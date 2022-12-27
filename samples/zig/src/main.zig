@@ -43,10 +43,10 @@ var ctx = .{
 pub fn main() anyerror!void {
     try renderFromString();
     try renderFromJson();
-    try renderComptimeTemplate();
+    //try renderComptimeTemplate();
     try renderFromCachedTemplate();
     try renderFromFile();
-    try renderComptimePartialTemplate();
+    //try renderComptimePartialTemplate();
 }
 
 /// Render a template from a string

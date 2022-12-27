@@ -67,7 +67,7 @@ pub fn build(b: *std.build.Builder) void {
     // Tests
 
     var comptime_tests = b.addOptions();
-    const comptime_tests_enabled = b.option(bool, "comptime-tests", "Run comptime tests") orelse true;
+    const comptime_tests_enabled = b.option(bool, "comptime-tests", "Run comptime tests") orelse false;
     comptime_tests.addOption(bool, "comptime_tests_enabled", comptime_tests_enabled);
 
     {

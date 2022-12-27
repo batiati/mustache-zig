@@ -1696,14 +1696,14 @@ const tests = struct {
                 const expected = "";
 
                 {
-                    var data = .{ .@"null" = null };
+                    var data = .{ .null = null };
 
                     try expectRender(template_text, data, expected);
                 }
 
                 {
-                    const Data = struct { @"null": ?[]i32 };
-                    var data = Data{ .@"null" = null };
+                    const Data = struct { null: ?[]i32 };
+                    var data = Data{ .null = null };
 
                     try expectRender(template_text, data, expected);
                 }
@@ -2403,14 +2403,14 @@ const tests = struct {
 
                 {
                     // comptime
-                    var data = .{ .@"null" = null };
+                    var data = .{ .null = null };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // runtime
-                    const Data = struct { @"null": ?u0 };
-                    var data = Data{ .@"null" = null };
+                    const Data = struct { null: ?u0 };
+                    var data = Data{ .null = null };
                     try expectRender(template_text, data, expected);
                 }
             }
@@ -2740,20 +2740,20 @@ const tests = struct {
 
             // Delimiters set in a parent template should not affect a partial.
             test "Partial Inheritence" {
-                const template_text =
+                const template_text: []const u8 =
                     \\[ {{>include}} ]
                     \\{{= | | =}}
                     \\[ |>include| ]
                 ;
 
-                const partials_text = .{
+                const partials_text = [_]struct { []const u8, []const u8 }{
                     .{
                         "include",
                         ".{{value}}.",
                     },
                 };
 
-                const expected =
+                const expected: []const u8 =
                     \\[ .yes. ]
                     \\[ .yes. ]
                 ;
@@ -2764,19 +2764,19 @@ const tests = struct {
 
             // Delimiters set in a partial should not affect the parent template.
             test "Post-Partial Behavior" {
-                const template_text =
+                const template_text: []const u8 =
                     \\[ {{>include}} ]
                     \\[ .{{value}}.  .|value|. ]
                 ;
 
-                const partials_text = .{
+                const partials_text = [_]struct { []const u8, []const u8 }{
                     .{
                         "include",
                         ".{{value}}. {{= | | =}} .|value|.",
                     },
                 };
 
-                const expected =
+                const expected: []const u8 =
                     \\[ .yes.  .yes. ]
                     \\[ .yes.  .|value|. ]
                 ;
@@ -3040,12 +3040,12 @@ const tests = struct {
 
             // The greater-than operator should expand to the named partial.
             test "Basic Behavior" {
-                const template_text = "'{{>text}}'";
-                const partials_template_text = .{
+                const template_text: []const u8 = "'{{>text}}'";
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
                     .{ "text", "from partial" },
                 };
 
-                const expected = "'from partial'";
+                const expected: []const u8 = "'from partial'";
 
                 var data = .{};
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
@@ -3064,12 +3064,15 @@ const tests = struct {
 
             // The greater-than operator should operate within the current context.
             test "Context" {
-                const template_text = "'{{>partial}}'";
-                const partials_template_text = .{
-                    .{ "partial", "*{{text}}*" },
+                const template_text: []const u8 = "'{{>partial}}'";
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                    .{
+                        "partial",
+                        "*{{text}}*",
+                    },
                 };
 
-                const expected = "'*content*'";
+                const expected: []const u8 = "'*content*'";
 
                 var data = .{ .text = "content" };
 
@@ -3083,12 +3086,15 @@ const tests = struct {
                     nodes: []const @This(),
                 };
 
-                const template_text = "{{>node}}";
-                const partials_template_text = .{
-                    .{ "node", "{{content}}<{{#nodes}}{{>node}}{{/nodes}}>" },
+                const template_text: []const u8 = "{{>node}}";
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                    .{
+                        "node",
+                        "{{content}}<{{#nodes}}{{>node}}{{/nodes}}>",
+                    },
                 };
 
-                const expected = "X<Y<>>";
+                const expected: []const u8 = "X<Y<>>";
 
                 var data = Content{ .content = "X", .nodes = &.{Content{ .content = "Y", .nodes = &.{} }} };
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
@@ -3097,7 +3103,7 @@ const tests = struct {
             // The greater-than operator should not alter surrounding whitespace.
             test "Surrounding Whitespace" {
                 const template_text = "| {{>partial}} |";
-                const partials_template_text = .{
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
                     .{ "partial", "\t|\t" },
                 };
 
@@ -3110,7 +3116,7 @@ const tests = struct {
             // Whitespace should be left untouched.
             test "Inline Indentation" {
                 const template_text = "  {{data}}  {{> partial}}\n";
-                const partials_template_text = .{
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
                     .{ "partial", ">\n>" },
                 };
 
@@ -3123,7 +3129,7 @@ const tests = struct {
             // "\r\n" should be considered a newline for standalone tags.
             test "Standalone Line Endings" {
                 const template_text = "|\r\n{{>partial}}\r\n|";
-                const partials_template_text = .{
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
                     .{ "partial", ">" },
                 };
 
@@ -3136,7 +3142,7 @@ const tests = struct {
             // Standalone tags should not require a newline to precede them.
             test "Standalone Without Previous Line" {
                 const template_text = "  {{>partial}}\n>";
-                const partials_template_text = .{
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
                     .{ "partial", ">\n>" },
                 };
 
@@ -3149,7 +3155,7 @@ const tests = struct {
             // Standalone tags should not require a newline to follow them.
             test "Standalone Without Newline" {
                 const template_text = ">\n  {{>partial}}";
-                const partials_template_text = .{
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
                     .{ "partial", ">\n>" },
                 };
 
@@ -3168,14 +3174,13 @@ const tests = struct {
                     \\
                 ;
 
-                const partials_template_text = .{
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
                     .{
                         "partial",
                         \\|
                         \\{{{content}}}
                         \\|
                         \\
-                        ,
                     },
                 };
 
@@ -3195,12 +3200,12 @@ const tests = struct {
 
             // Superfluous in-tag whitespace should be ignored.
             test "Padding Whitespace" {
-                const template_text = "|{{> partial }}|";
-                const partials_template_text = .{
+                const template_text: []const u8 = "|{{> partial }}|";
+                const partials_template_text = [_]struct { []const u8, []const u8 }{
                     .{ "partial", "[]" },
                 };
 
-                const expected = "|[]|";
+                const expected: []const u8 = "|[]|";
 
                 var data = .{ .boolean = true };
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
@@ -3462,13 +3467,13 @@ const tests = struct {
         }
 
         test "Nested partials with indentation" {
-            const template_text =
+            const template_text: []const u8 =
                 \\BOF
                 \\  {{>todo}}
                 \\EOF
             ;
 
-            const partials = .{
+            const partials = [_]struct { []const u8, []const u8 }{
                 .{
                     "todo",
                     \\My tasks
@@ -3493,7 +3498,7 @@ const tests = struct {
                 },
             };
 
-            const expected =
+            const expected: []const u8 =
                 \\BOF
                 \\  My tasks
                 \\    |id |desc    |

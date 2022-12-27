@@ -89,7 +89,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
             self.inner_state.text_scanner.nodes = nodes;
 
             if (is_comptime) {
-                var buffer: [comptime_count.nodes]Node = undefined;
+                comptime var buffer: [comptime_count.nodes]Node = undefined;
                 nodes.items.ptr = &buffer;
                 nodes.items.len = 0;
                 nodes.capacity = buffer.len;
@@ -373,7 +373,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                 }
             }
 
-            const elements = if (options.output == .render or options.load_mode == .comptime_loaded) list.items else list.toOwnedSlice(self.gpa);
+            const elements = if (options.output == .render or options.load_mode == .comptime_loaded) list.items else try list.toOwnedSlice(self.gpa);
             try render.render(elements);
         }
 

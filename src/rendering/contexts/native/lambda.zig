@@ -95,8 +95,8 @@ pub fn isLambdaInvoker(comptime TValue: type) bool {
             @hasField(TValue, "data") and
             @hasField(TValue, "bound_fn") and
             blk: {
-            const TFn = meta.Child(meta.fieldInfo(TValue, .bound_fn).field_type);
-            const TData = meta.fieldInfo(TValue, .data).field_type;
+            const TFn = meta.Child(meta.fieldInfo(TValue, .bound_fn).type);
+            const TData = meta.fieldInfo(TValue, .data).type;
 
             break :blk comptime isValidLambdaFunction(TData, TFn) and
                 TValue == LambdaInvoker(TData, TFn);
@@ -133,14 +133,14 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
     };
 
     //TODO: deprecated in master, but still valid in 0.9.1
-    const Type = if (@hasDecl(std.builtin, "Type")) std.builtin.Type else std.builtin.TypeInfo;
-    const FnParam = if (@hasDecl(std.builtin, "Type")) Type.Fn.Param else Type.FnArg;
+    const Type = std.builtin.Type;
+    const FnParam = Type.Fn.Param;
 
-    const argIs = struct {
-        fn action(comptime arg: FnParam, comptime types: []const type) bool {
+    const paramIs = struct {
+        fn action(comptime param: FnParam, comptime types: []const type) bool {
             inline for (types) |compare_to| {
-                if (arg.arg_type) |arg_type| {
-                    if (arg_type == compare_to) return true;
+                if (param.type) |param_type| {
+                    if (param_type == compare_to) return true;
                 }
             } else {
                 return false;
@@ -150,9 +150,9 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
 
     const TValue = if (comptime meta.trait.isSingleItemPtr(TData)) meta.Child(TData) else TData;
 
-    const valid_args = comptime switch (fn_info.args.len) {
-        1 => argIs(fn_info.args[0], &.{LambdaContext}),
-        2 => argIs(fn_info.args[0], &.{ TValue, *const TValue, *TValue }) and argIs(fn_info.args[1], &.{LambdaContext}),
+    const valid_params = comptime switch (fn_info.params.len) {
+        1 => paramIs(fn_info.params[0], &.{LambdaContext}),
+        2 => paramIs(fn_info.params[0], &.{ TValue, *const TValue, *TValue }) and paramIs(fn_info.params[1], &.{LambdaContext}),
         else => false,
     };
 
@@ -162,7 +162,7 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
         else => false,
     } else false;
 
-    return valid_args and valid_return;
+    return valid_params and valid_return;
 }
 
 test "isValidLambdaFunction" {
@@ -258,7 +258,7 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
                 // fn(self TValue ...)
                 // fn(self *const TValue ...)
                 // fn(self *TValue ...)
-                const fnArg = fn_type.args[0].arg_type orelse @compileError("Generic argument could not be evaluated");
+                const fnArg = fn_type.params[0].type orelse @compileError("Generic argument could not be evaluated");
 
                 switch (@typeInfo(TData)) {
                     .Pointer => |info| {
@@ -328,9 +328,9 @@ pub fn LambdaInvoker(comptime TData: type, comptime TFn: type) type {
             const has_error = @typeInfo(return_type) == .ErrorUnion;
 
             if (has_error)
-                try @call(.{}, self.bound_fn, args)
+                try @call(.auto, self.bound_fn, args)
             else
-                @call(.{}, self.bound_fn, args);
+                @call(.auto, self.bound_fn, args);
         }
     };
 }

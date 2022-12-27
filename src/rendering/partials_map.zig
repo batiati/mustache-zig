@@ -117,7 +117,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
                         return true;
                     } else {
                         inline for (meta.fields(TPartials)) |field| {
-                            if (!isPartialsTupleElement(field.field_type)) {
+                            if (!isPartialsTupleElement(field.type)) {
                                 return false;
                             }
                         } else {
@@ -149,11 +149,11 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
             comptime {
                 if (trait.isTuple(TElement)) {
                     const fields = meta.fields(TElement);
-                    if (fields.len == 2 and trait.isZigString(fields[0].field_type)) {
-                        if (fields[1].field_type == Self.Template) {
+                    if (fields.len == 2 and trait.isZigString(fields[0].type)) {
+                        if (fields[1].type == Self.Template) {
                             return true;
                         } else {
-                            return trait.isZigString(fields[1].field_type) and trait.isZigString(Self.Template);
+                            return trait.isZigString(fields[1].type) and trait.isZigString(Self.Template);
                         }
                     }
                 }
@@ -180,6 +180,24 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 }
 
 test "Map single tuple" {
+    const key: []const u8 = "hello";
+    const value: []const u8 = "{{hello}}world";
+    var data = .{ key, value };
+
+    const dummy_options = RenderOptions{ .string = .{} };
+    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    var map = DummyMap.init(testing.allocator, data);
+
+    const hello = map.get("hello");
+    try testing.expect(hello != null);
+    try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+    try testing.expect(map.get("wrong") == null);
+}
+
+test "Map single tuple - comptime value" {
+    // TODO: Compiler segfaul
+    if (true) return error.SkipZigTest;
     var data = .{ "hello", "{{hello}}world" };
 
     const dummy_options = RenderOptions{ .string = .{} };
@@ -210,6 +228,31 @@ test "Map void" {
 }
 
 test "Map multiple tuple" {
+    const Tuple = struct { []const u8, []const u8 };
+    const Data = struct { Tuple, Tuple };
+    var data: Data = .{
+        .{ "hello", "{{hello}}world" },
+        .{ "hi", "{{hi}}there" },
+    };
+
+    const dummy_options = RenderOptions{ .string = .{} };
+    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    var map = DummyMap.init(testing.allocator, data);
+
+    const hello = map.get("hello");
+    try testing.expect(hello != null);
+    try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+    const hi = map.get("hi");
+    try testing.expect(hi != null);
+    try testing.expectEqualStrings("{{hi}}there", hi.?);
+
+    try testing.expect(map.get("wrong") == null);
+}
+
+test "Map multiple tuple comptime" {
+    // TODO: Compiler segfaul
+    if (true) return error.SkipZigTest;
     var data = .{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
@@ -231,9 +274,7 @@ test "Map multiple tuple" {
 }
 
 test "Map array" {
-    const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
-
-    var data = [_]Tuple{
+    var data = [_]struct { []const u8, []const u8 }{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
     };
@@ -254,9 +295,7 @@ test "Map array" {
 }
 
 test "Map ref array" {
-    const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
-
-    var data = &[_]Tuple{
+    var data = &[_]struct { []const u8, []const u8 }{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
     };
@@ -277,8 +316,7 @@ test "Map ref array" {
 }
 
 test "Map slice" {
-    const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
-    const array = [_]Tuple{
+    const array = [_]struct { []const u8, []const u8 }{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
     };

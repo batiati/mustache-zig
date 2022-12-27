@@ -180,7 +180,7 @@ pub fn partialTemplates(allocator: Allocator, buffer: []u8, comptime mode: Mode,
     try partial_templates.put("head.html", head_template);
     try partial_templates.put("footer.html", footer_template);
 
-    const partial_templates_text = .{
+    const partial_templates_text = [_]struct { []const u8, []const u8 }{
         .{ "head.html", head_partial_text },
         .{ "footer.html", footer_partial_text },
     };
@@ -278,7 +278,7 @@ fn repeat(comptime caption: []const u8, comptime func: anytype, args: anytype, r
 
     const start = std.time.nanoTimestamp();
     while (index < TIMES) : (index += 1) {
-        total_bytes += try @call(.{}, func, args);
+        total_bytes += try @call(.auto, func, args);
     }
     const ellapsed = std.time.nanoTimestamp() - start;
 
