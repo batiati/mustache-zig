@@ -158,7 +158,7 @@ fn Lhs(comptime T: type) type {
     }
 }
 
-pub inline fn lhs(value: anytype) Lhs(@TypeOf(value)) {
+pub fn lhs(value: anytype) Lhs(@TypeOf(value)) {
     const T = @TypeOf(value);
 
     if (comptime trait.is(.Optional)(T)) {
