@@ -71,8 +71,16 @@ pub fn build(b: *std.build.Builder) void {
     comptime_tests.addOption(bool, "comptime_tests_enabled", comptime_tests_enabled);
 
     {
+        const filter = b.option(
+            []const u8,
+            "test-filter",
+            "Skip tests that do not match filter",
+        );
+        if (filter) |filter_value| std.log.debug("filter: {s}", .{filter_value});
+
         const main_tests = b.addTest("src/mustache.zig");
         main_tests.setBuildMode(mode);
+        main_tests.setFilter(filter);
 
         main_tests.addOptions("build_comptime_tests", comptime_tests);
         const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;

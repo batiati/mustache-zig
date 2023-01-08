@@ -49,7 +49,7 @@ pub inline fn getField(data: anytype, comptime field_name: []const u8) field_typ
         return runtime_null;
     }
 
-    return if (is_by_value) @field(lhs(data), field_name) else &@field(lhs(data), field_name);
+    return if (is_by_value) @field(lhs(Data, data), field_name) else &@field(lhs(Data, data), field_name);
 }
 
 pub inline fn getRuntimeValue(ctx: anytype) context_type: {
@@ -158,19 +158,17 @@ fn Lhs(comptime T: type) type {
     }
 }
 
-pub fn lhs(value: anytype) Lhs(@TypeOf(value)) {
-    const T = @TypeOf(value);
-
+pub inline fn lhs(comptime T: type, value: T) Lhs(T) {
     if (comptime trait.is(.Optional)(T)) {
-        return lhs(value.?);
+        return lhs(@TypeOf(value.?), value.?);
     } else if (comptime needsDerref(T)) {
-        return lhs(value.*);
+        return lhs(@TypeOf(value.*), value.*);
     } else {
         return value;
     }
 }
 
-pub inline fn needsDerref(comptime T: type) bool {
+pub fn needsDerref(comptime T: type) bool {
     comptime {
         if (trait.isSingleItemPtr(T)) {
             const Child = meta.Child(T);
@@ -214,10 +212,10 @@ pub fn byValue(comptime TField: type) bool {
     }
 }
 
-pub inline fn isNull(data: anytype) bool {
-    return switch (@typeInfo(@TypeOf(data))) {
+pub inline fn isNull(comptime T: type, data: T) bool {
+    return switch (@typeInfo(T)) {
         .Pointer => |info| switch (info.size) {
-            .One => return isNull(data.*),
+            .One => return isNull(@TypeOf(data.*), data.*),
             .Slice => return false,
             .Many => @compileError("[*] pointers not supported"),
             .C => @compileError("[*c] pointers not supported"),
@@ -227,8 +225,8 @@ pub inline fn isNull(data: anytype) bool {
     };
 }
 
-pub inline fn lenOf(data: anytype) ?usize {
-    return switch (@typeInfo(@TypeOf(data))) {
+pub inline fn lenOf(comptime T: type, data: T) ?usize {
+    return switch (@typeInfo(T)) {
         .Pointer => |info| switch (info.size) {
             .One => return null,
             .Slice => return data.len,
@@ -236,7 +234,7 @@ pub inline fn lenOf(data: anytype) ?usize {
             .C => @compileError("[*c] pointers not supported"),
         },
         .Array, .Vector => return data.len,
-        .Optional => if (data) |value| return lenOf(value) else null,
+        .Optional => if (data) |value| return lenOf(@TypeOf(value), value) else null,
         else => return null,
     };
 }
@@ -689,7 +687,7 @@ test "zero size" {
 
     var field2 = getField(&data, "value2");
     try std.testing.expect(field2.len == 3);
-    try std.testing.expect(@sizeOf(@TypeOf(field2)) == @sizeOf(usize));
+    try std.testing.expect(@sizeOf(@TypeOf(field2)) == @sizeOf([]const Empty));
 
     var field3 = getField(&data, "value3");
     try std.testing.expect(field3 == {});

@@ -80,6 +80,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     next_path_parts: Element.Path,
                     index: ?usize,
                 ) TError!Result {
+                    const Data = @TypeOf(data);
                     const typeInfo = @typeInfo(TValue);
 
                     switch (comptime typeInfo) {
@@ -93,17 +94,16 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                                 //Slice supports the "len" field,
                                 if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
                                     return if (next_path_parts.len == 0)
-                                        Result{ .field = try action_fn(action_param, Fields.lenOf(data)) }
+                                        Result{ .field = try action_fn(action_param, Fields.lenOf(Data, data)) }
                                     else
                                         .chain_broken;
                                 }
                             },
-
                             .Many => @compileError("[*] pointers not supported"),
                             .C => @compileError("[*c] pointers not supported"),
                         },
                         .Optional => |info| {
-                            if (!Fields.isNull(data)) {
+                            if (!Fields.isNull(Data, data)) {
                                 return try recursiveFind(depth, info.child, action_param, data, current_path_part, next_path_parts, index);
                             }
                         },
@@ -112,7 +112,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             //Slice supports the "len" field,
                             if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
                                 return if (next_path_parts.len == 0)
-                                    Result{ .field = try action_fn(action_param, Fields.lenOf(data)) }
+                                    Result{ .field = try action_fn(action_param, Fields.lenOf(Data, data)) }
                                 else
                                     .chain_broken;
                             }
@@ -161,7 +161,11 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
-                                    return try getLambda(action_param, Fields.lhs(data), bound_fn);
+                                    return try getLambda(
+                                        action_param,
+                                        Fields.lhs(@TypeOf(data), data),
+                                        bound_fn,
+                                    );
                                 } else {
                                     return .chain_broken;
                                 }
@@ -205,10 +209,11 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     data: anytype,
                     index: usize,
                 ) TError!Result {
+                    const Data = @TypeOf(data);
                     switch (@typeInfo(TValue)) {
                         .Struct => |info| {
                             if (info.is_tuple) {
-                                const derref = comptime trait.isSingleItemPtr(@TypeOf(data));
+                                const derref = comptime trait.isSingleItemPtr(Data);
                                 inline for (info.fields) |_, i| {
                                     if (index == i) {
                                         return Result{
@@ -223,7 +228,6 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                                 }
                             }
                         },
-
                         // Booleans are evaluated on the iterator
                         .Bool => {
                             return if (data == true and index == 0)
@@ -231,45 +235,40 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                             else
                                 .iterator_consumed;
                         },
-
                         .Pointer => |info| switch (info.size) {
                             .One => {
-                                return try iterateAt(info.child, action_param, Fields.lhs(data), index);
+                                return try iterateAt(info.child, action_param, Fields.lhs(Data, data), index);
                             },
                             .Slice => {
 
                                 //Slice of u8 is always string
                                 if (info.child != u8) {
                                     return if (index < data.len)
-                                        Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
+                                        Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(Data, data), index)) }
                                     else
                                         .iterator_consumed;
                                 }
                             },
                             else => {},
                         },
-
                         .Array => |info| {
-
                             //Array of u8 is always string
                             if (info.child != u8) {
                                 return if (index < data.len)
-                                    Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
+                                    Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(Data, data), index)) }
                                 else
                                     .iterator_consumed;
                             }
                         },
-
                         .Vector => {
                             return if (index < data.len)
-                                Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(data), index)) }
+                                Result{ .field = try action_fn(action_param, Fields.getElement(Fields.lhs(Data, data), index)) }
                             else
                                 .iterator_consumed;
                         },
-
                         .Optional => |info| {
-                            return if (!Fields.isNull(data))
-                                try iterateAt(info.child, action_param, Fields.lhs(data), index)
+                            return if (!Fields.isNull(Data, data))
+                                try iterateAt(info.child, action_param, Fields.lhs(Data, data), index)
                             else
                                 .iterator_consumed;
                         },

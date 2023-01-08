@@ -2072,7 +2072,8 @@ const tests = struct {
                     \\
                 ;
 
-                var data = .{ .bool = true, .two = "second" };
+                const Data = struct { bool: bool, two: []const u8 };
+                var data = Data{ .bool = true, .two = "second" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2498,7 +2499,8 @@ const tests = struct {
                     \\
                 ;
 
-                var data = .{ .bool = false, .two = "second" };
+                const Data = struct { bool: bool, two: []const u8 };
+                var data = Data{ .bool = false, .two = "second" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -3076,7 +3078,7 @@ const tests = struct {
 
                 var data = .{ .text = "content" };
 
-                try expectRenderPartials(template_text, partials_template_text, data, expected);
+                try expectRenderPartials(template_text, partials_template_text, &data, expected);
             }
 
             // The greater-than operator should properly recurse.
