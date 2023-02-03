@@ -10,9 +10,12 @@ pub fn build(b: *std.build.Builder) void {
     // Benchmark defaults to ReleaseSafe
     const mode = std.builtin.Mode.ReleaseSafe;
 
-    const exe = b.addExecutable("benchmark", "src/ramhorns_bench.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
+    const exe = b.addExecutable(.{
+            .name = "benchmark",
+            .root_source_file = .{ .path = "src/ramhorns_bench.zig" },
+            .target = target,
+            .optimize = mode,
+        });
     exe.addPackagePath("mustache", "../src/mustache.zig");
     exe.linkLibC();
     exe.install();
