@@ -119,7 +119,6 @@ pub fn build(b: *std.build.Builder) void {
     {
         const test_exe = b.addTest(.{
             .name = "tests",
-            .kind = .test_exe,
             .root_source_file = .{ .path = "src/mustache.zig" },
             .target = target,
             .optimize = mode,

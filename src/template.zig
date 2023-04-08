@@ -515,8 +515,8 @@ const tests = struct {
         defer Element.destroyPath(testing.allocator, false, expected_path);
 
         try testing.expectEqual(expected_path.len, path.len);
-        for (expected_path) |expected_part, i| {
-            try testing.expectEqualStrings(expected_part, path[i]);
+        for (expected_path, path) |expected_part, path_part| {
+            try testing.expectEqualStrings(expected_part, path_part);
         }
     }
 

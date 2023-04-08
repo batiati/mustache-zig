@@ -9,12 +9,21 @@ pub fn build(b: *std.build.Builder) void {
 
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    const mode = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable("samples", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-    exe.addPackagePath("mustache", "../../src/mustache.zig");
+    const exe = b.addExecutable(
+        .{
+            .name = "samples",
+            .root_source_file = .{ .path = "src/main.zig" },
+            .target = target,
+            .optimize = mode,
+        },
+    );
+    exe.addAnonymousModule("mustache", .{
+        .source_file = .{
+            .path = "../../src/mustache.zig",
+        },
+    });
     exe.install();
 
     const run_cmd = exe.run();

@@ -73,7 +73,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
             if (comptime isPartialsTupleElement(TPartials)) {
                 return if (std.mem.eql(u8, self.partials.@"0", key)) self.partials.@"1" else null;
             } else {
-                inline for (meta.fields(TPartials)) |_, index| {
+                inline for (0..meta.fields(TPartials).len) |index| {
                     const item = self.partials[index];
                     if (std.mem.eql(u8, item.@"0", key)) return item.@"1";
                 } else {
