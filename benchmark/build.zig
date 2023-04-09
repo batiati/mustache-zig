@@ -8,7 +8,7 @@ pub fn build(b: *std.build.Builder) void {
     });
 
     // Benchmark defaults to ReleaseSafe
-    const mode = std.builtin.Mode.ReleaseSafe;
+    const mode = std.builtin.OptimizeMode.ReleaseSafe;
 
     const exe = b.addExecutable(.{
         .name = "benchmark",
@@ -16,8 +16,10 @@ pub fn build(b: *std.build.Builder) void {
         .target = target,
         .optimize = mode,
     });
-    
-    exe.addAnonymousModule("mustache", .{ .source_file = .{ .path = "../src/mustache.zig" },});
+
+    exe.addAnonymousModule("mustache", .{
+        .source_file = .{ .path = "../src/mustache.zig" },
+    });
     exe.linkLibC();
     exe.install();
 
