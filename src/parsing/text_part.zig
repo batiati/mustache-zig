@@ -131,7 +131,7 @@ pub fn TextPart(comptime options: TemplateOptions) type {
             // Validate if the content ends with the proper "=" symbol before parsing the delimiters
             var content = self.content.slice;
             const last_index = content.len - 1;
-            if (content[last_index] != @enumToInt(PartType.delimiters)) return null;
+            if (content[last_index] != @intFromEnum(PartType.delimiters)) return null;
 
             content = content[0..last_index];
             var iterator = std.mem.tokenize(u8, content, " \t");

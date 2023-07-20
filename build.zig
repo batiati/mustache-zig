@@ -34,9 +34,9 @@ pub fn build(b: *std.build.Builder) void {
                 .optimize = mode,
             });
             dynamic_lib.linkage = linkage;
-            dynamic_lib.setOutputDir("lib/" ++ platform[1]);
+            // dynamic_lib.setOutputDir("lib/" ++ platform[1]);
             dynamic_lib.linkLibC();
-            dynamic_lib.install();
+            b.installArtifact(dynamic_lib);
             ffi_libs.dependOn(&dynamic_lib.step);
         }
     }
@@ -65,7 +65,7 @@ pub fn build(b: *std.build.Builder) void {
         c_sample.linkLibrary(static_lib);
         c_sample.linkLibC();
 
-        const run_cmd = c_sample.run();
+        const run_cmd = b.addRunArtifact(c_sample);
         run_cmd.step.dependOn(b.getInstallStep());
         if (b.args) |args| {
             run_cmd.addArgs(args);
@@ -95,7 +95,8 @@ pub fn build(b: *std.build.Builder) void {
             .target = target,
             .optimize = mode,
         });
-        main_tests.setFilter(filter);
+        // main_tests.setFilter(filter);
+        main_tests.filter = filter;
 
         main_tests.addOptions("build_comptime_tests", comptime_tests);
         const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
@@ -125,7 +126,7 @@ pub fn build(b: *std.build.Builder) void {
         });
         test_exe.addOptions("build_comptime_tests", comptime_tests);
 
-        const test_exe_install = b.addInstallArtifact(test_exe);
+        const test_exe_install = b.addInstallArtifact(test_exe, .{});
 
         const test_build = b.step("build_tests", "Build library tests");
         test_build.dependOn(&test_exe_install.step);

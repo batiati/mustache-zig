@@ -44,8 +44,6 @@ pub const ContextType = enum {
     pub fn fromData(comptime Data: type) ContextType {
         if (Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
             return .json;
-        } else if (Data == json.ValueTree or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
-            return .json;
         } else if (Data == ffi_extern_types.UserData) {
             return .ffi;
         } else {
