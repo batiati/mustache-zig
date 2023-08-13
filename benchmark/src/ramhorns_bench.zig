@@ -69,10 +69,7 @@ pub fn simpleTemplate(allocator: Allocator, buffer: []u8, comptime mode: Mode, w
     var json_text = try std.json.stringifyAlloc(allocator, data, .{});
     defer allocator.free(json_text);
 
-    var parser = std.json.Parser.init(allocator, false);
-    defer parser.deinit();
-
-    var json_data = try parser.parse(json_text);
+    var json_data = try std.json.parseFromSlice(std.json.Value, json_text, .{});
     defer json_data.deinit();
 
     var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })).success;
@@ -194,10 +191,7 @@ pub fn partialTemplates(allocator: Allocator, buffer: []u8, comptime mode: Mode,
     var json_text = try std.json.stringifyAlloc(allocator, data, .{});
     defer allocator.free(json_text);
 
-    var parser = std.json.Parser.init(allocator, false);
-    defer parser.deinit();
-
-    var json_data = try parser.parse(json_text);
+    var json_data = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
     defer json_data.deinit();
 
     std.debug.print("Mode {s}\n", .{@tagName(mode)});

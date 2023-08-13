@@ -83,7 +83,7 @@ pub fn renderFromJson() anyerror!void {
     var parser = std.json.Parser.init(allocator, false);
     defer parser.deinit();
 
-    var tree = try parser.parse(json_text);
+    var tree = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
     defer tree.deinit();
 
     // Rendering from a Json object

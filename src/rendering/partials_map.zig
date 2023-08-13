@@ -23,10 +23,8 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
         };
 
         pub fn isEmpty() bool {
-            comptime {
-                return TPartials == void or
-                    (trait.isTuple(TPartials) and meta.fields(TPartials).len == 0);
-            }
+            return TPartials == void or
+                (trait.isTuple(TPartials) and meta.fields(TPartials).len == 0);
         }
 
         allocator: if (options != .template and !isEmpty()) Allocator else void,

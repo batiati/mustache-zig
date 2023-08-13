@@ -167,7 +167,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
                         // block_index: initial index of the current TextBlock, the minimum part needed
                         // bookmark.last_starting_mark: index of the last starting mark '{{', used to determine the inner_text between two tags
-                        const last_index = if (self.bookmark.node_index == null) self.block_index else std.math.min(self.block_index, self.bookmark.last_starting_mark);
+                        const last_index = if (self.bookmark.node_index == null) self.block_index else @min(self.block_index, self.bookmark.last_starting_mark);
 
                         if (self.file.preserve_bookmark) |preserve| {
 

@@ -627,7 +627,7 @@ const invoker_tests = struct {
         try expectIterNotFound(data, ".", 1);
     }
 
-    test "Comptime seek - not found" {
+    test "Comptime seek - not found 2" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
         var data = Data{};
         try expectIterNotFound(data, "wrong", 0);
