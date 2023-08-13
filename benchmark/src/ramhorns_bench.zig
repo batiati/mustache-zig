@@ -288,16 +288,16 @@ fn repeat(comptime caption: []const u8, comptime func: anytype, args: anytype, r
 
 fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize, reference: ?i128) void {
     std.debug.print("{s}\n", .{caption});
-    std.debug.print("Total time {d:.3}s\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_s});
+    std.debug.print("Total time {d:.3}s\n", .{@as(f64, @floatFromInt(ellapsed)) / std.time.ns_per_s});
 
     if (reference) |reference_time| {
-        const perf = if (reference_time > 0) @intToFloat(f64, ellapsed) / @intToFloat(f64, reference_time) else 0;
+        const perf = if (reference_time > 0) @as(f64, @floatFromInt(ellapsed)) / @as(f64, @floatFromInt(reference_time)) else 0;
         std.debug.print("Comparation {d:.3}x {s}\n", .{ perf, (if (perf > 0) "slower" else "faster") });
     }
 
-    std.debug.print("{d:.0} ops/s\n", .{TIMES / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
-    std.debug.print("{d:.0} ns/iter\n", .{@intToFloat(f64, ellapsed) / TIMES});
-    std.debug.print("{d:.0} MB/s\n", .{(@intToFloat(f64, total_bytes) / 1024 / 1024) / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
+    std.debug.print("{d:.0} ops/s\n", .{TIMES / (@as(f64, @floatFromInt(ellapsed)) / std.time.ns_per_s)});
+    std.debug.print("{d:.0} ns/iter\n", .{@as(f64, @floatFromInt(ellapsed)) / TIMES});
+    std.debug.print("{d:.0} MB/s\n", .{(@as(f64, @floatFromInt(total_bytes)) / 1024 / 1024) / (@as(f64, @floatFromInt(ellapsed)) / std.time.ns_per_s)});
     std.debug.print("\n", .{});
 }
 
