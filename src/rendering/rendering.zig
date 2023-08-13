@@ -4160,10 +4160,8 @@ const tests = struct {
             if (info == .Struct) {
                 const decls = info.Struct.decls;
                 inline for (decls) |decl| {
-                    if (decl.is_pub) {
-                        const DeclType = @TypeOf(@field(Data, decl.name));
-                        if (@typeInfo(DeclType) == .Fn) return true;
-                    }
+                    const DeclType = @TypeOf(@field(Data, decl.name));
+                    if (@typeInfo(DeclType) == .Fn) return true;
                 }
             }
 

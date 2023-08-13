@@ -155,7 +155,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 ) TError!Result {
                     const decls = comptime std.meta.declarations(TValue);
                     inline for (decls) |decl| {
-                        const has_fn = comptime decl.is_pub and trait.hasFn(decl.name)(TValue);
+                        const has_fn = comptime trait.hasFn(decl.name)(TValue);
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
