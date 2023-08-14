@@ -50,7 +50,7 @@ jobs:
       - name: Run Tests
         run: |
           zig version
-          zig build test ${{ matrix.coverage }} -Dcomptime-tests=${{ matrix.comptime }} -fstage1
+          zig build test ${{ matrix.coverage }} -Dcomptime-tests=${{ matrix.comptime }}
       
       - name: Upload Codecov
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.comptime == false }}
