@@ -55,7 +55,7 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
                     Chars.cr, Chars.space, Chars.tab, Chars.null_char => {},
                     Chars.lf => {
                         assert(index >= self.text_scanner.block_index);
-                        const lf_index = @intCast(u32, index - self.text_scanner.block_index);
+                        const lf_index: u32 = @intCast(index - self.text_scanner.block_index);
 
                         if (self.left_lf == .scanning) {
                             self.left_lf = .{ .found = lf_index };

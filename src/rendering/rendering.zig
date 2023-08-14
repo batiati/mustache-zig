@@ -44,8 +44,6 @@ pub const ContextType = enum {
     pub fn fromData(comptime Data: type) ContextType {
         if (Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
             return .json;
-        } else if (Data == json.ValueTree or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
-            return .json;
         } else if (Data == ffi_extern_types.UserData) {
             return .ffi;
         } else {
@@ -585,7 +583,8 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                                 if (self.preseveLineBreaksAndIndentation()) {
                                     if (partial.indentation) |value| {
                                         const prev_has_pending = self.indentation_queue.has_pending;
-                                        self.indentation_queue.indent(&IndentationQueue.Node{ .indentation = value });
+                                        var node = IndentationQueue.Node{ .indentation = value };
+                                        self.indentation_queue.indent(&node);
                                         self.indentation_queue.has_pending = true;
 
                                         defer {
@@ -790,7 +789,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                 const escaped = comptime escape == .Escaped;
                 const indentation_supported = comptime !PartialsMap.isEmpty();
 
-                if (comptime escaped or indentation_supported) {
+                if (escaped or indentation_supported) {
                     const indentation_empty: if (indentation_supported) bool else void = if (indentation_supported) self.indentation_queue.isEmpty() or !self.preseveLineBreaksAndIndentation() else {};
 
                     var index: usize = 0;
@@ -799,7 +798,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                     while (char_index < value.len) : (char_index += 1) {
                         const char = value[char_index];
 
-                        if (comptime indentation_supported and !indentation_empty) {
+                        if (indentation_supported and !indentation_empty) {
 
                             // The indentation must be inserted after the line break
                             // Supports both \n and \r\n
@@ -2348,7 +2347,7 @@ const tests = struct {
             }
 
             // Standalone tags should not require a newline to precede them.
-            test "Standalone Line Endings" {
+            test "Standalone Line Endings 2" {
                 const template_text = "  {{#boolean}}\n#{{/boolean}}\n/";
                 const expected = "#\n/";
 
@@ -2748,7 +2747,7 @@ const tests = struct {
                     \\[ |>include| ]
                 ;
 
-                const partials_text = [_]struct { []const u8, []const u8 }{
+                const partials_text = .{
                     .{
                         "include",
                         ".{{value}}.",
@@ -2771,7 +2770,7 @@ const tests = struct {
                     \\[ .{{value}}.  .|value|. ]
                 ;
 
-                const partials_text = [_]struct { []const u8, []const u8 }{
+                const partials_text = .{
                     .{
                         "include",
                         ".{{value}}. {{= | | =}} .|value|.",
@@ -3043,7 +3042,7 @@ const tests = struct {
             // The greater-than operator should expand to the named partial.
             test "Basic Behavior" {
                 const template_text: []const u8 = "'{{>text}}'";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{ "text", "from partial" },
                 };
 
@@ -3067,7 +3066,7 @@ const tests = struct {
             // The greater-than operator should operate within the current context.
             test "Context" {
                 const template_text: []const u8 = "'{{>partial}}'";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{
                         "partial",
                         "*{{text}}*",
@@ -3089,7 +3088,7 @@ const tests = struct {
                 };
 
                 const template_text: []const u8 = "{{>node}}";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{
                         "node",
                         "{{content}}<{{#nodes}}{{>node}}{{/nodes}}>",
@@ -3105,7 +3104,7 @@ const tests = struct {
             // The greater-than operator should not alter surrounding whitespace.
             test "Surrounding Whitespace" {
                 const template_text = "| {{>partial}} |";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{ "partial", "\t|\t" },
                 };
 
@@ -3118,7 +3117,7 @@ const tests = struct {
             // Whitespace should be left untouched.
             test "Inline Indentation" {
                 const template_text = "  {{data}}  {{> partial}}\n";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{ "partial", ">\n>" },
                 };
 
@@ -3131,7 +3130,7 @@ const tests = struct {
             // "\r\n" should be considered a newline for standalone tags.
             test "Standalone Line Endings" {
                 const template_text = "|\r\n{{>partial}}\r\n|";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{ "partial", ">" },
                 };
 
@@ -3144,7 +3143,7 @@ const tests = struct {
             // Standalone tags should not require a newline to precede them.
             test "Standalone Without Previous Line" {
                 const template_text = "  {{>partial}}\n>";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{ "partial", ">\n>" },
                 };
 
@@ -3157,7 +3156,7 @@ const tests = struct {
             // Standalone tags should not require a newline to follow them.
             test "Standalone Without Newline" {
                 const template_text = ">\n  {{>partial}}";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{ "partial", ">\n>" },
                 };
 
@@ -3176,7 +3175,7 @@ const tests = struct {
                     \\
                 ;
 
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{
                         "partial",
                         \\|
@@ -3203,7 +3202,7 @@ const tests = struct {
             // Superfluous in-tag whitespace should be ignored.
             test "Padding Whitespace" {
                 const template_text: []const u8 = "|{{> partial }}|";
-                const partials_template_text = [_]struct { []const u8, []const u8 }{
+                const partials_template_text = .{
                     .{ "partial", "[]" },
                 };
 
@@ -3475,7 +3474,7 @@ const tests = struct {
                 \\EOF
             ;
 
-            const partials = [_]struct { []const u8, []const u8 }{
+            const partials = .{
                 .{
                     "todo",
                     \\My tasks
@@ -4162,10 +4161,8 @@ const tests = struct {
             if (info == .Struct) {
                 const decls = info.Struct.decls;
                 inline for (decls) |decl| {
-                    if (decl.is_pub) {
-                        const DeclType = @TypeOf(@field(Data, decl.name));
-                        if (@typeInfo(DeclType) == .Fn) return true;
-                    }
+                    const DeclType = @TypeOf(@field(Data, decl.name));
+                    if (@typeInfo(DeclType) == .Fn) return true;
                 }
             }
 
@@ -4183,13 +4180,10 @@ const tests = struct {
         const json_text = try std.json.stringifyAlloc(allocator, data, .{});
         defer allocator.free(json_text);
 
-        var parser = std.json.Parser.init(allocator, false);
-        defer parser.deinit();
-
-        var json_obj = try parser.parse(json_text);
+        var json_obj = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
         defer json_obj.deinit();
 
-        var result = try allocRender(allocator, cached_template, json_obj);
+        var result = try allocRender(allocator, cached_template, json_obj.value);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
@@ -4263,13 +4257,10 @@ const tests = struct {
         const json_text = try std.json.stringifyAlloc(allocator, data, .{});
         defer allocator.free(json_text);
 
-        var parser = std.json.Parser.init(allocator, false);
-        defer parser.deinit();
-
-        var json_obj = try parser.parse(json_text);
+        var json_obj = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
         defer json_obj.deinit();
 
-        var result = try allocRenderPartials(allocator, cached_template, hashMap, json_obj);
+        var result = try allocRenderPartials(allocator, cached_template, hashMap, json_obj.value);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);

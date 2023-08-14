@@ -168,7 +168,7 @@ pub inline fn lhs(comptime T: type, value: T) Lhs(T) {
     }
 }
 
-pub fn needsDerref(comptime T: type) bool {
+pub inline fn needsDerref(comptime T: type) bool {
     comptime {
         if (trait.isSingleItemPtr(T)) {
             const Child = meta.Child(T);
@@ -357,7 +357,7 @@ test "comptime int" {
 }
 
 test "comptime floats" {
-    var data = .{ .float = 3.14, .level = .{ .float = std.math.f128_min } };
+    var data = .{ .float = 3.14, .level = .{ .float = std.math.floatMin(f128) } };
 
     var field = getField(&data, "float");
     try std.testing.expectEqual(field, data.float);

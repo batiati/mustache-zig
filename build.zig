@@ -10,52 +10,28 @@ pub fn build(b: *std.build.Builder) void {
         },
     });
 
-    const ffi_libs = b.step("ffi", "Build FFI libs");
+    // TODO re-add cross-compile
+    const static_lib = b.addStaticLibrary(.{
+        .name = "mustache",
+        .root_source_file = .{ .path = "src/exports.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    static_lib.linkLibC();
+    b.installArtifact(static_lib);
 
-    // Zig cross-target x folder names
-    const platforms = .{
-        .{ "x86_64-linux-gnu", "linux-x64" },
-        .{ "x86_64-windows-gnu", "win-x64" },
-        .{ "x86_64-macos", "osx-x64" },
-    };
-
-    inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
-
-        inline for (.{ .dynamic, .static }) |linkage| {
-
-            // Appends the name "lib" on windows, in order to generate the same name "libmustache" for all platforms
-            const lib_name = comptime (if (std.mem.startsWith(u8, platform[1], "win")) "lib" else "") ++ "mustache";
-
-            const dynamic_lib = b.addStaticLibrary(.{
-                .name = lib_name,
-                .root_source_file = .{ .path = "src/exports.zig" },
-                .target = cross_target,
-                .optimize = mode,
-            });
-            dynamic_lib.linkage = linkage;
-            dynamic_lib.setOutputDir("lib/" ++ platform[1]);
-            dynamic_lib.linkLibC();
-            dynamic_lib.install();
-            ffi_libs.dependOn(&dynamic_lib.step);
-        }
-    }
+    const dynamic_lib = b.addSharedLibrary(.{
+        .name = "mustache",
+        .root_source_file = .{ .path = "src/exports.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    dynamic_lib.linkLibC();
+    b.installArtifact(dynamic_lib);
 
     // C FFI Sample
 
     {
-
-        // Building the static lib
-
-        const static_lib = b.addStaticLibrary(.{
-            .name = "mustache",
-            .root_source_file = .{ .path = "src/exports.zig" },
-            .target = target,
-            .optimize = mode,
-        });
-        static_lib.linkage = .static;
-        static_lib.linkLibC();
-
         const c_sample = b.addExecutable(.{
             .name = "sample",
             .root_source_file = .{ .path = "samples/c/sample.c" },
@@ -65,7 +41,7 @@ pub fn build(b: *std.build.Builder) void {
         c_sample.linkLibrary(static_lib);
         c_sample.linkLibC();
 
-        const run_cmd = c_sample.run();
+        const run_cmd = b.addRunArtifact(c_sample);
         run_cmd.step.dependOn(b.getInstallStep());
         if (b.args) |args| {
             run_cmd.addArgs(args);
@@ -95,7 +71,8 @@ pub fn build(b: *std.build.Builder) void {
             .target = target,
             .optimize = mode,
         });
-        main_tests.setFilter(filter);
+        // main_tests.setFilter(filter);
+        main_tests.filter = filter;
 
         main_tests.addOptions("build_comptime_tests", comptime_tests);
         const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
@@ -125,7 +102,7 @@ pub fn build(b: *std.build.Builder) void {
         });
         test_exe.addOptions("build_comptime_tests", comptime_tests);
 
-        const test_exe_install = b.addInstallArtifact(test_exe);
+        const test_exe_install = b.addInstallArtifact(test_exe, .{});
 
         const test_build = b.step("build_tests", "Build library tests");
         test_build.dependOn(&test_exe_install.step);

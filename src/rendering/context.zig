@@ -70,7 +70,7 @@ pub fn Context(comptime context_type: ContextType, comptime Writer: type, compti
 }
 
 pub fn ContextImpl(comptime context_type: ContextType, comptime Writer: type, comptime Data: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    if (comptime context_type != ContextType.fromData(Data)) @compileError("Unexpected context_type");
+    if (comptime context_type != ContextType.fromData(Data)) @compileError("Unexpected context_type [" ++ @tagName(context_type) ++ "] should be [" ++ @tagName(ContextType.fromData(Data)) ++ "]");
 
     return switch (context_type) {
         .native => native_context.ContextImpl(Writer, Data, PartialsMap, options),

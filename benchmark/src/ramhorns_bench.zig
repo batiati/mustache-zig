@@ -69,10 +69,7 @@ pub fn simpleTemplate(allocator: Allocator, buffer: []u8, comptime mode: Mode, w
     var json_text = try std.json.stringifyAlloc(allocator, data, .{});
     defer allocator.free(json_text);
 
-    var parser = std.json.Parser.init(allocator, false);
-    defer parser.deinit();
-
-    var json_data = try parser.parse(json_text);
+    var json_data = try std.json.parseFromSlice(std.json.Value, json_text, .{});
     defer json_data.deinit();
 
     var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })).success;
@@ -111,7 +108,7 @@ pub fn simpleTemplate(allocator: Allocator, buffer: []u8, comptime mode: Mode, w
             buffer,
             mode,
             template,
-            json_data,
+            json_data.value,
             writer,
         },
         reference,
@@ -194,10 +191,7 @@ pub fn partialTemplates(allocator: Allocator, buffer: []u8, comptime mode: Mode,
     var json_text = try std.json.stringifyAlloc(allocator, data, .{});
     defer allocator.free(json_text);
 
-    var parser = std.json.Parser.init(allocator, false);
-    defer parser.deinit();
-
-    var json_data = try parser.parse(json_text);
+    var json_data = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
     defer json_data.deinit();
 
     std.debug.print("Mode {s}\n", .{@tagName(mode)});
@@ -227,7 +221,7 @@ pub fn partialTemplates(allocator: Allocator, buffer: []u8, comptime mode: Mode,
             mode,
             template,
             partial_templates,
-            json_data,
+            json_data.value,
             writer,
         },
         null,
@@ -288,16 +282,16 @@ fn repeat(comptime caption: []const u8, comptime func: anytype, args: anytype, r
 
 fn printSummary(caption: []const u8, ellapsed: i128, total_bytes: usize, reference: ?i128) void {
     std.debug.print("{s}\n", .{caption});
-    std.debug.print("Total time {d:.3}s\n", .{@intToFloat(f64, ellapsed) / std.time.ns_per_s});
+    std.debug.print("Total time {d:.3}s\n", .{@as(f64, @floatFromInt(ellapsed)) / std.time.ns_per_s});
 
     if (reference) |reference_time| {
-        const perf = if (reference_time > 0) @intToFloat(f64, ellapsed) / @intToFloat(f64, reference_time) else 0;
+        const perf = if (reference_time > 0) @as(f64, @floatFromInt(ellapsed)) / @as(f64, @floatFromInt(reference_time)) else 0;
         std.debug.print("Comparation {d:.3}x {s}\n", .{ perf, (if (perf > 0) "slower" else "faster") });
     }
 
-    std.debug.print("{d:.0} ops/s\n", .{TIMES / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
-    std.debug.print("{d:.0} ns/iter\n", .{@intToFloat(f64, ellapsed) / TIMES});
-    std.debug.print("{d:.0} MB/s\n", .{(@intToFloat(f64, total_bytes) / 1024 / 1024) / (@intToFloat(f64, ellapsed) / std.time.ns_per_s)});
+    std.debug.print("{d:.0} ops/s\n", .{TIMES / (@as(f64, @floatFromInt(ellapsed)) / std.time.ns_per_s)});
+    std.debug.print("{d:.0} ns/iter\n", .{@as(f64, @floatFromInt(ellapsed)) / TIMES});
+    std.debug.print("{d:.0} MB/s\n", .{(@as(f64, @floatFromInt(total_bytes)) / 1024 / 1024) / (@as(f64, @floatFromInt(ellapsed)) / std.time.ns_per_s)});
     std.debug.print("\n", .{});
 }
 

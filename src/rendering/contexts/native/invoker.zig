@@ -155,7 +155,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 ) TError!Result {
                     const decls = comptime std.meta.declarations(TValue);
                     inline for (decls) |decl| {
-                        const has_fn = comptime decl.is_pub and trait.hasFn(decl.name)(TValue);
+                        const has_fn = comptime trait.hasFn(decl.name)(TValue);
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
@@ -392,7 +392,8 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             // Errors are intentionally ignored on lambda calls, interpolating empty strings
             value.invoke(lambda_context) catch |e| {
                 if (isOnErrorSet(Error, e)) {
-                    return @errSetCast(Error, e);
+                    const err: Error = @errSetCast(e);
+                    return err;
                 }
             };
         }
@@ -401,13 +402,13 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
 // Check if an error is part of a error set
 // https://github.com/ziglang/zig/issues/2473
-fn isOnErrorSet(comptime Error: type, value: anytype) bool {
+fn isOnErrorSet(comptime Error: type, value: anyerror) bool {
     switch (@typeInfo(Error)) {
         .ErrorSet => |info| if (info) |errors| {
             if (@typeInfo(@TypeOf(value)) == .ErrorSet) {
                 inline for (errors) |item| {
-                    const int_value = @errorToInt(@field(Error, item.name));
-                    if (int_value == @errorToInt(value)) return true;
+                    const int_value = @intFromError(@field(Error, item.name));
+                    if (int_value == @intFromError(value)) return true;
                 }
             }
         },
@@ -627,7 +628,7 @@ const invoker_tests = struct {
         try expectIterNotFound(data, ".", 1);
     }
 
-    test "Comptime seek - not found" {
+    test "Comptime seek - not found 2" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
         var data = Data{};
         try expectIterNotFound(data, "wrong", 0);

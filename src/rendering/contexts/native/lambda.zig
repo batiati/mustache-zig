@@ -81,7 +81,7 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
         }
 
         inline fn getSelf(ctx: *const anyopaque) *const Self {
-            return @ptrCast(*const Self, @alignCast(@alignOf(Self), ctx));
+            return @ptrCast(@alignCast(ctx));
         }
     };
 }

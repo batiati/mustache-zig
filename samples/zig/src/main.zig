@@ -83,11 +83,11 @@ pub fn renderFromJson() anyerror!void {
     var parser = std.json.Parser.init(allocator, false);
     defer parser.deinit();
 
-    var tree = try parser.parse(json_text);
+    var tree = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
     defer tree.deinit();
 
     // Rendering from a Json object
-    try mustache.renderText(allocator, template_text, tree, out.writer());
+    try mustache.renderText(allocator, template_text, tree.value, out.writer());
 }
 
 /// Parses a template at comptime to render many times at runtime, no allocations needed

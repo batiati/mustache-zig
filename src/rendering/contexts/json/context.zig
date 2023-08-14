@@ -72,12 +72,12 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 .chain_broken => .chain_broken,
                 .iterator_consumed => .iterator_consumed,
                 .field => |content| switch (content) {
-                    .Bool => |boolean| return .{ .field = data_render.valueCapacityHint(boolean) },
-                    .Integer => |integer| return .{ .field = data_render.valueCapacityHint(integer) },
-                    .Float => |float| return .{ .field = data_render.valueCapacityHint(float) },
-                    .NumberString => |number_string| return .{ .field = data_render.valueCapacityHint(number_string) },
-                    .String => |string| return .{ .field = data_render.valueCapacityHint(string) },
-                    .Array => |array| return .{ .field = data_render.valueCapacityHint(array.items) },
+                    .bool => |boolean| return .{ .field = data_render.valueCapacityHint(boolean) },
+                    .integer => |integer| return .{ .field = data_render.valueCapacityHint(integer) },
+                    .float => |float| return .{ .field = data_render.valueCapacityHint(float) },
+                    .number_string => |number_string| return .{ .field = data_render.valueCapacityHint(number_string) },
+                    .string => |string| return .{ .field = data_render.valueCapacityHint(string) },
+                    .array => |array| return .{ .field = data_render.valueCapacityHint(array.items) },
                     else => return .{ .field = 0 },
                 },
                 .lambda => {
@@ -100,12 +100,12 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 .chain_broken => return .chain_broken,
                 .iterator_consumed => return .iterator_consumed,
                 .field => |content| switch (content) {
-                    .Bool => |boolean| try data_render.write(boolean, escape),
-                    .Integer => |integer| try data_render.write(integer, escape),
-                    .Float => |float| try data_render.write(float, escape),
-                    .NumberString => |number_string| try data_render.write(number_string, escape),
-                    .String => |string| try data_render.write(string, escape),
-                    .Array => |array| try data_render.write(array.items, escape),
+                    .bool => |boolean| try data_render.write(boolean, escape),
+                    .integer => |integer| try data_render.write(integer, escape),
+                    .float => |float| try data_render.write(float, escape),
+                    .number_string => |number_string| try data_render.write(number_string, escape),
+                    .string => |string| try data_render.write(string, escape),
+                    .array => |array| try data_render.write(array.items, escape),
                     else => {},
                 },
                 .lambda => {
@@ -158,16 +158,16 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             if (path.len == 0) {
                 if (index) |current_index| {
                     switch (value) {
-                        .Array => |array| if (array.items.len > current_index) {
+                        .array => |array| if (array.items.len > current_index) {
                             return .{ .field = array.items[current_index] };
                         },
-                        .Bool => |boolean| if (boolean == true and current_index == 0) {
+                        .bool => |boolean| if (boolean == true and current_index == 0) {
                             return .{ .field = value };
                         },
                         else => if (current_index == 0) {
                             return .{ .field = value };
                         },
-                        .Null => {},
+                        .null => {},
                     }
 
                     return .iterator_consumed;
@@ -176,7 +176,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 }
             } else {
                 switch (value) {
-                    .Object => |obj| {
+                    .object => |obj| {
                         const key = path[0];
 
                         if (obj.get(key)) |next_value| {

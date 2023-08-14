@@ -39,7 +39,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             fn write(ctx: ?*anyopaque, value: ?[*]const u8, len: u32) callconv(.C) extern_types.Status {
                 if (ctx) |handle| {
                     if (value) |buffer| {
-                        var self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), handle));
+                        var self = @as(*@This(), @ptrCast(@alignCast(handle)));
                         self.data_render.write(buffer[0..len], self.escape) catch {
                             return .INTERPOLATION_ERROR;
                         };
@@ -72,7 +72,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 if (path.len > 0) {
                     var root_path = extern_types.PathPart{
                         .value = path[0].ptr,
-                        .size = @intCast(u32, path[0].len),
+                        .size = @as(u32, @intCast(path[0].len)),
                         .next = null,
                     };
 
@@ -95,7 +95,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             if (path.len > 0) {
                 current_part = extern_types.PathPart{
                     .value = path[0].ptr,
-                    .size = @intCast(u32, path[0].len),
+                    .size = @as(u32, @intCast(path[0].len)),
                     .next = null,
                 };
 
@@ -115,7 +115,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             var out_value: extern_types.UserData = undefined;
             var ffi_path: extern_types.Path = .{
                 .root = root_path,
-                .index = @intCast(u32, index orelse 0),
+                .index = @as(u32, @intCast(index orelse 0)),
                 .has_index = index != null,
             };
 
@@ -140,7 +140,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 if (path.len > 0) {
                     var root_path = extern_types.PathPart{
                         .value = path[0].ptr,
-                        .size = @intCast(u32, path[0].len),
+                        .size = @as(u32, @intCast(path[0].len)),
                         .next = null,
                     };
 
@@ -163,7 +163,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             if (path.len > 0) {
                 current_part = extern_types.PathPart{
                     .value = path[0].ptr,
-                    .size = @intCast(u32, path[0].len),
+                    .size = @as(u32, @intCast(path[0].len)),
                     .next = null,
                 };
 
@@ -208,7 +208,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 if (path.len > 0) {
                     var root_path = extern_types.PathPart{
                         .value = path[0].ptr,
-                        .size = @intCast(u32, path[0].len),
+                        .size = @as(u32, @intCast(path[0].len)),
                         .next = null,
                     };
 
@@ -231,7 +231,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             if (path.len > 0) {
                 current_part = extern_types.PathPart{
                     .value = path[0].ptr,
-                    .size = @intCast(u32, path[0].len),
+                    .size = @as(u32, @intCast(path[0].len)),
                     .next = null,
                 };
 
@@ -410,11 +410,11 @@ const context_tests = struct {
 
                 if (std.mem.eql(u8, path_value, "id")) {
                     if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
-                    out_value.* = @intCast(u32, std.fmt.count("{}", .{person.id}));
+                    out_value.* = @as(u32, @intCast(std.fmt.count("{}", .{person.id})));
                     return .FIELD;
                 } else if (std.mem.eql(u8, path_value, "name")) {
                     if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
-                    out_value.* = @intCast(u32, person.name.len);
+                    out_value.* = @as(u32, @intCast(person.name.len));
                     return .FIELD;
                 } else if (std.mem.eql(u8, path_value, "boss")) {
                     if (person.boss == null) return .CHAIN_BROKEN;
@@ -451,14 +451,14 @@ const context_tests = struct {
                     var buffer: [64]u8 = undefined;
                     var len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
 
-                    var ret = writer_fn(writer_handle, &buffer, @intCast(u32, len));
+                    var ret = writer_fn(writer_handle, &buffer, @as(u32, @intCast(len)));
                     if (ret != .SUCCESS) return .CHAIN_BROKEN;
 
                     return .FIELD;
                 } else if (std.mem.eql(u8, path_value, "name")) {
                     if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
 
-                    var ret = writer_fn(writer_handle, person.name.ptr, @intCast(u32, person.name.len));
+                    var ret = writer_fn(writer_handle, person.name.ptr, @as(u32, @intCast(person.name.len)));
                     if (ret != .SUCCESS) return .CHAIN_BROKEN;
 
                     return .FIELD;
@@ -490,7 +490,7 @@ const context_tests = struct {
         }
 
         fn getSelf(user_data_handle: extern_types.UserDataHandle) *const Self {
-            return @ptrCast(*const Self, @alignCast(@alignOf(Self), user_data_handle));
+            return @as(*const Self, @ptrCast(@alignCast(user_data_handle)));
         }
 
         pub fn getUserData(handle: *const anyopaque) extern_types.UserData {
@@ -530,7 +530,7 @@ const context_tests = struct {
 
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
-        try testing.expectEqual(@ptrToInt(&person.id), @ptrToInt(id_ctx.user_data.handle));
+        try testing.expectEqual(@intFromPtr(&person.id), @intFromPtr(id_ctx.user_data.handle));
 
         var name_ctx = name_ctx: {
             const path = try expectPath(allocator, "name");
@@ -547,7 +547,7 @@ const context_tests = struct {
 
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
-        try testing.expectEqual(@ptrToInt(person.name.ptr), @ptrToInt(name_ctx.user_data.handle));
+        try testing.expectEqual(@intFromPtr(person.name.ptr), @intFromPtr(name_ctx.user_data.handle));
     }
 
     test "FFI context get children" {
@@ -583,7 +583,8 @@ const context_tests = struct {
 
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
-        try testing.expectEqual(@ptrToInt(&person.boss.?.id), @ptrToInt(id_ctx.user_data.handle));
+        // TODO put this back
+        try testing.expectEqual(@intFromPtr(&person.boss.?.id), @intFromPtr(id_ctx.user_data.handle));
 
         var name_ctx = name_ctx: {
             const path = try expectPath(allocator, "boss.name");
@@ -600,7 +601,7 @@ const context_tests = struct {
 
         // Expects that the context was set with the field address
         // The context can be set with any value, this test sets a pointer
-        try testing.expectEqual(@ptrToInt(person.boss.?.name.ptr), @ptrToInt(name_ctx.user_data.handle));
+        try testing.expectEqual(@intFromPtr(person.boss.?.name.ptr), @intFromPtr(name_ctx.user_data.handle));
     }
 
     test "FFI Write" {
