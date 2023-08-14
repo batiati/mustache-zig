@@ -4183,7 +4183,7 @@ const tests = struct {
         var json_obj = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
         defer json_obj.deinit();
 
-        var result = try allocRender(allocator, cached_template, json_obj);
+        var result = try allocRender(allocator, cached_template, json_obj.value);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
@@ -4260,7 +4260,7 @@ const tests = struct {
         var json_obj = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
         defer json_obj.deinit();
 
-        var result = try allocRenderPartials(allocator, cached_template, hashMap, json_obj);
+        var result = try allocRenderPartials(allocator, cached_template, hashMap, json_obj.value);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);

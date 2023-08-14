@@ -87,7 +87,7 @@ pub fn renderFromJson() anyerror!void {
     defer tree.deinit();
 
     // Rendering from a Json object
-    try mustache.renderText(allocator, template_text, tree, out.writer());
+    try mustache.renderText(allocator, template_text, tree.value, out.writer());
 }
 
 /// Parses a template at comptime to render many times at runtime, no allocations needed
