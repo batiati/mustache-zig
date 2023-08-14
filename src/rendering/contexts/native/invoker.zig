@@ -392,7 +392,8 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             // Errors are intentionally ignored on lambda calls, interpolating empty strings
             value.invoke(lambda_context) catch |e| {
                 if (isOnErrorSet(Error, e)) {
-                    return @errSetCast(e);
+                    const err: Error = @errSetCast(e);
+                    return err;
                 }
             };
         }
@@ -401,7 +402,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
 
 // Check if an error is part of a error set
 // https://github.com/ziglang/zig/issues/2473
-fn isOnErrorSet(comptime Error: type, value: anytype) bool {
+fn isOnErrorSet(comptime Error: type, value: anyerror) bool {
     switch (@typeInfo(Error)) {
         .ErrorSet => |info| if (info) |errors| {
             if (@typeInfo(@TypeOf(value)) == .ErrorSet) {
