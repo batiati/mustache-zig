@@ -12,7 +12,7 @@ pub fn build(b: *std.build.Builder) void {
 
     // TODO re-add cross-compile
     const static_lib = b.addStaticLibrary(.{
-        .name = "mustache",
+        .name = "mustache-static",
         .root_source_file = .{ .path = "src/exports.zig" },
         .target = target,
         .optimize = mode,
