@@ -29,6 +29,9 @@ pub fn build(b: *std.build.Builder) void {
     dynamic_lib.linkLibC();
     b.installArtifact(dynamic_lib);
 
+    // Zig module
+    _ = b.addModule("mustache", .{ .source_file = .{ .path = "src/mustache.zig" } });
+
     // C FFI Sample
 
     {
