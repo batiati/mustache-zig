@@ -12,7 +12,7 @@ pub fn build(b: *std.build.Builder) void {
 
     // TODO re-add cross-compile
     const static_lib = b.addStaticLibrary(.{
-        .name = "mustache",
+        .name = "mustache-static",
         .root_source_file = .{ .path = "src/exports.zig" },
         .target = target,
         .optimize = mode,
@@ -28,6 +28,9 @@ pub fn build(b: *std.build.Builder) void {
     });
     dynamic_lib.linkLibC();
     b.installArtifact(dynamic_lib);
+
+    // Zig module
+    _ = b.addModule("mustache", .{ .source_file = .{ .path = "src/mustache.zig" } });
 
     // C FFI Sample
 
