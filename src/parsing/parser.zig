@@ -109,7 +109,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
             self.beginLevel(0, self.default_delimiters, render) catch |err| switch (err) {
                 AbortError.ParserAbortedError => return false,
                 else => {
-                    const newerr: (LoadError || RenderError(@TypeOf(render))) = @errSetCast(err);
+                    const newerr: (LoadError || RenderError(@TypeOf(render))) = @errorCast(err);
                     return newerr;
                 },
             };
@@ -343,7 +343,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
         }
 
         fn produceNodes(self: *Self, render: anytype) !void {
-            var nodes = &self.inner_state.nodes;
+            const nodes = &self.inner_state.nodes;
             if (nodes.items.len == 0) return;
 
             defer if (options.isRefCounted()) self.unRefNodes();
@@ -379,7 +379,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
 
         fn unRefNodes(self: *Self) void {
             if (options.isRefCounted()) {
-                var nodes = &self.inner_state.nodes;
+                const nodes = &self.inner_state.nodes;
                 for (nodes.items) |*node| {
                     node.unRef(self.gpa);
                 }
@@ -665,7 +665,7 @@ test "Scan standAlone tags" {
                     try testing.expectEqual(@as(usize, 1), elements.len);
 
                     {
-                        var element = elements[0];
+                        const element = elements[0];
                         try testing.expectEqual(Element.Type.static_text, element);
                         try testing.expectEqualStrings("Hello", element.static_text);
                     }
@@ -724,7 +724,7 @@ test "Scan delimiters Tags" {
                     try testing.expectEqual(@as(usize, 1), elements.len);
 
                     {
-                        var element = elements[0];
+                        const element = elements[0];
                         try testing.expectEqual(Element.Type.interpolation, element);
                         try testing.expectEqualStrings("interpolation", element.interpolation[0]);
                         try testing.expectEqualStrings("value", element.interpolation[1]);

@@ -31,7 +31,7 @@ pub fn FileReader(comptime options: TemplateOptions) type {
         eof: bool = false,
 
         pub fn init(absolute_path: []const u8) OpenError!Self {
-            var file = try std.fs.openFileAbsolute(absolute_path, .{});
+            const file = try std.fs.openFileAbsolute(absolute_path, .{});
             return Self{
                 .file = file,
             };
@@ -45,7 +45,7 @@ pub fn FileReader(comptime options: TemplateOptions) type {
                 std.mem.copy(u8, buffer, prepend);
             }
 
-            var size = try self.file.read(buffer[prepend.len..]);
+            const size = try self.file.read(buffer[prepend.len..]);
 
             if (size < read_buffer_size) {
                 const full_size = prepend.len + size;

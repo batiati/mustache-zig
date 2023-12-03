@@ -1,6 +1,5 @@
 const std = @import("std");
 const meta = std.meta;
-const trait = meta.trait;
 const json = std.json;
 const Allocator = std.mem.Allocator;
 
@@ -42,7 +41,7 @@ pub const ContextType = enum {
     ffi,
 
     pub fn fromData(comptime Data: type) ContextType {
-        if (Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
+        if (Data == json.Value or (@TypeOf(Data) == *[]type and meta.Child(Data) == json.Value)) {
             return .json;
         } else if (Data == ffi_extern_types.UserData) {
             return .ffi;
@@ -190,7 +189,7 @@ pub fn bufRenderZPartials(buf: []u8, template: Template, partials: anytype, data
 /// `options` defines the behavior of the render process
 /// Returns a slice pointing to the underlying buffer
 pub fn bufRenderZPartialsWithOptions(buf: []u8, template: Template, partials: anytype, data: anytype, comptime options: mustache.options.RenderFromTemplateOptions) (Allocator.Error || BufError)![:0]const u8 {
-    var ret = try bufRenderPartialsWithOptions(buf, template, partials, data, options);
+    const ret = try bufRenderPartialsWithOptions(buf, template, partials, data, options);
 
     if (ret.len < buf.len) {
         buf[ret.len] = '\x00';
@@ -973,13 +972,13 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             switch (context_type) {
                 .native => {
                     const by_value = comptime Fields.byValue(Data);
-                    if (comptime !by_value and !trait.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
+                    if (comptime !by_value and !mustache.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
                     return ContextImpl.context(data);
                 },
                 .json => {
-                    if (comptime Data == json.Value or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
+                    if (comptime Data == json.Value or (mustache.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
                         return ContextImpl.context(data);
-                    } else if (comptime Data == json.ValueTree or (trait.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
+                    } else if (comptime Data == json.ValueTree or (mustache.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
                         return ContextImpl.context(data.root);
                     } else {
                         @compileError("Expected a std.json.Value or std.json.ValueTree");
@@ -1117,7 +1116,7 @@ const tests = struct {
             // Mustache-free templates should render as-is.
             test "No Interpolation" {
                 const template_text = "Hello from {Mustache}!";
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, "Hello from {Mustache}!");
             }
 
@@ -1125,7 +1124,7 @@ const tests = struct {
             test "Basic Interpolation" {
                 const template_text = "Hello, {{subject}}!";
 
-                var data = .{
+                const data = .{
                     .subject = "world",
                 };
 
@@ -1136,7 +1135,7 @@ const tests = struct {
             test "HTML Escaping" {
                 const template_text = "These characters should be HTML escaped: {{forbidden}}";
 
-                var data = .{
+                const data = .{
                     .forbidden = "& \" < >",
                 };
 
@@ -1147,7 +1146,7 @@ const tests = struct {
             test "Triple Mustache" {
                 const template_text = "These characters should not be HTML escaped: {{{forbidden}}}";
 
-                var data = .{
+                const data = .{
                     .forbidden = "& \" < >",
                 };
 
@@ -1158,7 +1157,7 @@ const tests = struct {
             test "Ampersand" {
                 const template_text = "These characters should not be HTML escaped: {{&forbidden}}";
 
-                var data = .{
+                const data = .{
                     .forbidden = "& \" < >",
                 };
 
@@ -1169,7 +1168,7 @@ const tests = struct {
             test "Basic Integer Interpolation" {
                 const template_text = "{{mph}} miles an hour!";
 
-                var data = .{
+                const data = .{
                     .mph = 85,
                 };
 
@@ -1180,7 +1179,7 @@ const tests = struct {
             test "Triple Mustache Integer Interpolation" {
                 const template_text = "{{{mph}}} miles an hour!";
 
-                var data = .{
+                const data = .{
                     .mph = 85,
                 };
 
@@ -1191,7 +1190,7 @@ const tests = struct {
             test "Ampersand Integer Interpolation" {
                 const template_text = "{{&mph}} miles an hour!";
 
-                var data = .{
+                const data = .{
                     .mph = 85,
                 };
 
@@ -1211,7 +1210,7 @@ const tests = struct {
                         power: f32,
                     };
 
-                    var data = Data{
+                    const data = Data{
                         .power = 1.210,
                     };
 
@@ -1225,7 +1224,7 @@ const tests = struct {
                         power: f64,
                     };
 
-                    var data = Data{
+                    const data = Data{
                         .power = 1.210,
                     };
 
@@ -1234,7 +1233,7 @@ const tests = struct {
 
                 {
                     // Comptime float
-                    var data = .{
+                    const data = .{
                         .power = 1.210,
                     };
 
@@ -1243,7 +1242,7 @@ const tests = struct {
 
                 {
                     // Comptime negative float
-                    var data = .{
+                    const data = .{
                         .power = -1.210,
                     };
 
@@ -1257,7 +1256,7 @@ const tests = struct {
 
                 {
                     // Comptime float
-                    var data = .{
+                    const data = .{
                         .power = 1.210,
                     };
 
@@ -1266,7 +1265,7 @@ const tests = struct {
 
                 {
                     // Comptime negative float
-                    var data = .{
+                    const data = .{
                         .power = -1.210,
                     };
 
@@ -1280,7 +1279,7 @@ const tests = struct {
 
                 {
                     // Comptime float
-                    var data = .{
+                    const data = .{
                         .power = 1.210,
                     };
 
@@ -1299,7 +1298,7 @@ const tests = struct {
                         cannot: ?[]const u8,
                     };
 
-                    var data = Data{
+                    const data = Data{
                         .cannot = null,
                     };
 
@@ -1309,7 +1308,7 @@ const tests = struct {
                 {
                     // Comptime null
 
-                    var data = .{
+                    const data = .{
                         .cannot = null,
                     };
 
@@ -1328,7 +1327,7 @@ const tests = struct {
                         cannot: ?[]const u8,
                     };
 
-                    var data = Data{
+                    const data = Data{
                         .cannot = null,
                     };
 
@@ -1338,7 +1337,7 @@ const tests = struct {
                 {
                     // Comptime null
 
-                    var data = .{
+                    const data = .{
                         .cannot = null,
                     };
 
@@ -1357,7 +1356,7 @@ const tests = struct {
                         cannot: ?[]const u8,
                     };
 
-                    var data = Data{
+                    const data = Data{
                         .cannot = null,
                     };
 
@@ -1367,7 +1366,7 @@ const tests = struct {
                 {
                     // Comptime null
 
-                    var data = .{
+                    const data = .{
                         .cannot = null,
                     };
 
@@ -1379,7 +1378,7 @@ const tests = struct {
             test "Basic Context Miss Interpolation" {
                 const template_text = "I ({{cannot}}) be seen!";
 
-                var data = .{};
+                const data = .{};
 
                 try expectRender(template_text, data, "I () be seen!");
             }
@@ -1388,7 +1387,7 @@ const tests = struct {
             test "Triple Mustache Context Miss Interpolation" {
                 const template_text = "I ({{{cannot}}}) be seen!";
 
-                var data = .{};
+                const data = .{};
 
                 try expectRender(template_text, data, "I () be seen!");
             }
@@ -1397,7 +1396,7 @@ const tests = struct {
             test "Ampersand Context Miss Interpolation" {
                 const template_text = "I ({{&cannot}}) be seen!";
 
-                var data = .{};
+                const data = .{};
 
                 try expectRender(template_text, data, "I () be seen!");
             }
@@ -1406,7 +1405,7 @@ const tests = struct {
             test "Dotted Names - Basic Interpolation" {
                 const template_text = "'{{person.name}}' == '{{#person}}{{name}}{{/person}}'";
 
-                var data = .{
+                const data = .{
                     .person = .{
                         .name = "Joe",
                     },
@@ -1419,7 +1418,7 @@ const tests = struct {
             test "Dotted Names - Triple Mustache Interpolation" {
                 const template_text = "'{{{person.name}}}' == '{{#person}}{{{name}}}{{/person}}'";
 
-                var data = .{
+                const data = .{
                     .person = .{
                         .name = "Joe",
                     },
@@ -1432,7 +1431,7 @@ const tests = struct {
             test "Dotted Names - Ampersand Interpolation" {
                 const template_text = "'{{&person.name}}' == '{{#person}}{{&name}}{{/person}}'";
 
-                var data = .{
+                const data = .{
                     .person = .{
                         .name = "Joe",
                     },
@@ -1445,7 +1444,7 @@ const tests = struct {
             test "Dotted Names - Arbitrary Depth" {
                 const template_text = "'{{a.b.c.d.e.name}}' == 'Phil'";
 
-                var data = .{
+                const data = .{
                     .a = .{ .b = .{ .c = .{ .d = .{ .e = .{ .name = "Phil" } } } } },
                 };
 
@@ -1456,7 +1455,7 @@ const tests = struct {
             test "Dotted Names - Broken Chains" {
                 const template_text = "'{{a.b.c}}' == ''";
 
-                var data = .{
+                const data = .{
                     .a = .{},
                 };
 
@@ -1467,7 +1466,7 @@ const tests = struct {
             test "Dotted Names - Broken Chain Resolution" {
                 const template_text = "'{{a.b.c.name}}' == ''";
 
-                var data = .{
+                const data = .{
                     .a = .{ .b = .{} },
                     .c = .{ .name = "Jim" },
                 };
@@ -1479,7 +1478,7 @@ const tests = struct {
             test "Dotted Names - Initial Resolution" {
                 const template_text = "'{{#a}}{{b.c.d.e.name}}{{/a}}' == 'Phil'";
 
-                var data = .{
+                const data = .{
                     .a = .{ .b = .{ .c = .{ .d = .{ .e = .{ .name = "Phil" } } } } },
                     .b = .{ .c = .{ .d = .{ .e = .{ .name = "Wrong" } } } },
                 };
@@ -1491,7 +1490,7 @@ const tests = struct {
             test "Dotted Names - Context Precedence" {
                 const template_text = "{{#a}}{{b.c}}{{/a}}";
 
-                var data = .{
+                const data = .{
                     .a = .{ .b = .{} },
                     .b = .{ .c = "ERROR" },
                 };
@@ -1503,7 +1502,7 @@ const tests = struct {
             test "Implicit Iterators - Basic Interpolation" {
                 const template_text = "Hello, {{.}}!";
 
-                var data = "world";
+                const data = "world";
 
                 try expectRender(template_text, data, "Hello, world!");
             }
@@ -1512,7 +1511,7 @@ const tests = struct {
             test "Implicit Iterators - HTML Escaping" {
                 const template_text = "These characters should be HTML escaped: {{.}}";
 
-                var data = "& \" < >";
+                const data = "& \" < >";
 
                 try expectRender(template_text, data, "These characters should be HTML escaped: &amp; &quot; &lt; &gt;");
             }
@@ -1521,7 +1520,7 @@ const tests = struct {
             test "Implicit Iterators - Triple Mustache" {
                 const template_text = "These characters should not be HTML escaped: {{{.}}}";
 
-                var data = "& \" < >";
+                const data = "& \" < >";
 
                 try expectRender(template_text, data, "These characters should not be HTML escaped: & \" < >");
             }
@@ -1530,7 +1529,7 @@ const tests = struct {
             test "Implicit Iterators - Ampersand" {
                 const template_text = "These characters should not be HTML escaped: {{&.}}";
 
-                var data = "& \" < >";
+                const data = "& \" < >";
 
                 try expectRender(template_text, data, "These characters should not be HTML escaped: & \" < >");
             }
@@ -1657,14 +1656,14 @@ const tests = struct {
                 const expected = "This should be rendered.";
 
                 {
-                    var data = .{ .boolean = true };
+                    const data = .{ .boolean = true };
 
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     const Data = struct { boolean: bool };
-                    var data = Data{ .boolean = true };
+                    const data = Data{ .boolean = true };
 
                     try expectRender(template_text, data, expected);
                 }
@@ -1676,14 +1675,14 @@ const tests = struct {
                 const expected = "";
 
                 {
-                    var data = .{ .boolean = false };
+                    const data = .{ .boolean = false };
 
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     const Data = struct { boolean: bool };
-                    var data = Data{ .boolean = false };
+                    const data = Data{ .boolean = false };
 
                     try expectRender(template_text, data, expected);
                 }
@@ -1695,14 +1694,14 @@ const tests = struct {
                 const expected = "";
 
                 {
-                    var data = .{ .null = null };
+                    const data = .{ .null = null };
 
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     const Data = struct { null: ?[]i32 };
-                    var data = Data{ .null = null };
+                    const data = Data{ .null = null };
 
                     try expectRender(template_text, data, expected);
                 }
@@ -1714,13 +1713,13 @@ const tests = struct {
                 const expected = "Hi Joe.";
 
                 {
-                    var data = .{ .context = .{ .name = "Joe" } };
+                    const data = .{ .context = .{ .name = "Joe" } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     const Data = struct { context: struct { name: []const u8 } };
-                    var data = Data{ .context = .{ .name = "Joe" } };
+                    const data = Data{ .context = .{ .name = "Joe" } };
 
                     try expectRender(template_text, data, expected);
                 }
@@ -1732,13 +1731,13 @@ const tests = struct {
                 const expected = "foo, bar, baz";
 
                 {
-                    var data = .{ .a = "foo", .b = "wrong", .sec = .{ .b = "bar" }, .c = .{ .d = "baz" } };
+                    const data = .{ .a = "foo", .b = "wrong", .sec = .{ .b = "bar" }, .c = .{ .d = "baz" } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     const Data = struct { a: []const u8, b: []const u8, sec: struct { b: []const u8 }, c: struct { d: []const u8 } };
-                    var data = Data{ .a = "foo", .b = "wrong", .sec = .{ .b = "bar" }, .c = .{ .d = "baz" } };
+                    const data = Data{ .a = "foo", .b = "wrong", .sec = .{ .b = "bar" }, .c = .{ .d = "baz" } };
 
                     try expectRender(template_text, data, expected);
                 }
@@ -1752,13 +1751,13 @@ const tests = struct {
                 const expected = "bar is bar";
 
                 {
-                    var data = .{ .foo = "bar" };
+                    const data = .{ .foo = "bar" };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     const Data = struct { foo: []const u8 };
-                    var data = Data{ .foo = "bar" };
+                    const data = Data{ .foo = "bar" };
 
                     try expectRender(template_text, data, expected);
                 }
@@ -1792,7 +1791,7 @@ const tests = struct {
                         tops: []const Top,
                     };
 
-                    var data = Data{
+                    const data = Data{
                         .tops = &.{
                             .{
                                 .tname = .{
@@ -1838,7 +1837,7 @@ const tests = struct {
                         tops: [1]Top,
                     };
 
-                    var data = Data{
+                    const data = Data{
                         .tops = [_]Top{
                             .{
                                 .tname = .{
@@ -1867,7 +1866,7 @@ const tests = struct {
                         bname: []const u8,
                     };
 
-                    var data = .{
+                    const data = .{
                         .tops = .{
                             .{
                                 .tname = .{
@@ -1935,7 +1934,7 @@ const tests = struct {
                 ;
 
                 {
-                    var data = .{
+                    const data = .{
                         .a = .{ .one = 1 },
                         .b = .{ .two = 2 },
                         .c = .{ .three = 3, .d = .{ .four = 4, .five = 5 } },
@@ -1951,7 +1950,7 @@ const tests = struct {
                         c: struct { three: usize, d: struct { four: u8, five: i16 } },
                     };
 
-                    var data = Data{
+                    const data = Data{
                         .a = .{ .one = 1 },
                         .b = .{ .two = 2 },
                         .c = .{ .three = 3, .d = .{ .four = 4, .five = 5 } },
@@ -1970,7 +1969,7 @@ const tests = struct {
                     // slice
                     const Data = struct { list: []const struct { item: u32 } };
 
-                    var data = Data{
+                    const data = Data{
                         .list = &.{
                             .{ .item = 1 },
                             .{ .item = 2 },
@@ -1985,7 +1984,7 @@ const tests = struct {
                     // array
                     const Data = struct { list: [3]struct { item: u32 } };
 
-                    var data = Data{
+                    const data = Data{
                         .list = .{
                             .{ .item = 1 },
                             .{ .item = 2 },
@@ -1998,7 +1997,7 @@ const tests = struct {
 
                 {
                     // tuple
-                    var data = .{
+                    const data = .{
                         .list = .{
                             .{ .item = 1 },
                             .{ .item = 2 },
@@ -2022,7 +2021,7 @@ const tests = struct {
                     const Item = struct { item: u32 };
                     const Data = struct { list: []const Item };
 
-                    var data = Data{
+                    const data = Data{
                         .list = &[0]Item{},
                     };
 
@@ -2034,7 +2033,7 @@ const tests = struct {
                     const Item = struct { item: u32 };
                     const Data = struct { list: [0]Item };
 
-                    var data = Data{
+                    const data = Data{
                         .list = [0]Item{},
                     };
 
@@ -2043,7 +2042,7 @@ const tests = struct {
 
                 {
                     // tuple
-                    var data = .{
+                    const data = .{
                         .list = .{},
                     };
 
@@ -2072,7 +2071,7 @@ const tests = struct {
                 ;
 
                 const Data = struct { bool: bool, two: []const u8 };
-                var data = Data{ .bool = true, .two = "second" };
+                const data = Data{ .bool = true, .two = "second" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2081,7 +2080,7 @@ const tests = struct {
                 const template_text = "| A {{#bool}}B {{#bool}}C{{/bool}} D{{/bool}} E |";
                 const expected = "| A B C D E |";
 
-                var data = .{ .bool = true };
+                const data = .{ .bool = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2090,7 +2089,7 @@ const tests = struct {
                 const template_text = "| A {{#bool}}B {{#bool}}C{{/bool}} D{{/bool}} E |";
                 const expected = "| A  E |";
 
-                var data = .{ .bool = false };
+                const data = .{ .bool = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2099,7 +2098,7 @@ const tests = struct {
                 const template_text = "[{{#missing}}Found key 'missing'!{{/missing}}]";
                 const expected = "[]";
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2111,20 +2110,20 @@ const tests = struct {
                 {
                     // slice
                     const Data = struct { list: []const []const u8 };
-                    var data = Data{ .list = &.{ "a", "b", "c", "d", "e" } };
+                    const data = Data{ .list = &.{ "a", "b", "c", "d", "e" } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // array
                     const Data = struct { list: [5][]const u8 };
-                    var data = Data{ .list = .{ "a", "b", "c", "d", "e" } };
+                    const data = Data{ .list = .{ "a", "b", "c", "d", "e" } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // tuple
-                    var data = .{ .list = .{ "a", "b", "c", "d", "e" } };
+                    const data = .{ .list = .{ "a", "b", "c", "d", "e" } };
                     try expectCachedRender(template_text, data, expected);
                     try expectComptimeRender(template_text, data, expected);
                     try expectStreamedRender(template_text, data, expected);
@@ -2139,20 +2138,20 @@ const tests = struct {
                 {
                     // slice
                     const Data = struct { list: []const u32 };
-                    var data = Data{ .list = &.{ 1, 2, 3, 4, 5 } };
+                    const data = Data{ .list = &.{ 1, 2, 3, 4, 5 } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // array
                     const Data = struct { list: [5]u32 };
-                    var data = Data{ .list = .{ 1, 2, 3, 4, 5 } };
+                    const data = Data{ .list = .{ 1, 2, 3, 4, 5 } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // tuple
-                    var data = .{ .list = .{ 1, 2, 3, 4, 5 } };
+                    const data = .{ .list = .{ 1, 2, 3, 4, 5 } };
                     try expectCachedRender(template_text, data, expected);
                     try expectComptimeRender(template_text, data, expected);
                     try expectStreamedRender(template_text, data, expected);
@@ -2169,20 +2168,20 @@ const tests = struct {
                 {
                     // slice
                     const Data = struct { list: []const f32 };
-                    var data = Data{ .list = &.{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
+                    const data = Data{ .list = &.{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // array
                     const Data = struct { list: [5]f32 };
-                    var data = Data{ .list = .{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
+                    const data = Data{ .list = .{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // tuple
-                    var data = .{ .list = .{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
+                    const data = .{ .list = .{ 1.1, 2.2, 3.3, 4.4, 5.5 } };
 
                     try expectCachedRender(template_text, data, expected);
                     try expectComptimeRender(template_text, data, expected);
@@ -2199,7 +2198,7 @@ const tests = struct {
                     // slice
 
                     const Data = struct { list: []const []const u32 };
-                    var data = Data{ .list = &.{
+                    const data = Data{ .list = &.{
                         &.{ 1, 2, 3 },
                         &.{ 4, 5, 6 },
                     } };
@@ -2209,7 +2208,7 @@ const tests = struct {
                 {
                     // array
                     const Data = struct { list: [2][3]u32 };
-                    var data = Data{ .list = .{
+                    const data = Data{ .list = .{
                         .{ 1, 2, 3 },
                         .{ 4, 5, 6 },
                     } };
@@ -2218,7 +2217,7 @@ const tests = struct {
 
                 {
                     // tuple
-                    var data = .{ .list = .{
+                    const data = .{ .list = .{
                         .{ 1, 2, 3 },
                         .{ 4, 5, 6 },
                     } };
@@ -2235,7 +2234,7 @@ const tests = struct {
                 const expected = "(123)(abc)";
 
                 // Tuple is the only way to have mixed element types inside a list
-                var data = .{ .list = .{
+                const data = .{ .list = .{
                     .{ 1, 2, 3 },
                     .{ "a", "b", "c" },
                 } };
@@ -2250,7 +2249,7 @@ const tests = struct {
                 const template_text = "'{{#a.b.c}}Here{{/a.b.c}}' == 'Here'";
                 const expected = "'Here' == 'Here'";
 
-                var data = .{ .a = .{ .b = .{ .c = true } } };
+                const data = .{ .a = .{ .b = .{ .c = true } } };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2259,7 +2258,7 @@ const tests = struct {
                 const template_text = "'{{#a.b.c}}Here{{/a.b.c}}' == ''";
                 const expected = "'' == ''";
 
-                var data = .{ .a = .{ .b = .{ .c = false } } };
+                const data = .{ .a = .{ .b = .{ .c = false } } };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2268,7 +2267,7 @@ const tests = struct {
                 const template_text = "'{{#a.b.c}}Here{{/a.b.c}}' == ''";
                 const expected = "'' == ''";
 
-                var data = .{ .a = .{} };
+                const data = .{ .a = .{} };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2277,7 +2276,7 @@ const tests = struct {
                 const template_text = " | {{#boolean}}\t|\t{{/boolean}} | \n";
                 const expected = " | \t|\t | \n";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2286,7 +2285,7 @@ const tests = struct {
                 const template_text = " | {{#boolean}} {{! Important Whitespace }}\n {{/boolean}} | \n";
                 const expected = " |  \n  | \n";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2295,7 +2294,7 @@ const tests = struct {
                 const template_text = " {{#boolean}}YES{{/boolean}}\n {{#boolean}}GOOD{{/boolean}}\n";
                 const expected = " YES\n GOOD\n";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2314,7 +2313,7 @@ const tests = struct {
                     \\| A Line
                 ;
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2333,7 +2332,7 @@ const tests = struct {
                     \\| A Line
                 ;
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2342,7 +2341,7 @@ const tests = struct {
                 const template_text = "|\r\n{{#boolean}}\r\n{{/boolean}}\r\n|";
                 const expected = "|\r\n|";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2351,7 +2350,7 @@ const tests = struct {
                 const template_text = "  {{#boolean}}\n#{{/boolean}}\n/";
                 const expected = "#\n/";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2360,7 +2359,7 @@ const tests = struct {
                 const template_text = "#{{#boolean}}\n/\n  {{/boolean}}";
                 const expected = "#\n/\n";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2369,7 +2368,7 @@ const tests = struct {
                 const template_text = "|{{# boolean }}={{/ boolean }}|";
                 const expected = "|=|";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
         };
@@ -2383,7 +2382,7 @@ const tests = struct {
                 const template_text = "{{^boolean}}This should be rendered.{{/boolean}}";
                 const expected = "This should be rendered.";
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2392,7 +2391,7 @@ const tests = struct {
                 const template_text = "{{^boolean}}This should not be rendered.{{/boolean}}";
                 const expected = "";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2403,14 +2402,14 @@ const tests = struct {
 
                 {
                     // comptime
-                    var data = .{ .null = null };
+                    const data = .{ .null = null };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // runtime
                     const Data = struct { null: ?u0 };
-                    var data = Data{ .null = null };
+                    const data = Data{ .null = null };
                     try expectRender(template_text, data, expected);
                 }
             }
@@ -2420,7 +2419,7 @@ const tests = struct {
                 const template_text = "{{^context}}Hi {{name}}.{{/context}}";
                 const expected = "";
 
-                var data = .{ .context = .{ .name = "Joe" } };
+                const data = .{ .context = .{ .name = "Joe" } };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2432,20 +2431,20 @@ const tests = struct {
                 {
                     // Slice
                     const Data = struct { list: []const struct { n: u32 } };
-                    var data = Data{ .list = &.{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
+                    const data = Data{ .list = &.{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // Array
                     const Data = struct { list: [3]struct { n: u32 } };
-                    var data = Data{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
+                    const data = Data{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // tuple
-                    var data = .{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
+                    const data = .{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
                     try expectCachedRender(template_text, data, expected);
                     try expectComptimeRender(template_text, data, expected);
                     try expectStreamedRender(template_text, data, expected);
@@ -2460,20 +2459,20 @@ const tests = struct {
                 {
                     // Slice
                     const Data = struct { list: []const struct { n: u32 } };
-                    var data = Data{ .list = &.{} };
+                    const data = Data{ .list = &.{} };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // Array
                     const Data = struct { list: [0]struct { n: u32 } };
-                    var data = Data{ .list = .{} };
+                    const data = Data{ .list = .{} };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // tuple
-                    var data = .{ .list = .{} };
+                    const data = .{ .list = .{} };
                     try expectCachedRender(template_text, data, expected);
                     try expectComptimeRender(template_text, data, expected);
                     try expectStreamedRender(template_text, data, expected);
@@ -2499,7 +2498,7 @@ const tests = struct {
                 ;
 
                 const Data = struct { bool: bool, two: []const u8 };
-                var data = Data{ .bool = false, .two = "second" };
+                const data = Data{ .bool = false, .two = "second" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2508,7 +2507,7 @@ const tests = struct {
                 const template_text = "| A {{^bool}}B {{^bool}}C{{/bool}} D{{/bool}} E |";
                 const expected = "| A B C D E |";
 
-                var data = .{ .bool = false };
+                const data = .{ .bool = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2517,7 +2516,7 @@ const tests = struct {
                 const template_text = "| A {{^bool}}B {{^bool}}C{{/bool}} D{{/bool}} E |";
                 const expected = "| A  E |";
 
-                var data = .{ .bool = true };
+                const data = .{ .bool = true };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2526,7 +2525,7 @@ const tests = struct {
                 const template_text = "[{{^missing}}Cannot find key 'missing'!{{/missing}}]";
                 const expected = "[Cannot find key 'missing'!]";
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2535,7 +2534,7 @@ const tests = struct {
                 const template_text = "'{{^a.b.c}}Not Here{{/a.b.c}}' == ''";
                 const expected = "'' == ''";
 
-                var data = .{ .a = .{ .b = .{ .c = true } } };
+                const data = .{ .a = .{ .b = .{ .c = true } } };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2544,7 +2543,7 @@ const tests = struct {
                 const template_text = "'{{^a.b.c}}Not Here{{/a.b.c}}' == 'Not Here'";
                 const expected = "'Not Here' == 'Not Here'";
 
-                var data = .{ .a = .{ .b = .{ .c = false } } };
+                const data = .{ .a = .{ .b = .{ .c = false } } };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2553,7 +2552,7 @@ const tests = struct {
                 const template_text = "'{{^a.b.c}}Not Here{{/a.b.c}}' == 'Not Here'";
                 const expected = "'Not Here' == 'Not Here'";
 
-                var data = .{ .a = .{} };
+                const data = .{ .a = .{} };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2562,7 +2561,7 @@ const tests = struct {
                 const template_text = " | {{^boolean}}\t|\t{{/boolean}} | \n";
                 const expected = " | \t|\t | \n";
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2571,7 +2570,7 @@ const tests = struct {
                 const template_text = " | {{^boolean}} {{! Important Whitespace }}\n {{/boolean}} | \n";
                 const expected = " |  \n  | \n";
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2580,7 +2579,7 @@ const tests = struct {
                 const template_text = " {{^boolean}}NO{{/boolean}}\n {{^boolean}}WAY{{/boolean}}\n";
                 const expected = " NO\n WAY\n";
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2599,7 +2598,7 @@ const tests = struct {
                     \\| A Line
                 ;
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2618,7 +2617,7 @@ const tests = struct {
                     \\| A Line
                 ;
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2627,7 +2626,7 @@ const tests = struct {
                 const template_text = "|\r\n{{^boolean}}\r\n{{/boolean}}\r\n|";
                 const expected = "|\r\n|";
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2636,7 +2635,7 @@ const tests = struct {
                 const template_text = "  {{^boolean}}\n^{{/boolean}}\n/";
                 const expected = "^\n/";
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2645,7 +2644,7 @@ const tests = struct {
                 const template_text = "^{{^boolean}}\n/\n  {{/boolean}}";
                 const expected = "^\n/\n";
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2654,7 +2653,7 @@ const tests = struct {
                 const template_text = "|{{^ boolean }}={{/ boolean }}|";
                 const expected = "|=|";
 
-                var data = .{ .boolean = false };
+                const data = .{ .boolean = false };
                 try expectRender(template_text, data, expected);
             }
         };
@@ -2668,7 +2667,7 @@ const tests = struct {
                 const template_text = "{{=<% %>=}}(<%text%>)";
                 const expected = "(Hey!)";
 
-                var data = .{ .text = "Hey!" };
+                const data = .{ .text = "Hey!" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2677,7 +2676,7 @@ const tests = struct {
                 const template_text = "({{=[ ]=}}[text])";
                 const expected = "(It worked!)";
 
-                var data = .{ .text = "It worked!" };
+                const data = .{ .text = "It worked!" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2706,7 +2705,7 @@ const tests = struct {
                     \\]
                 ;
 
-                var data = .{ .section = true, .data = "I got interpolated." };
+                const data = .{ .section = true, .data = "I got interpolated." };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2735,7 +2734,7 @@ const tests = struct {
                     \\]
                 ;
 
-                var data = .{ .section = false, .data = "I got interpolated." };
+                const data = .{ .section = false, .data = "I got interpolated." };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2759,7 +2758,7 @@ const tests = struct {
                     \\[ .yes. ]
                 ;
 
-                var data = .{ .value = "yes" };
+                const data = .{ .value = "yes" };
                 try expectRenderPartials(template_text, partials_text, data, expected);
             }
 
@@ -2782,7 +2781,7 @@ const tests = struct {
                     \\[ .yes.  .|value|. ]
                 ;
 
-                var data = .{ .value = "yes" };
+                const data = .{ .value = "yes" };
                 try expectRenderPartials(template_text, partials_text, data, expected);
             }
 
@@ -2791,7 +2790,7 @@ const tests = struct {
                 const template_text = "| {{=@ @=}} |";
                 const expected = "|  |";
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2800,7 +2799,7 @@ const tests = struct {
                 const template_text = " | {{=@ @=}}\n";
                 const expected = " | \n";
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2817,7 +2816,7 @@ const tests = struct {
                     \\End.
                 ;
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2826,7 +2825,7 @@ const tests = struct {
                 const template_text = "|\r\n{{= @ @ =}}\r\n|";
                 const expected = "|\r\n|";
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2835,7 +2834,7 @@ const tests = struct {
                 const template_text = "  {{=@ @=}}\n=";
                 const expected = "=";
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2844,7 +2843,7 @@ const tests = struct {
                 const template_text = "=\n  {{=@ @=}}";
                 const expected = "=\n";
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2853,7 +2852,7 @@ const tests = struct {
                 const template_text = "|{{= @   @ =}}|";
                 const expected = "||";
 
-                var data = .{};
+                const data = .{};
                 try expectRender(template_text, data, expected);
             }
         };
@@ -2875,7 +2874,7 @@ const tests = struct {
                 const template_text = "Hello, {{lambda}}!";
                 const expected = "Hello, world!";
 
-                var data = Data{ .text = "Hey!" };
+                const data = Data{ .text = "Hey!" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2892,7 +2891,7 @@ const tests = struct {
                 const template_text = "Hello, {{lambda}}!";
                 const expected = "Hello, world!";
 
-                var data = Data{ .planet = "world" };
+                const data = Data{ .planet = "world" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2909,7 +2908,7 @@ const tests = struct {
                 const template_text = "{{= | | =}}\nHello, (|&lambda|)!";
                 const expected = "Hello, (|planet| => world)!";
 
-                var data = Data{ .planet = "world" };
+                const data = Data{ .planet = "world" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -2945,7 +2944,7 @@ const tests = struct {
                 const template_text = "<{{lambda}}{{{lambda}}}";
                 const expected = "<&gt;>";
 
-                var data = Data{};
+                const data = Data{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2964,7 +2963,7 @@ const tests = struct {
                 const template_text = "<{{#lambda}}{{x}}{{/lambda}}>";
                 const expected = "<yes>";
 
-                var data = Data{};
+                const data = Data{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -2981,7 +2980,7 @@ const tests = struct {
                 const template_text = "<{{#lambda}}-{{/lambda}}>";
                 const expected = "<-Earth->";
 
-                var data = Data{ .planet = "Earth" };
+                const data = Data{ .planet = "Earth" };
                 try expectRender(template_text, data, expected);
             }
 
@@ -3013,7 +3012,7 @@ const tests = struct {
                 const template_text = "{{#lambda}}FILE{{/lambda}} != {{#lambda}}LINE{{/lambda}}";
                 const expected = "__FILE__ != __LINE__";
 
-                var data = Data{};
+                const data = Data{};
                 try expectRender(template_text, data, expected);
             }
 
@@ -3030,7 +3029,7 @@ const tests = struct {
                 const template_text = "<{{^lambda}}{{static}}{{/lambda}}>";
                 const expected = "<>";
 
-                var data = Data{ .static = "static" };
+                const data = Data{ .static = "static" };
                 try expectRender(template_text, data, expected);
             }
         };
@@ -3048,7 +3047,7 @@ const tests = struct {
 
                 const expected: []const u8 = "'from partial'";
 
-                var data = .{};
+                const data = .{};
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
@@ -3059,7 +3058,7 @@ const tests = struct {
 
                 const expected = "''";
 
-                var data = .{};
+                const data = .{};
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
@@ -3097,7 +3096,7 @@ const tests = struct {
 
                 const expected: []const u8 = "X<Y<>>";
 
-                var data = Content{ .content = "X", .nodes = &.{Content{ .content = "Y", .nodes = &.{} }} };
+                const data = Content{ .content = "X", .nodes = &.{Content{ .content = "Y", .nodes = &.{} }} };
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
@@ -3110,7 +3109,7 @@ const tests = struct {
 
                 const expected = "| \t|\t |";
 
-                var data = .{};
+                const data = .{};
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
@@ -3123,7 +3122,7 @@ const tests = struct {
 
                 const expected = "  |  >\n>\n";
 
-                var data = .{ .data = "|" };
+                const data = .{ .data = "|" };
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
@@ -3136,7 +3135,7 @@ const tests = struct {
 
                 const expected = "|\r\n>|";
 
-                var data = .{};
+                const data = .{};
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
@@ -3149,7 +3148,7 @@ const tests = struct {
 
                 const expected = "  >\n  >>";
 
-                var data = .{};
+                const data = .{};
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
@@ -3162,7 +3161,7 @@ const tests = struct {
 
                 const expected = ">\n  >\n  >";
 
-                var data = .{};
+                const data = .{};
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
 
@@ -3208,7 +3207,7 @@ const tests = struct {
 
                 const expected: []const u8 = "|[]|";
 
-                var data = .{ .boolean = true };
+                const data = .{ .boolean = true };
                 try expectRenderPartials(template_text, partials_template_text, data, expected);
             }
         };
@@ -3219,7 +3218,7 @@ const tests = struct {
             const template_text = "|👉={{emoji}}|";
             const expected = "|👉=👈|";
 
-            var data = .{ .emoji = "👈" };
+            const data = .{ .emoji = "👈" };
             try expectRender(template_text, data, expected);
         }
 
@@ -3227,7 +3226,7 @@ const tests = struct {
             const template_text = "{{=👉 👈=}}👉message👈";
             const expected = "this is a message";
 
-            var data = .{ .message = "this is a message" };
+            const data = .{ .message = "this is a message" };
             try expectRender(template_text, data, expected);
         }
 
@@ -3235,7 +3234,7 @@ const tests = struct {
             const template_text = "|mustache|{{arabic}}|{{japanese}}|{{russian}}|{{chinese}}|";
             const expected = "|mustache|شوارب|口ひげ|усы|胡子|";
 
-            var data = .{ .arabic = "شوارب", .japanese = "口ひげ", .russian = "усы", .chinese = "胡子" };
+            const data = .{ .arabic = "شوارب", .japanese = "口ひげ", .russian = "усы", .chinese = "胡子" };
             try expectRender(template_text, data, expected);
         }
 
@@ -3313,7 +3312,7 @@ const tests = struct {
 
             const template_text = "{{#lower}}Name={{name}}{{/lower}}";
             const expected = "name=phill";
-            var data = Data{ .name = "Phill" };
+            const data = Data{ .name = "Phill" };
             try expectRender(template_text, data, expected);
         }
 
@@ -3322,7 +3321,7 @@ const tests = struct {
                 name: []const u8,
 
                 pub fn lower(ctx: LambdaContext) !void {
-                    var text = try ctx.renderAlloc(testing.allocator, ctx.inner_text);
+                    const text = try ctx.renderAlloc(testing.allocator, ctx.inner_text);
                     defer testing.allocator.free(text);
 
                     for (text) |*char| {
@@ -3349,7 +3348,7 @@ const tests = struct {
 
             const template_text = "{{#upper}}{{#lower}}Name={{name}}{{/lower}}{{/upper}}";
             const expected = "NAME=PHILL";
-            var data = Data{ .name = "Phill" };
+            const data = Data{ .name = "Phill" };
             try expectRender(template_text, data, expected);
         }
 
@@ -3423,7 +3422,7 @@ const tests = struct {
                 content: []const u8,
 
                 pub fn hash(ctx: LambdaContext) !void {
-                    var content = try ctx.renderAlloc(testing.allocator, ctx.inner_text);
+                    const content = try ctx.renderAlloc(testing.allocator, ctx.inner_text);
                     defer testing.allocator.free(content);
 
                     const hash_value = std.hash.Crc32.hash(content);
@@ -3434,7 +3433,7 @@ const tests = struct {
 
             const template_text = "<header id='{{id}}' hash='{{#hash}}{{id}}{{content}}{{/hash}}'/>";
 
-            var header = Header{ .id = 100, .content = "This is some content" };
+            const header = Header{ .id = 100, .content = "This is some content" };
             try expectRender(template_text, header, "<header id='100' hash='4174482081'/>");
         }
 
@@ -3456,7 +3455,7 @@ const tests = struct {
             ;
 
             const Item = struct { item: i32 };
-            var data = .{
+            const data = .{
                 .list = &[_]Item{
                     .{ .item = 1 },
                     .{ .item = 2 },
@@ -3513,7 +3512,7 @@ const tests = struct {
             ;
 
             const Item = struct { id: u32, desc: []const u8 };
-            var data = .{
+            const data = .{
                 .list = &[_]Item{
                     .{ .id = 1, .desc = "task a" },
                     .{ .id = 2, .desc = "task b" },
@@ -3577,28 +3576,28 @@ const tests = struct {
             const expected = "hello world";
 
             {
-                var ret = try mustache.allocRender(testing.allocator, template, data);
+                const ret = try mustache.allocRender(testing.allocator, template, data);
                 defer testing.allocator.free(ret);
 
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderPartials(testing.allocator, template, partials, data);
+                const ret = try mustache.allocRenderPartials(testing.allocator, template, partials, data);
                 defer testing.allocator.free(ret);
 
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderWithOptions(testing.allocator, template, data, options);
+                const ret = try mustache.allocRenderWithOptions(testing.allocator, template, data, options);
                 defer testing.allocator.free(ret);
 
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderPartialsWithOptions(testing.allocator, template, partials, data, options);
+                const ret = try mustache.allocRenderPartialsWithOptions(testing.allocator, template, partials, data, options);
                 defer testing.allocator.free(ret);
 
                 try testing.expectEqualStrings(ret, expected);
@@ -3615,28 +3614,28 @@ const tests = struct {
             const expected = "hello world";
 
             {
-                var ret = try mustache.allocRenderZ(testing.allocator, template, data);
+                const ret = try mustache.allocRenderZ(testing.allocator, template, data);
                 defer testing.allocator.free(ret);
 
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderZPartials(testing.allocator, template, partials, data);
+                const ret = try mustache.allocRenderZPartials(testing.allocator, template, partials, data);
                 defer testing.allocator.free(ret);
 
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderZWithOptions(testing.allocator, template, data, options);
+                const ret = try mustache.allocRenderZWithOptions(testing.allocator, template, data, options);
                 defer testing.allocator.free(ret);
 
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderZPartialsWithOptions(testing.allocator, template, partials, data, options);
+                const ret = try mustache.allocRenderZPartialsWithOptions(testing.allocator, template, partials, data, options);
                 defer testing.allocator.free(ret);
 
                 try testing.expectEqualStrings(ret, expected);
@@ -3654,22 +3653,22 @@ const tests = struct {
             const expected = "hello world";
 
             {
-                var ret = try mustache.bufRender(&buf, template, data);
+                const ret = try mustache.bufRender(&buf, template, data);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.bufRenderPartials(&buf, template, partials, data);
+                const ret = try mustache.bufRenderPartials(&buf, template, partials, data);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.bufRenderWithOptions(&buf, template, data, options);
+                const ret = try mustache.bufRenderWithOptions(&buf, template, data, options);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.bufRenderPartialsWithOptions(&buf, template, partials, data, options);
+                const ret = try mustache.bufRenderPartialsWithOptions(&buf, template, partials, data, options);
                 try testing.expectEqualStrings(ret, expected);
             }
         }
@@ -3685,22 +3684,22 @@ const tests = struct {
             const expected = "hello world";
 
             {
-                var ret = try mustache.bufRenderZ(&buf, template, data);
+                const ret = try mustache.bufRenderZ(&buf, template, data);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.bufRenderZPartials(&buf, template, partials, data);
+                const ret = try mustache.bufRenderZPartials(&buf, template, partials, data);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.bufRenderZWithOptions(&buf, template, data, options);
+                const ret = try mustache.bufRenderZWithOptions(&buf, template, data, options);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.bufRenderZPartialsWithOptions(&buf, template, partials, data, options);
+                const ret = try mustache.bufRenderZPartialsWithOptions(&buf, template, partials, data, options);
                 try testing.expectEqualStrings(ret, expected);
             }
         }
@@ -3837,25 +3836,25 @@ const tests = struct {
             const expected = "hello world";
 
             {
-                var ret = try mustache.allocRenderText(testing.allocator, template_text, data);
+                const ret = try mustache.allocRenderText(testing.allocator, template_text, data);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderTextPartials(testing.allocator, template_text, partials, data);
+                const ret = try mustache.allocRenderTextPartials(testing.allocator, template_text, partials, data);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderTextWithOptions(testing.allocator, template_text, data, options);
+                const ret = try mustache.allocRenderTextWithOptions(testing.allocator, template_text, data, options);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderTextPartialsWithOptions(testing.allocator, template_text, partials, data, options);
+                const ret = try mustache.allocRenderTextPartialsWithOptions(testing.allocator, template_text, partials, data, options);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
@@ -3869,25 +3868,25 @@ const tests = struct {
             const expected = "hello world";
 
             {
-                var ret = try mustache.allocRenderTextZ(testing.allocator, template_text, data);
+                const ret = try mustache.allocRenderTextZ(testing.allocator, template_text, data);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderTextZPartials(testing.allocator, template_text, partials, data);
+                const ret = try mustache.allocRenderTextZPartials(testing.allocator, template_text, partials, data);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderTextZWithOptions(testing.allocator, template_text, data, options);
+                const ret = try mustache.allocRenderTextZWithOptions(testing.allocator, template_text, data, options);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderTextZPartialsWithOptions(testing.allocator, template_text, partials, data, options);
+                const ret = try mustache.allocRenderTextZPartialsWithOptions(testing.allocator, template_text, partials, data, options);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
@@ -3903,7 +3902,7 @@ const tests = struct {
             const partials = .{};
             const expected = "hello world";
 
-            var absolute_path = try getTemplateFile(tmp.dir, "renderFile.mustache", template_text);
+            const absolute_path = try getTemplateFile(tmp.dir, "renderFile.mustache", template_text);
             defer testing.allocator.free(absolute_path);
 
             {
@@ -3941,29 +3940,29 @@ const tests = struct {
             const partials = .{};
             const expected = "hello world";
 
-            var absolute_path = try getTemplateFile(tmp.dir, "allocRenderFile.mustache", template_text);
+            const absolute_path = try getTemplateFile(tmp.dir, "allocRenderFile.mustache", template_text);
             defer testing.allocator.free(absolute_path);
 
             {
-                var ret = try mustache.allocRenderFile(testing.allocator, absolute_path, data);
+                const ret = try mustache.allocRenderFile(testing.allocator, absolute_path, data);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderFilePartials(testing.allocator, absolute_path, partials, data);
+                const ret = try mustache.allocRenderFilePartials(testing.allocator, absolute_path, partials, data);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderFileWithOptions(testing.allocator, absolute_path, data, options);
+                const ret = try mustache.allocRenderFileWithOptions(testing.allocator, absolute_path, data, options);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderFilePartialsWithOptions(testing.allocator, absolute_path, partials, data, options);
+                const ret = try mustache.allocRenderFilePartialsWithOptions(testing.allocator, absolute_path, partials, data, options);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
@@ -3979,29 +3978,29 @@ const tests = struct {
             const partials = .{};
             const expected = "hello world";
 
-            var absolute_path = try getTemplateFile(tmp.dir, "allocRenderFile.mustache", template_text);
+            const absolute_path = try getTemplateFile(tmp.dir, "allocRenderFile.mustache", template_text);
             defer testing.allocator.free(absolute_path);
 
             {
-                var ret = try mustache.allocRenderFileZ(testing.allocator, absolute_path, data);
+                const ret = try mustache.allocRenderFileZ(testing.allocator, absolute_path, data);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderFileZPartials(testing.allocator, absolute_path, partials, data);
+                const ret = try mustache.allocRenderFileZPartials(testing.allocator, absolute_path, partials, data);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderFileZWithOptions(testing.allocator, absolute_path, data, options);
+                const ret = try mustache.allocRenderFileZWithOptions(testing.allocator, absolute_path, data, options);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
 
             {
-                var ret = try mustache.allocRenderFileZPartialsWithOptions(testing.allocator, absolute_path, partials, data, options);
+                const ret = try mustache.allocRenderFileZPartialsWithOptions(testing.allocator, absolute_path, partials, data, options);
                 defer testing.allocator.free(ret);
                 try testing.expectEqualStrings(ret, expected);
             }
@@ -4148,13 +4147,13 @@ const tests = struct {
         var cached_template = try expectParseTemplate(template_text);
         defer cached_template.deinit(allocator);
 
-        var result = try allocRender(allocator, cached_template, data);
+        const result = try allocRender(allocator, cached_template, data);
         defer allocator.free(result);
         try testing.expectEqualStrings(expected, result);
     }
 
     fn hasLambda(comptime Data: type) bool {
-        if (trait.isSingleItemPtr(Data)) {
+        if (mustache.isSingleItemPtr(Data)) {
             return hasLambda(meta.Child(Data));
         } else {
             const info = @typeInfo(Data);
@@ -4183,7 +4182,7 @@ const tests = struct {
         var json_obj = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
         defer json_obj.deinit();
 
-        var result = try allocRender(allocator, cached_template, json_obj.value);
+        const result = try allocRender(allocator, cached_template, json_obj.value);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
@@ -4194,9 +4193,9 @@ const tests = struct {
             const allocator = testing.allocator;
 
             // Comptime template render
-            var comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
+            const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
 
-            var result = try allocRender(allocator, comptime_template, data);
+            const result = try allocRender(allocator, comptime_template, data);
             defer allocator.free(result);
             try testing.expectEqualStrings(expected, result);
         }
@@ -4225,7 +4224,7 @@ const tests = struct {
             try hashMap.put(item[0], partial_template);
         }
 
-        var result = try allocRenderPartials(allocator, cached_template, hashMap, data);
+        const result = try allocRenderPartials(allocator, cached_template, hashMap, data);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
@@ -4260,7 +4259,7 @@ const tests = struct {
         var json_obj = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
         defer json_obj.deinit();
 
-        var result = try allocRenderPartials(allocator, cached_template, hashMap, json_obj.value);
+        const result = try allocRenderPartials(allocator, cached_template, hashMap, json_obj.value);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
@@ -4270,19 +4269,19 @@ const tests = struct {
         if (comptime_tests_enabled) {
             const allocator = testing.allocator;
             // Cached template render
-            var comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
+            const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
 
             const PartialTuple = std.meta.Tuple(&[_]type{ []const u8, Template });
             comptime var comptime_partials: [partials.len]PartialTuple = undefined;
 
             comptime {
                 inline for (partials, 0..) |item, index| {
-                    var partial_template = mustache.parseComptime(item[1], .{}, .{});
+                    const partial_template = mustache.parseComptime(item[1], .{}, .{});
                     comptime_partials[index] = .{ item[0], partial_template };
                 }
             }
 
-            var result = try allocRenderPartials(allocator, comptime_template, comptime_partials, data);
+            const result = try allocRenderPartials(allocator, comptime_template, comptime_partials, data);
             defer allocator.free(result);
 
             try testing.expectEqualStrings(expected, result);
@@ -4292,7 +4291,7 @@ const tests = struct {
     fn expectStreamedRenderPartials(template_text: []const u8, partials: anytype, data: anytype, expected: []const u8) anyerror!void {
         const allocator = testing.allocator;
 
-        var result = try allocRenderTextPartials(allocator, template_text, partials, data);
+        const result = try allocRenderTextPartials(allocator, template_text, partials, data);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);
@@ -4302,7 +4301,7 @@ const tests = struct {
         const allocator = testing.allocator;
 
         // Streamed template render
-        var result = try allocRenderText(allocator, template_text, data);
+        const result = try allocRenderText(allocator, template_text, data);
         defer allocator.free(result);
 
         try testing.expectEqualStrings(expected, result);

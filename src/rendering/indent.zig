@@ -46,7 +46,7 @@ pub const IndentationQueue = struct {
             } else {
                 var current_level: *Node = list.head;
                 while (true) {
-                    var next_level = current_level.next orelse break;
+                    const next_level = current_level.next orelse break;
                     defer current_level = next_level;
 
                     if (next_level == list.tail) {

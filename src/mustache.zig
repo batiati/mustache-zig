@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const template = @import("template.zig");
 const rendering = @import("rendering/rendering.zig");
+const util = @import("util.zig");
 
 pub const ParseError = template.ParseError;
 pub const ParseErrorDetail = template.ParseErrorDetail;
@@ -74,6 +75,17 @@ pub const allocRenderFileZPartials = rendering.allocRenderFileZPartials;
 pub const allocRenderFileZPartialsWithOptions = rendering.allocRenderFileZPartialsWithOptions;
 
 pub const LambdaContext = rendering.LambdaContext;
+
+pub const isSingleItemPtr = util.isSingleItemPtr;
+pub const isTuple = util.isTuple;
+pub const is = util.is;
+pub const isIndexable = util.isIndexable;
+pub const isSlice = util.isSlice;
+pub const isFloat = util.isFloat;
+pub const isIntegral = util.isIntegral;
+pub const isZigString = util.isZigString;
+pub const hasDecls = util.hasDecls;
+pub const hasFields = util.hasFields;
 
 test {
     _ = template;

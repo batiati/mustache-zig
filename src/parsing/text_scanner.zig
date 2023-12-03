@@ -564,7 +564,7 @@ test "basic tests" {
     try expectTag(.static_text, "Until eof", part_5, 2, 18);
     defer part_5.?.unRef(allocator);
 
-    var part_6 = try reader.next(allocator);
+    const part_6 = try reader.next(allocator);
     try testing.expect(part_6 == null);
 }
 
@@ -601,7 +601,7 @@ test "custom tags" {
     try expectTag(.static_text, "Until eof", part_5, 2, 14);
     defer part_5.?.unRef(allocator);
 
-    var part_6 = try reader.next(allocator);
+    const part_6 = try reader.next(allocator);
     try testing.expect(part_6 == null);
 }
 
@@ -619,7 +619,7 @@ test "EOF" {
     try expectTag(.interpolation, "tag1", part_1, 1, 1);
     defer part_1.?.unRef(allocator);
 
-    var part_2 = try reader.next(allocator);
+    const part_2 = try reader.next(allocator);
     try testing.expect(part_2 == null);
 }
 
@@ -637,7 +637,7 @@ test "EOF custom tags" {
     try expectTag(.interpolation, "tag1", part_1, 1, 1);
     defer part_1.?.unRef(allocator);
 
-    var part_2 = try reader.next(allocator);
+    const part_2 = try reader.next(allocator);
     try testing.expect(part_2 == null);
 }
 
@@ -703,7 +703,7 @@ test "bookmarks" {
         try testing.expect(false);
     }
 
-    var part_8 = try reader.next(allocator);
+    const part_8 = try reader.next(allocator);
     try testing.expect(part_8 == null);
 }
 

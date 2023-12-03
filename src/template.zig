@@ -405,7 +405,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             defer parser.deinit();
 
             var collector = Collector{};
-            var success = try parser.parse(&collector);
+            const success = try parser.parse(&collector);
 
             self.result = if (success) .{
                 .elements = collector.elements,
@@ -2414,8 +2414,8 @@ const tests = struct {
 
     const api = struct {
         test "parseText API" {
-            var result = result: {
-                var template_text = try testing.allocator.dupe(u8, "{{hello}}world");
+            const result = result: {
+                const template_text = try testing.allocator.dupe(u8, "{{hello}}world");
                 defer testing.allocator.free(template_text);
 
                 break :result try parseText(testing.allocator, template_text, .{}, .{ .copy_strings = true });
@@ -2447,11 +2447,11 @@ const tests = struct {
         }
 
         test "parseFile API" {
-            var result = result: {
+            const result = result: {
                 var tmp = testing.tmpDir(.{});
                 defer tmp.cleanup();
 
-                var file_name = file_name: {
+                const file_name = file_name: {
                     const name = "parseFile.mustache";
 
                     {

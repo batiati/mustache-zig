@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const meta = std.meta;
-const trait = std.meta.trait;
 
 const testing = std.testing;
 const assert = std.debug.assert;
@@ -155,7 +154,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 ) TError!Result {
                     const decls = comptime std.meta.declarations(TValue);
                     inline for (decls) |decl| {
-                        const has_fn = comptime trait.hasFn(decl.name)(TValue);
+                        const has_fn = comptime meta.hasFn(decl.name)(TValue);
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
@@ -213,7 +212,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     switch (@typeInfo(TValue)) {
                         .Struct => |info| {
                             if (info.is_tuple) {
-                                const derref = comptime trait.isSingleItemPtr(Data);
+                                const derref = comptime mustache.isSingleItemPtr(Data);
                                 inline for (0..info.fields.len) |i| {
                                     if (index == i) {
                                         return Result{
@@ -352,7 +351,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             params: anytype,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
-            if (comptime !std.meta.trait.isTuple(@TypeOf(params)) and params.len != 2) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
+            if (comptime !mustache.isTuple(@TypeOf(params)) and params.len != 2) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
 
             var data_render: *DataRender = params.@"0";
             const escape: Escape = params.@"1";
@@ -370,7 +369,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             params: anytype,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
-            if (comptime !std.meta.trait.isTuple(@TypeOf(params)) and params.len != 4) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
+            if (comptime !mustache.isTuple(@TypeOf(params)) and params.len != 4) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
             if (comptime !lambda.isLambdaInvoker(@TypeOf(value))) return;
 
             const Error = Allocator.Error || Writer.Error;
@@ -392,7 +391,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             // Errors are intentionally ignored on lambda calls, interpolating empty strings
             value.invoke(lambda_context) catch |e| {
                 if (isOnErrorSet(Error, e)) {
-                    const err: Error = @errSetCast(e);
+                    const err: Error = @errorCast(e);
                     return err;
                 }
             };
@@ -493,7 +492,7 @@ const invoker_tests = struct {
 
     fn dummyAction(comptime TExpected: type, value: anytype) error{}!bool {
         const TValue = @TypeOf(value);
-        const expected = comptime (TExpected == TValue) or (trait.isSingleItemPtr(TValue) and meta.Child(TValue) == TExpected);
+        const expected = comptime (TExpected == TValue) or (mustache.isSingleItemPtr(TValue) and meta.Child(TValue) == TExpected);
         if (!expected) {
             std.log.err(
                 \\ Invalid iterator type
@@ -508,7 +507,7 @@ const invoker_tests = struct {
         var parser = try DummyParser.init(testing.allocator, "", .{});
         defer parser.deinit();
 
-        var path = try parser.parsePath(identifier);
+        const path = try parser.parsePath(identifier);
         defer Element.destroyPath(testing.allocator, false, path);
 
         return try DummyCaller.call(TExpected, &data, path, index);
@@ -538,25 +537,25 @@ const invoker_tests = struct {
 
     test "Comptime seek - self" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectFound(Data, data, "");
     }
 
     test "Comptime seek - dot" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectFound(Data, data, ".");
     }
 
     test "Comptime seek - not found" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectNotFound(data, "wrong");
     }
 
     test "Comptime seek - found" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectFound(@TypeOf(data.a1), data, "a1");
 
         try expectFound(@TypeOf(data.a2), data, "a2");
@@ -564,19 +563,19 @@ const invoker_tests = struct {
 
     test "Comptime seek - self null" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data: ?Data = null;
+        const data: ?Data = null;
         try expectFound(?Data, data, "");
     }
 
     test "Comptime seek - self dot" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data: ?Data = null;
+        const data: ?Data = null;
         try expectFound(?Data, data, ".");
     }
 
     test "Comptime seek - found nested" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectFound(@TypeOf(data.a1.b1), data, "a1.b1");
         try expectFound(@TypeOf(data.a1.b2), data, "a1.b2");
         try expectFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1");
@@ -586,7 +585,7 @@ const invoker_tests = struct {
 
     test "Comptime seek - not found nested" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectNotFound(data, "a1.wong");
         try expectNotFound(data, "a1.b1.wong");
         try expectNotFound(data, "a1.b2.wrong");
@@ -597,7 +596,7 @@ const invoker_tests = struct {
 
     test "Comptime seek - null nested" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectFound(@TypeOf(data.a_null), data, "a_null");
         try expectFound(@TypeOf(data.a1.b_null), data, "a1.b_null");
         try expectFound(@TypeOf(data.a1.b1.c_null), data, "a1.b1.c_null");
@@ -606,45 +605,45 @@ const invoker_tests = struct {
 
     test "Comptime iter - self" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(Data, data, "", 0);
     }
 
     test "Comptime iter consumed - self" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterNotFound(data, "", 1);
     }
 
     test "Comptime iter - dot" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(Data, data, ".", 0);
     }
 
     test "Comptime iter consumed - dot" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterNotFound(data, ".", 1);
     }
 
     test "Comptime seek - not found 2" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterNotFound(data, "wrong", 0);
         try expectIterNotFound(data, "wrong", 1);
     }
 
     test "Comptime iter - found" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(@TypeOf(data.a1), data, "a1", 0);
         try expectIterFound(@TypeOf(data.a2), data, "a2", 0);
     }
 
     test "Comptime iter consumed - found" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterNotFound(data, "a1", 1);
 
         try expectIterNotFound(data, "a2", 1);
@@ -652,7 +651,7 @@ const invoker_tests = struct {
 
     test "Comptime iter - found nested" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(@TypeOf(data.a1.b1), data, "a1.b1", 0);
         try expectIterFound(@TypeOf(data.a1.b2), data, "a1.b2", 0);
         try expectIterFound(@TypeOf(data.a1.b1.c1), data, "a1.b1.c1", 0);
@@ -662,7 +661,7 @@ const invoker_tests = struct {
 
     test "Comptime iter consumed - found nested" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterNotFound(data, "a1.b1", 1);
         try expectIterNotFound(data, "a1.b2", 1);
         try expectIterNotFound(data, "a1.b1.c1", 1);
@@ -672,7 +671,7 @@ const invoker_tests = struct {
 
     test "Comptime iter - not found nested" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterNotFound(data, "a1.wong", 0);
         try expectIterNotFound(data, "a1.b1.wong", 0);
         try expectIterNotFound(data, "a1.b2.wrong", 0);
@@ -690,7 +689,7 @@ const invoker_tests = struct {
 
     test "Comptime iter - slice" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
 
         try expectIterFound(@TypeOf(data.a_slice[1]), data, "a_slice", 1);
@@ -702,7 +701,7 @@ const invoker_tests = struct {
 
     test "Comptime iter - array" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
         try expectIterFound(@TypeOf(data.a_array[1]), data, "a_array", 1);
         try expectIterFound(@TypeOf(data.a_array[2]), data, "a_array", 2);
@@ -711,7 +710,7 @@ const invoker_tests = struct {
 
     test "Comptime iter - tuple" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
         try expectIterFound(@TypeOf(data.a_tuple[1]), data, "a_tuple", 1);
         try expectIterFound(@TypeOf(data.a_tuple[2]), data, "a_tuple", 2);
@@ -720,7 +719,7 @@ const invoker_tests = struct {
 
     test "Comptime iter - nested slice" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(@TypeOf(data.a_slice[0]), data, "a_slice", 0);
         try expectIterFound(@TypeOf(data.a1.b_slice[0]), data, "a1.b_slice", 0);
         try expectIterFound(@TypeOf(data.a1.b1.c_slice[0]), data, "a1.b1.c_slice", 0);
@@ -744,7 +743,7 @@ const invoker_tests = struct {
 
     test "Comptime iter - nested array" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(@TypeOf(data.a_tuple[0]), data, "a_tuple", 0);
         try expectIterFound(@TypeOf(data.a1.b_tuple[0]), data, "a1.b_tuple", 0);
         try expectIterFound(@TypeOf(data.a1.b1.c_tuple[0]), data, "a1.b1.c_tuple", 0);
@@ -768,7 +767,7 @@ const invoker_tests = struct {
 
     test "Comptime iter - nested tuple" {
         if (!comptime_tests_enabled) return error.SkipZigTest;
-        var data = Data{};
+        const data = Data{};
         try expectIterFound(@TypeOf(data.a_array[0]), data, "a_array", 0);
         try expectIterFound(@TypeOf(data.a1.b_array[0]), data, "a1.b_array", 0);
         try expectIterFound(@TypeOf(data.a1.b1.c_array[0]), data, "a1.b1.c_array", 0);

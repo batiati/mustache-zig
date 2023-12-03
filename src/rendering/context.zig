@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const meta = std.meta;
-const trait = std.meta.trait;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -234,7 +233,7 @@ pub const LambdaContext = struct {
     /// Writes the raw text on the output stream.
     /// Can return anyerror depending on the underlying writer
     pub fn writeFormat(self: LambdaContext, comptime fmt: []const u8, args: anytype) anyerror!void {
-        var writer = std.io.Writer(LambdaContext, anyerror, writeFn){
+        const writer = std.io.Writer(LambdaContext, anyerror, writeFn){
             .context = self,
         };
 
