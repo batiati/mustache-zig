@@ -10,13 +10,8 @@ jobs:
   test:
     strategy:
       fail-fast: false
-      matrix:
-
-        ### Comptime tests and windows builds can't run due memory limitation
-        #os: [ubuntu-latest, macos-latest, windows-latest]
-        #comptime: [true, false]
-      
-        os: [ubuntu-latest, macos-latest]
+      matrix:      
+        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           #- os: windows-latest
           #  crlf: fix
