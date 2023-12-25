@@ -1,9 +1,9 @@
 name: Matrix Build
 on:
   push: 
-    branches: [ stage3 ]
+    branches: [ master ]
   pull_request:
-    branches: [ stage3 ]
+    branches: [ master ]
   schedule:
     - cron: 0 9 * * *
 jobs:
