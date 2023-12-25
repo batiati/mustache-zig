@@ -1,0 +1,8 @@
+{
+    "title": "Hello",
+    "image_url": "some image url",
+    "icon_url": "some icon url",
+    "short_description": "show bla-bla-bla",
+    "detail_description": "detail bla-bla-bla-bla-bla",
+    "offer_id": 42
+}

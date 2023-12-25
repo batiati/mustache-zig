@@ -1,0 +1,12 @@
+{
+    "name": "Chris",
+    "age": 25,
+    "company": "<b>GitHub</b>",
+    "person": false,
+    "repo": [
+        { "name": "resque" },
+        { "name": "hub" },
+        { "name": "rip" }
+    ],
+    "repo2": []
+}

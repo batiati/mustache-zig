@@ -1,0 +1,20 @@
+<h1>Today</h1>
+
+* {{name}}
+* {{age}}
+* {{company}}
+
+{{#person}}
+  Never shown!
+{{/person}}
+
+{{#repo}}
+  <b>{{name}}</b>
+{{/repo}}
+
+{{#repo2}}
+  <b>{{name}}</b>
+{{/repo2}}
+{{^repo2}}
+  No repos :(
+{{/repo2}}
