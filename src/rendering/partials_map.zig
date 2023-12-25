@@ -1,6 +1,5 @@
 const std = @import("std");
 const meta = std.meta;
-const trait = meta.trait;
 const Allocator = std.mem.Allocator;
 
 const testing = std.testing;
@@ -23,10 +22,8 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
         };
 
         pub fn isEmpty() bool {
-            comptime {
-                return TPartials == void or
-                    (trait.isTuple(TPartials) and meta.fields(TPartials).len == 0);
-            }
+            return TPartials == void or
+                (mustache.isTuple(TPartials) and meta.fields(TPartials).len == 0);
         }
 
         allocator: if (options != .template and !isEmpty()) Allocator else void,
@@ -73,7 +70,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
             if (comptime isPartialsTupleElement(TPartials)) {
                 return if (std.mem.eql(u8, self.partials.@"0", key)) self.partials.@"1" else null;
             } else {
-                inline for (meta.fields(TPartials)) |_, index| {
+                inline for (0..meta.fields(TPartials).len) |index| {
                     const item = self.partials[index];
                     if (std.mem.eql(u8, item.@"0", key)) return item.@"1";
                 } else {
@@ -112,12 +109,12 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         fn isValidTuple() bool {
             comptime {
-                if (trait.isTuple(TPartials)) {
+                if (mustache.isTuple(TPartials)) {
                     if (isPartialsTupleElement(TPartials)) {
                         return true;
                     } else {
-                        inline for (meta.fields(TPartials)) |field| {
-                            if (!isPartialsTupleElement(field.field_type)) {
+                        for (meta.fields(TPartials)) |field| {
+                            if (!isPartialsTupleElement(field.type)) {
                                 return false;
                             }
                         } else {
@@ -132,8 +129,8 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         fn isValidIndexable() bool {
             comptime {
-                if (trait.isIndexable(TPartials) and !trait.isTuple(TPartials)) {
-                    if (trait.isSingleItemPtr(TPartials) and trait.is(.Array)(meta.Child(TPartials))) {
+                if (mustache.isIndexable(TPartials) and !mustache.isTuple(TPartials)) {
+                    if (mustache.isSingleItemPtr(TPartials) and mustache.is(.Array)(meta.Child(TPartials))) {
                         const Array = meta.Child(TPartials);
                         return isPartialsTupleElement(meta.Child(Array));
                     } else {
@@ -147,13 +144,13 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         fn isPartialsTupleElement(comptime TElement: type) bool {
             comptime {
-                if (trait.isTuple(TElement)) {
+                if (mustache.isTuple(TElement)) {
                     const fields = meta.fields(TElement);
-                    if (fields.len == 2 and trait.isZigString(fields[0].field_type)) {
-                        if (fields[1].field_type == Self.Template) {
+                    if (fields.len == 2 and mustache.isZigString(fields[0].type)) {
+                        if (fields[1].type == Self.Template) {
                             return true;
                         } else {
-                            return trait.isZigString(fields[1].field_type) and trait.isZigString(Self.Template);
+                            return mustache.isZigString(fields[1].type) and mustache.isZigString(Self.Template);
                         }
                     }
                 }
@@ -163,13 +160,13 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         fn isValidMap() bool {
             comptime {
-                if (trait.is(.Struct)(TPartials) and trait.hasDecls(TPartials, .{ "KV", "get" })) {
+                if (mustache.is(.Struct)(TPartials) and mustache.hasDecls(TPartials, .{ "KV", "get" })) {
                     const KV = @field(TPartials, "KV");
-                    if (trait.is(.Struct)(KV) and trait.hasFields(KV, .{ "key", "value" })) {
+                    if (mustache.is(.Struct)(KV) and mustache.hasFields(KV, .{ "key", "value" })) {
                         const kv: KV = undefined;
-                        return trait.isZigString(@TypeOf(kv.key)) and
+                        return mustache.isZigString(@TypeOf(kv.key)) and
                             (@TypeOf(kv.value) == Self.Template or
-                            (trait.isZigString(@TypeOf(kv.value)) and trait.isZigString(Self.Template)));
+                            (mustache.isZigString(@TypeOf(kv.value)) and mustache.isZigString(Self.Template)));
                     }
                 }
 
@@ -180,7 +177,25 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 }
 
 test "Map single tuple" {
-    var data = .{ "hello", "{{hello}}world" };
+    const key: []const u8 = "hello";
+    const value: []const u8 = "{{hello}}world";
+    const data = .{ key, value };
+
+    const dummy_options = RenderOptions{ .string = .{} };
+    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    var map = DummyMap.init(testing.allocator, data);
+
+    const hello = map.get("hello");
+    try testing.expect(hello != null);
+    try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+    try testing.expect(map.get("wrong") == null);
+}
+
+test "Map single tuple - comptime value" {
+    // TODO: Compiler segfaul
+    if (true) return error.SkipZigTest;
+    const data = .{ "hello", "{{hello}}world" };
 
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
@@ -194,7 +209,7 @@ test "Map single tuple" {
 }
 
 test "Map empty tuple" {
-    var data = .{};
+    const data = .{};
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
@@ -202,7 +217,7 @@ test "Map empty tuple" {
 }
 
 test "Map void" {
-    var data = {};
+    const data = {};
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
@@ -210,7 +225,32 @@ test "Map void" {
 }
 
 test "Map multiple tuple" {
-    var data = .{
+    const Tuple = struct { []const u8, []const u8 };
+    const Data = struct { Tuple, Tuple };
+    const data: Data = .{
+        .{ "hello", "{{hello}}world" },
+        .{ "hi", "{{hi}}there" },
+    };
+
+    const dummy_options = RenderOptions{ .string = .{} };
+    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    var map = DummyMap.init(testing.allocator, data);
+
+    const hello = map.get("hello");
+    try testing.expect(hello != null);
+    try testing.expectEqualStrings("{{hello}}world", hello.?);
+
+    const hi = map.get("hi");
+    try testing.expect(hi != null);
+    try testing.expectEqualStrings("{{hi}}there", hi.?);
+
+    try testing.expect(map.get("wrong") == null);
+}
+
+test "Map multiple tuple comptime" {
+    // TODO: Compiler segfaul
+    if (true) return error.SkipZigTest;
+    const data = .{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
     };
@@ -231,9 +271,7 @@ test "Map multiple tuple" {
 }
 
 test "Map array" {
-    const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
-
-    var data = [_]Tuple{
+    const data = [_]struct { []const u8, []const u8 }{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
     };
@@ -254,9 +292,7 @@ test "Map array" {
 }
 
 test "Map ref array" {
-    const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
-
-    var data = &[_]Tuple{
+    const data = &[_]struct { []const u8, []const u8 }{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
     };
@@ -277,8 +313,7 @@ test "Map ref array" {
 }
 
 test "Map slice" {
-    const Tuple = meta.Tuple(&.{ []const u8, []const u8 });
-    const array = [_]Tuple{
+    const array = [_]struct { []const u8, []const u8 }{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
     };

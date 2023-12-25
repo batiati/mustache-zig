@@ -153,7 +153,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             if (delimiters.starting_delimiter.len == 0) return ParseError.InvalidDelimiters;
             if (delimiters.ending_delimiter.len == 0) return ParseError.InvalidDelimiters;
 
-            self.delimiter_max_size = @intCast(u32, std.math.max(delimiters.starting_delimiter.len, delimiters.ending_delimiter.len) + 1);
+            self.delimiter_max_size = @as(u32, @intCast(@max(delimiters.starting_delimiter.len, delimiters.ending_delimiter.len))) + 1;
             self.delimiters = delimiters;
         }
 
@@ -167,7 +167,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
                         // block_index: initial index of the current TextBlock, the minimum part needed
                         // bookmark.last_starting_mark: index of the last starting mark '{{', used to determine the inner_text between two tags
-                        const last_index = if (self.bookmark.node_index == null) self.block_index else std.math.min(self.block_index, self.bookmark.last_starting_mark);
+                        const last_index = if (self.bookmark.node_index == null) self.block_index else @min(self.block_index, self.bookmark.last_starting_mark);
 
                         if (self.file.preserve_bookmark) |preserve| {
 
@@ -294,21 +294,21 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
         fn produceOpen(self: *Self, trimmer: Trimmer, char: u8) ?TextPart {
             const skip_current = switch (char) {
-                @enumToInt(PartType.comments),
-                @enumToInt(PartType.section),
-                @enumToInt(PartType.inverted_section),
-                @enumToInt(PartType.close_section),
-                @enumToInt(PartType.partial),
-                @enumToInt(PartType.parent),
-                @enumToInt(PartType.block),
-                @enumToInt(PartType.unescaped_interpolation),
-                @enumToInt(PartType.delimiters),
-                @enumToInt(PartType.triple_mustache),
+                @intFromEnum(PartType.comments),
+                @intFromEnum(PartType.section),
+                @intFromEnum(PartType.inverted_section),
+                @intFromEnum(PartType.close_section),
+                @intFromEnum(PartType.partial),
+                @intFromEnum(PartType.parent),
+                @intFromEnum(PartType.block),
+                @intFromEnum(PartType.unescaped_interpolation),
+                @intFromEnum(PartType.delimiters),
+                @intFromEnum(PartType.triple_mustache),
                 => true,
                 else => false,
             };
 
-            const delimiter_len = @intCast(u32, self.delimiters.starting_delimiter.len);
+            const delimiter_len = @as(u32, @intCast(self.delimiters.starting_delimiter.len));
 
             defer {
                 self.start_pos = .{
@@ -326,7 +326,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
                     self.state = .{
                         .matching_close = .{
                             .delimiter_index = 0,
-                            .part_type = @intToEnum(PartType, char),
+                            .part_type = @as(PartType, @enumFromInt(char)),
                         },
                     };
                 } else {
@@ -564,7 +564,7 @@ test "basic tests" {
     try expectTag(.static_text, "Until eof", part_5, 2, 18);
     defer part_5.?.unRef(allocator);
 
-    var part_6 = try reader.next(allocator);
+    const part_6 = try reader.next(allocator);
     try testing.expect(part_6 == null);
 }
 
@@ -601,7 +601,7 @@ test "custom tags" {
     try expectTag(.static_text, "Until eof", part_5, 2, 14);
     defer part_5.?.unRef(allocator);
 
-    var part_6 = try reader.next(allocator);
+    const part_6 = try reader.next(allocator);
     try testing.expect(part_6 == null);
 }
 
@@ -619,7 +619,7 @@ test "EOF" {
     try expectTag(.interpolation, "tag1", part_1, 1, 1);
     defer part_1.?.unRef(allocator);
 
-    var part_2 = try reader.next(allocator);
+    const part_2 = try reader.next(allocator);
     try testing.expect(part_2 == null);
 }
 
@@ -637,7 +637,7 @@ test "EOF custom tags" {
     try expectTag(.interpolation, "tag1", part_1, 1, 1);
     defer part_1.?.unRef(allocator);
 
-    var part_2 = try reader.next(allocator);
+    const part_2 = try reader.next(allocator);
     try testing.expect(part_2 == null);
 }
 
@@ -703,7 +703,7 @@ test "bookmarks" {
         try testing.expect(false);
     }
 
-    var part_8 = try reader.next(allocator);
+    const part_8 = try reader.next(allocator);
     try testing.expect(part_8 == null);
 }
 

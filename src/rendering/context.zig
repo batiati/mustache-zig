@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const meta = std.meta;
-const trait = std.meta.trait;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -70,7 +69,9 @@ pub fn Context(comptime context_type: ContextType, comptime Writer: type, compti
 }
 
 pub fn ContextImpl(comptime context_type: ContextType, comptime Writer: type, comptime Data: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    if (comptime context_type != ContextType.fromData(Data)) @compileError("Unexpected context_type");
+    if (comptime context_type != ContextType.fromData(Data)) {
+        @compileError("Unexpected context_type: " ++ @typeName(Data) ++ " of type [" ++ @tagName(ContextType.fromData(Data)) ++ "] and context_type == [" ++ @tagName(context_type) ++ "]");
+    }
 
     return switch (context_type) {
         .native => native_context.ContextImpl(Writer, Data, PartialsMap, options),
@@ -196,9 +197,9 @@ pub const LambdaContext = struct {
     inner_text: []const u8,
 
     pub const VTable = struct {
-        renderAlloc: fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
-        render: fn (*const anyopaque, Allocator, []const u8) anyerror!void,
-        write: fn (*const anyopaque, []const u8) anyerror!usize,
+        renderAlloc: *const fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
+        render: *const fn (*const anyopaque, Allocator, []const u8) anyerror!void,
+        write: *const fn (*const anyopaque, []const u8) anyerror!usize,
     };
 
     /// Renders a template against the current context
@@ -234,7 +235,7 @@ pub const LambdaContext = struct {
     /// Writes the raw text on the output stream.
     /// Can return anyerror depending on the underlying writer
     pub fn writeFormat(self: LambdaContext, comptime fmt: []const u8, args: anytype) anyerror!void {
-        var writer = std.io.Writer(LambdaContext, anyerror, writeFn){
+        const writer = std.io.Writer(LambdaContext, anyerror, writeFn){
             .context = self,
         };
 

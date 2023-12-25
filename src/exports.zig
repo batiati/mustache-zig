@@ -17,7 +17,7 @@ pub export fn mustache_create_template(template_text: ?[*]const u8, template_len
 
         switch (result) {
             .success => |template| {
-                var ptr = allocator.create(mustache.Template) catch return .OUT_OF_MEMORY;
+                const ptr = allocator.create(mustache.Template) catch return .OUT_OF_MEMORY;
                 ptr.* = template;
                 out_template_handle.* = ptr;
                 return .SUCCESS;
@@ -31,7 +31,7 @@ pub export fn mustache_create_template(template_text: ?[*]const u8, template_len
 
 pub export fn mustache_free_template(template_handle: ?extern_types.TemplateHandle) callconv(.C) extern_types.Status {
     if (template_handle) |handle| {
-        var template = @ptrCast(*mustache.Template, @alignCast(@alignOf(mustache.Template), handle));
+        var template: *mustache.Template = @ptrCast(@alignCast(handle));
 
         var allocator = if (comptime builtin.link_libc) std.heap.c_allocator else testing.allocator;
         template.deinit(allocator);
@@ -45,15 +45,15 @@ pub export fn mustache_free_template(template_handle: ?extern_types.TemplateHand
 
 pub export fn mustache_render(template_handle: ?extern_types.TemplateHandle, user_data: extern_types.UserData, out_buffer: *[*]const u8, out_buffer_len: *u32) callconv(.C) extern_types.Status {
     if (template_handle) |handle| {
-        var template = @ptrCast(*mustache.Template, @alignCast(@alignOf(mustache.Template), handle));
+        const template = @as(*mustache.Template, @ptrCast(@alignCast(handle)));
 
-        var allocator = if (comptime builtin.link_libc) std.heap.c_allocator else testing.allocator;
+        const allocator = if (comptime builtin.link_libc) std.heap.c_allocator else testing.allocator;
         const result = mustache.allocRenderZ(allocator, template.*, user_data) catch |err| switch (err) {
             error.OutOfMemory => return .OUT_OF_MEMORY,
         };
 
         out_buffer.* = result.ptr;
-        out_buffer_len.* = @intCast(u32, result.len);
+        out_buffer_len.* = @as(u32, @intCast(result.len));
 
         return .SUCCESS;
     } else {

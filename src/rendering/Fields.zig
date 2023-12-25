@@ -1,6 +1,5 @@
 const std = @import("std");
 const meta = std.meta;
-const trait = std.meta.trait;
 
 const testing = std.testing;
 const assert = std.debug.assert;
@@ -49,7 +48,7 @@ pub inline fn getField(data: anytype, comptime field_name: []const u8) field_typ
         return runtime_null;
     }
 
-    return if (is_by_value) @field(lhs(data), field_name) else &@field(lhs(data), field_name);
+    return if (is_by_value) @field(lhs(Data, data), field_name) else &@field(lhs(Data, data), field_name);
 }
 
 pub inline fn getRuntimeValue(ctx: anytype) context_type: {
@@ -87,7 +86,7 @@ pub inline fn getRuntimeValue(ctx: anytype) context_type: {
 
 pub inline fn getTupleElement(ctx: anytype, comptime index: usize) element_type: {
     const T = @TypeOf(ctx);
-    assert(trait.isTuple(T));
+    assert(mustache.isTuple(T));
 
     const ElementType = @TypeOf(ctx[index]);
     if (ElementType == comptime_int) {
@@ -126,7 +125,7 @@ pub inline fn getTupleElement(ctx: anytype, comptime index: usize) element_type:
 pub inline fn getElement(ctx: anytype, index: usize) element_type: {
     const T = @TypeOf(ctx);
 
-    const is_indexable = trait.isIndexable(T) and !trait.isTuple(T);
+    const is_indexable = mustache.isIndexable(T) and !mustache.isTuple(T);
     if (!is_indexable) @compileError("Array, slice or vector expected");
 
     const ElementType = @TypeOf(ctx[0]);
@@ -148,7 +147,7 @@ pub inline fn getElement(ctx: anytype, index: usize) element_type: {
 
 fn Lhs(comptime T: type) type {
     comptime {
-        if (trait.is(.Optional)(T)) {
+        if (mustache.is(.Optional)(T)) {
             return Lhs(meta.Child(T));
         } else if (needsDerref(T)) {
             return Lhs(meta.Child(T));
@@ -158,13 +157,11 @@ fn Lhs(comptime T: type) type {
     }
 }
 
-pub inline fn lhs(value: anytype) Lhs(@TypeOf(value)) {
-    const T = @TypeOf(value);
-
-    if (comptime trait.is(.Optional)(T)) {
-        return lhs(value.?);
+pub inline fn lhs(comptime T: type, value: T) Lhs(T) {
+    if (comptime mustache.is(.Optional)(T)) {
+        return lhs(@TypeOf(value.?), value.?);
     } else if (comptime needsDerref(T)) {
-        return lhs(value.*);
+        return lhs(@TypeOf(value.*), value.*);
     } else {
         return value;
     }
@@ -172,9 +169,9 @@ pub inline fn lhs(value: anytype) Lhs(@TypeOf(value)) {
 
 pub inline fn needsDerref(comptime T: type) bool {
     comptime {
-        if (trait.isSingleItemPtr(T)) {
+        if (mustache.isSingleItemPtr(T)) {
             const Child = meta.Child(T);
-            return trait.isSingleItemPtr(Child) or trait.isSlice(Child) or trait.is(.Optional)(Child);
+            return mustache.isSingleItemPtr(Child) or mustache.isSlice(Child) or mustache.is(.Optional)(Child);
         } else {
             return false;
         }
@@ -183,40 +180,41 @@ pub inline fn needsDerref(comptime T: type) bool {
 
 pub fn byValue(comptime TField: type) bool {
     comptime {
-        if (trait.is(.EnumLiteral)(TField)) @compileError(
+        if (mustache.is(.EnumLiteral)(TField)) @compileError(
             \\Enum literal is not supported for interpolation
             \\Error: ir_resolve_lazy_recurse. This is a bug in the Zig compiler
             \\Type:
         ++ @typeName(TField));
 
         const max_size = @sizeOf(ErasedType);
-        const is_zero_size = @sizeOf(TField) == 0;
+        const size = if (TField == @TypeOf(null)) 0 else @sizeOf(TField);
+        const is_zero_size = size == 0;
 
-        const is_pointer = trait.isSlice(TField) or
-            trait.isSingleItemPtr(TField);
+        const is_pointer = mustache.isSlice(TField) or
+            mustache.isSingleItemPtr(TField);
 
         const is_json = TField == std.json.Value;
 
         const is_ffi_userdata = TField == extern_types.UserData;
 
-        const is_lambda_invoker = @sizeOf(TField) <= max_size and lambda.isLambdaInvoker(TField);
+        const is_lambda_invoker = size <= max_size and lambda.isLambdaInvoker(TField);
 
-        const can_embed = @sizeOf(TField) <= max_size and
-            (trait.is(.Enum)(TField) or
-            trait.is(.EnumLiteral)(TField) or
+        const can_embed = size <= max_size and
+            (mustache.is(.Enum)(TField) or
+            mustache.is(.EnumLiteral)(TField) or
             TField == bool or
-            trait.isIntegral(TField) or
-            trait.isFloat(TField) or
-            (trait.is(.Optional)(TField) and byValue(meta.Child(TField))));
+            mustache.isIntegral(TField) or
+            mustache.isFloat(TField) or
+            (mustache.is(.Optional)(TField) and byValue(meta.Child(TField))));
 
         return is_json or is_ffi_userdata or is_zero_size or is_pointer or is_lambda_invoker or can_embed;
     }
 }
 
-pub inline fn isNull(data: anytype) bool {
-    return switch (@typeInfo(@TypeOf(data))) {
+pub inline fn isNull(comptime T: type, data: T) bool {
+    return switch (@typeInfo(T)) {
         .Pointer => |info| switch (info.size) {
-            .One => return isNull(data.*),
+            .One => return isNull(@TypeOf(data.*), data.*),
             .Slice => return false,
             .Many => @compileError("[*] pointers not supported"),
             .C => @compileError("[*c] pointers not supported"),
@@ -226,8 +224,8 @@ pub inline fn isNull(data: anytype) bool {
     };
 }
 
-pub inline fn lenOf(data: anytype) ?usize {
-    return switch (@typeInfo(@TypeOf(data))) {
+pub inline fn lenOf(comptime T: type, data: T) ?usize {
+    return switch (@typeInfo(T)) {
         .Pointer => |info| switch (info.size) {
             .One => return null,
             .Slice => return data.len,
@@ -235,7 +233,7 @@ pub inline fn lenOf(data: anytype) ?usize {
             .C => @compileError("[*c] pointers not supported"),
         },
         .Array, .Vector => return data.len,
-        .Optional => if (data) |value| return lenOf(value) else null,
+        .Optional => if (data) |value| return lenOf(@TypeOf(value), value) else null,
         else => return null,
     };
 }
@@ -248,22 +246,28 @@ fn FieldRef(comptime T: type, comptime field_name: []const u8) type {
         assert(TField != comptime_float);
         assert(TField != @TypeOf(.Null));
 
-        if (trait.is(.Optional)(T)) {
+        if (mustache.is(.Optional)(T)) {
             return FieldRef(meta.Child(T), field_name);
         } else if (needsDerref(T)) {
             return FieldRef(meta.Child(T), field_name);
         } else {
-            const instance: T = undefined;
-            return @TypeOf(if (byValue(TField)) @field(instance, field_name) else &@field(instance, field_name));
+            const instance: T = switch (@typeInfo(T)) {
+                .Struct => std.mem.zeroInit(T, .{}),
+                .Pointer => @ptrFromInt(@alignOf(T)),
+                .Void => {},
+                else => undefined,
+            };
+
+            return if (byValue(TField)) @TypeOf(@field(instance, field_name)) else @TypeOf(&@field(instance, field_name));
         }
     }
 }
 
 fn FieldType(comptime T: type, comptime field_name: []const u8) type {
-    if (trait.is(.Optional)(T)) {
+    if (mustache.is(.Optional)(T)) {
         const Child = meta.Child(T);
         return FieldType(Child, field_name);
-    } else if (trait.isSingleItemPtr(T)) {
+    } else if (mustache.isSingleItemPtr(T)) {
         const Child = meta.Child(T);
         return FieldType(Child, field_name);
     } else {
@@ -284,9 +288,9 @@ fn RuntimeFloat(comptime value: comptime_float) type {
 test "Needs derref" {
     var value: usize = 10;
     var ptr = &value;
-    var const_ptr: *const usize = &value;
-    var ptr_ptr = &ptr;
-    var const_ptr_ptr: *const *usize = &ptr;
+    const const_ptr: *const usize = &value;
+    const ptr_ptr = &ptr;
+    const const_ptr_ptr: *const *usize = &ptr;
 
     try std.testing.expect(needsDerref(@TypeOf(value)) == false);
     try std.testing.expect(needsDerref(@TypeOf(ptr)) == false);
@@ -298,10 +302,10 @@ test "Needs derref" {
     var optional: ?usize = value;
     try std.testing.expect(needsDerref(@TypeOf(optional)) == false);
 
-    var ptr_optional: *?usize = &optional;
+    const ptr_optional: *?usize = &optional;
     try std.testing.expect(needsDerref(@TypeOf(ptr_optional)) == true);
 
-    var optional_ptr: ?*usize = ptr;
+    const optional_ptr: ?*usize = ptr;
     try std.testing.expect(needsDerref(@TypeOf(optional_ptr)) == false);
 }
 
@@ -314,7 +318,7 @@ test "Ref values" {
     };
 
     var data = Data{ .int = 100, .level = .{ .int = 1000 } };
-    var field = getField(&data, "int");
+    const field = getField(&data, "int");
     try std.testing.expectEqual(field, data.int);
 
     var level = getField(&data, "level");
@@ -326,7 +330,7 @@ test "Ref values" {
     level.int = 1002;
     try std.testing.expectEqual(level.int, data.level.int);
 
-    var level_field = getField(level, "int");
+    const level_field = getField(level, "int");
     try std.testing.expectEqual(level_field, level.int);
     try std.testing.expectEqual(level_field, data.level.int);
 }
@@ -334,40 +338,40 @@ test "Ref values" {
 test "Const ref values" {
     var data = .{ .int = @as(usize, 100), .level = .{ .int = @as(usize, 1000) } };
 
-    var field = getField(&data, "int");
+    const field = getField(&data, "int");
     try std.testing.expectEqual(field, data.int);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expectEqual(level.int, data.level.int);
 
-    var level_field = getField(level, "int");
+    const level_field = getField(level, "int");
     try std.testing.expectEqual(level_field, data.level.int);
 }
 
 test "comptime int" {
     var data = .{ .int = 100, .level = .{ .int = 1000 } };
 
-    var field = getField(&data, "int");
+    const field = getField(&data, "int");
     try std.testing.expectEqual(field, data.int);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expectEqual(level.int, data.level.int);
 
-    var level_field = getField(level, "int");
+    const level_field = getField(level, "int");
     try std.testing.expectEqual(level_field, data.level.int);
 }
 
 test "comptime floats" {
-    var data = .{ .float = 3.14, .level = .{ .float = std.math.f128_min } };
+    var data = .{ .float = 3.14, .level = .{ .float = std.math.floatMin(f128) } };
 
-    var field = getField(&data, "float");
+    const field = getField(&data, "float");
     try std.testing.expectEqual(field, data.float);
     try std.testing.expect(@TypeOf(field) == f64);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expectEqual(level.float, data.level.float);
 
-    var level_field = getField(level, "float");
+    const level_field = getField(level, "float");
     try std.testing.expectEqual(level_field, data.level.float);
     try std.testing.expect(@TypeOf(level_field) == f128);
 }
@@ -380,13 +384,13 @@ test "enum literal " {
 
     var data = .{ .value = .AreYouSure, .level = .{ .value = .Totally } };
 
-    var field = getField(&data, "value");
+    const field = getField(&data, "value");
     try std.testing.expectEqual(field, data.value);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expectEqual(level.value, data.level.int);
 
-    var level_field = getField(level, "value");
+    const level_field = getField(level, "value");
     try std.testing.expectEqual(level_field, data.level.int);
 }
 
@@ -394,26 +398,26 @@ test "enum" {
     const Options = enum { AreYouSure, Totally };
     var data = .{ .value = Options.AreYouSure, .level = .{ .value = Options.Totally } };
 
-    var field = getField(&data, "value");
+    const field = getField(&data, "value");
     try std.testing.expectEqual(field, data.value);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expectEqual(level.value, data.level.value);
 
-    var level_field = getField(level, "value");
+    const level_field = getField(level, "value");
     try std.testing.expectEqual(level_field, data.level.value);
 }
 
 test "strings" {
     var data = .{ .value = "hello", .level = .{ .value = "world" } };
 
-    var field = getField(&data, "value");
+    const field = getField(&data, "value");
     try std.testing.expectEqualStrings(field, data.value);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expectEqualStrings(level.value, data.level.value);
 
-    var level_field = getField(level, "value");
+    const level_field = getField(level, "value");
     try std.testing.expectEqualStrings(level_field, data.level.value);
 }
 
@@ -427,13 +431,13 @@ test "slices" {
 
     var data = Data{ .value = "hello", .level = .{ .value = "world" } };
 
-    var field = getField(&data, "value");
+    const field = getField(&data, "value");
     try std.testing.expectEqualStrings(field, data.value);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expectEqualStrings(level.value, data.level.value);
 
-    var level_field = getField(level, "value");
+    const level_field = getField(level, "value");
     try std.testing.expectEqualStrings(level_field, data.level.value);
 }
 
@@ -452,7 +456,7 @@ test "slices items" {
     };
     var data = Data{ .values = &items };
 
-    var field = getField(&data, "values");
+    const field = getField(&data, "values");
     try std.testing.expectEqual(field.len, data.values.len);
 
     var item0 = getElement(field, 0);
@@ -491,7 +495,7 @@ test "array items" {
         },
     };
 
-    var field = getField(&data, "values");
+    const field = getField(&data, "values");
     try std.testing.expectEqual(field.len, data.values.len);
 
     var item0 = getElement(field, 0);
@@ -522,16 +526,16 @@ test "tuple items" {
         },
     };
 
-    var field = getField(&data, "values");
+    const field = getField(&data, "values");
     try std.testing.expectEqual(field.len, data.values.len);
 
-    var item0 = getTupleElement(field, 0);
+    const item0 = getTupleElement(field, 0);
     try std.testing.expectEqual(item0.value, data.values[0].value);
 
-    var item1 = getTupleElement(field, 1);
+    const item1 = getTupleElement(field, 1);
     try std.testing.expectEqual(item1.value, data.values[1].value);
 
-    var item2 = getTupleElement(field, 2);
+    const item2 = getTupleElement(field, 2);
     try std.testing.expectEqual(item2.value, data.values[2].value);
 }
 
@@ -547,23 +551,23 @@ test "optionals" {
 
     var data = Data{ .value1 = "hello", .value2 = null, .level = .{ .value1 = "world", .value2 = null } };
 
-    var field1 = getField(&data, "value1");
+    const field1 = getField(&data, "value1");
     try std.testing.expect(field1 != null);
     try std.testing.expectEqualStrings(field1.?, data.value1.?);
 
-    var field2 = getField(&data, "value2");
+    const field2 = getField(&data, "value2");
     try std.testing.expect(field2 == null);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expect(level.*.?.value1 != null);
     try std.testing.expectEqualStrings(level.*.?.value1.?, data.level.?.value1.?);
     try std.testing.expect(level.*.?.value2 == null);
 
-    var level_field1 = getField(level, "value1");
+    const level_field1 = getField(level, "value1");
     try std.testing.expect(level_field1 != null);
     try std.testing.expectEqualStrings(level_field1.?, data.level.?.value1.?);
 
-    var level_field2 = getField(level, "value2");
+    const level_field2 = getField(level, "value2");
     try std.testing.expect(level_field2 == null);
 }
 
@@ -599,23 +603,23 @@ test "optional pointers" {
     field1.?.value = "changed again";
     try std.testing.expectEqualStrings(field1.?.value, data.value1.?.value);
 
-    var field1_value = getField(field1, "value");
+    const field1_value = getField(field1, "value");
     try std.testing.expectEqualStrings(field1_value, data.value1.?.value);
 
-    var field1_level = getField(field1, "level");
+    const field1_level = getField(field1, "level");
     try std.testing.expect(field1_level == null);
 
-    var field2 = getField(&data, "value2");
+    const field2 = getField(&data, "value2");
     try std.testing.expect(field2 != null);
     try std.testing.expectEqualStrings(field2.?.value, data.value2.?.value);
 
-    var field2_value = getField(field2, "value");
+    const field2_value = getField(field2, "value");
     try std.testing.expectEqualStrings(field2_value, data.value2.?.value);
 
-    var field2_level = getField(field2, "level");
+    const field2_level = getField(field2, "level");
     try std.testing.expectEqualStrings(field2_level.?.value, data.value2.?.level.?.value);
 
-    var field3 = getField(&data, "value3");
+    const field3 = getField(&data, "value3");
     try std.testing.expect(field3 == null);
 }
 
@@ -635,11 +639,11 @@ test "ref optionals" {
 
     var data = Data{ .value1 = SubData{ .value = "hello" }, .value2 = null, .level = .{ .value1 = SubData{ .value = "world" }, .value2 = null } };
 
-    var field1 = getField(&data, "value1");
+    const field1 = getField(&data, "value1");
     try std.testing.expect(field1.* != null);
     try std.testing.expectEqualStrings(field1.*.?.value, data.value1.?.value);
 
-    var field2 = getField(&data, "value2");
+    const field2 = getField(&data, "value2");
     try std.testing.expect(field2.* == null);
 
     data.value1.?.value = "changed";
@@ -648,7 +652,7 @@ test "ref optionals" {
     field1.*.?.value = "changed again";
     try std.testing.expectEqualStrings(field1.*.?.value, data.value1.?.value);
 
-    var level = getField(&data, "level");
+    const level = getField(&data, "level");
     try std.testing.expect(level.value1 != null);
     try std.testing.expectEqualStrings(level.value1.?.value, data.level.value1.?.value);
     try std.testing.expect(level.value2 == null);
@@ -656,11 +660,11 @@ test "ref optionals" {
     data.level.value1.?.value = "changed too";
     try std.testing.expectEqualStrings(level.value1.?.value, data.level.value1.?.value);
 
-    var level_field1 = getField(level, "value1");
+    const level_field1 = getField(level, "value1");
     try std.testing.expect(level_field1.* != null);
     try std.testing.expectEqualStrings(level_field1.*.?.value, data.level.value1.?.value);
 
-    var level_field2 = getField(level, "value2");
+    const level_field2 = getField(level, "value2");
     try std.testing.expect(level_field2.* == null);
 
     data.level.value1.?.value = "changed one more time";
@@ -682,19 +686,19 @@ test "zero size" {
 
     var data = Data{ .value1 = 0, .value2 = &.{ Empty{}, Empty{}, Empty{} }, .value3 = {}, .value4 = .OnlyOption };
 
-    var field1 = getField(&data, "value1");
+    const field1 = getField(&data, "value1");
     try std.testing.expect(field1 == 0);
     try std.testing.expect(@sizeOf(@TypeOf(field1)) == 0);
 
-    var field2 = getField(&data, "value2");
+    const field2 = getField(&data, "value2");
     try std.testing.expect(field2.len == 3);
-    try std.testing.expect(@sizeOf(@TypeOf(field2)) == @sizeOf(usize));
+    try std.testing.expect(@sizeOf(@TypeOf(field2)) == @sizeOf([]const Empty));
 
-    var field3 = getField(&data, "value3");
+    const field3 = getField(&data, "value3");
     try std.testing.expect(field3 == {});
     try std.testing.expect(@sizeOf(@TypeOf(field3)) == 0);
 
-    var field4 = getField(&data, "value4");
+    const field4 = getField(&data, "value4");
     try std.testing.expect(field4 == .OnlyOption);
     try std.testing.expect(@sizeOf(@TypeOf(field4)) == 0);
 }

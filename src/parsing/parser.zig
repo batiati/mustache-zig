@@ -89,7 +89,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
             self.inner_state.text_scanner.nodes = nodes;
 
             if (is_comptime) {
-                var buffer: [comptime_count.nodes]Node = undefined;
+                comptime var buffer: [comptime_count.nodes]Node = undefined;
                 nodes.items.ptr = &buffer;
                 nodes.items.len = 0;
                 nodes.capacity = buffer.len;
@@ -109,8 +109,8 @@ pub fn Parser(comptime options: TemplateOptions) type {
             self.beginLevel(0, self.default_delimiters, render) catch |err| switch (err) {
                 AbortError.ParserAbortedError => return false,
                 else => {
-                    const Error = LoadError || RenderError(@TypeOf(render));
-                    return @errSetCast(Error, err);
+                    const newerr: (LoadError || RenderError(@TypeOf(render))) = @errorCast(err);
+                    return newerr;
                 },
             };
 
@@ -129,7 +129,8 @@ pub fn Parser(comptime options: TemplateOptions) type {
                 };
             }
 
-            while (try self.inner_state.text_scanner.next(self.gpa)) |*text_part| {
+            var produced_text_part: ?TextPart = try self.inner_state.text_scanner.next(self.gpa);
+            while (produced_text_part) |*text_part| : (produced_text_part = try self.inner_state.text_scanner.next(self.gpa)) {
                 switch (text_part.part_type) {
                     .static_text => {
                         // TODO: Static text must be ignored if inside a "parent" tag
@@ -173,7 +174,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
                             return self.abort(ParseError.ClosingTagMismatch, text_part);
                         }
 
-                        open_node.children_count = @intCast(u32, nodes.items.len - initial_index);
+                        open_node.children_count = @as(u32, @intCast(nodes.items.len - initial_index));
 
                         if (allow_lambdas and open_node.text_part.part_type == .section) {
                             if (try self.inner_state.text_scanner.endBookmark(nodes)) |bookmark| {
@@ -190,7 +191,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
 
                 // Adding
                 var current_node: *Node = current_node: {
-                    const index = @intCast(u32, nodes.items.len);
+                    const index = @as(u32, @intCast(nodes.items.len));
                     const node = Node{
                         .index = index,
                         .identifier = try self.parseIdentifier(text_part),
@@ -342,7 +343,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
         }
 
         fn produceNodes(self: *Self, render: anytype) !void {
-            var nodes = &self.inner_state.nodes;
+            const nodes = &self.inner_state.nodes;
             if (nodes.items.len == 0) return;
 
             defer if (options.isRefCounted()) self.unRefNodes();
@@ -372,13 +373,13 @@ pub fn Parser(comptime options: TemplateOptions) type {
                 }
             }
 
-            const elements = if (options.output == .render or options.load_mode == .comptime_loaded) list.items else list.toOwnedSlice(self.gpa);
+            const elements = if (options.output == .render or options.load_mode == .comptime_loaded) list.items else try list.toOwnedSlice(self.gpa);
             try render.render(elements);
         }
 
         fn unRefNodes(self: *Self) void {
             if (options.isRefCounted()) {
-                var nodes = &self.inner_state.nodes;
+                const nodes = &self.inner_state.nodes;
                 for (nodes.items) |*node| {
                     node.unRef(self.gpa);
                 }
@@ -395,7 +396,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
 
         pub fn parsePath(self: *Self, identifier: []const u8) Allocator.Error!Element.Path {
             const action = struct {
-                pub fn action(ctx: *Self, iterator: *std.mem.TokenIterator(u8), index: usize) Allocator.Error!?[][]const u8 {
+                pub fn action(ctx: *Self, iterator: *std.mem.TokenIterator(u8, .any), index: usize) Allocator.Error!?[][]const u8 {
                     if (iterator.next()) |part| {
                         var path = (try action(ctx, iterator, index + 1)) orelse unreachable;
                         path[index] = try ctx.dupe(part);
@@ -664,7 +665,7 @@ test "Scan standAlone tags" {
                     try testing.expectEqual(@as(usize, 1), elements.len);
 
                     {
-                        var element = elements[0];
+                        const element = elements[0];
                         try testing.expectEqual(Element.Type.static_text, element);
                         try testing.expectEqualStrings("Hello", element.static_text);
                     }
@@ -723,7 +724,7 @@ test "Scan delimiters Tags" {
                     try testing.expectEqual(@as(usize, 1), elements.len);
 
                     {
-                        var element = elements[0];
+                        const element = elements[0];
                         try testing.expectEqual(Element.Type.interpolation, element);
                         try testing.expectEqualStrings("interpolation", element.interpolation[0]);
                         try testing.expectEqualStrings("value", element.interpolation[1]);

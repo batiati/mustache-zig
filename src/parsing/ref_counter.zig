@@ -32,7 +32,7 @@ const RefCounterImpl = struct {
     state: ?*State = null,
 
     pub fn create(allocator: Allocator, buffer: []const u8) Allocator.Error!Self {
-        var state = try allocator.create(State);
+        const state = try allocator.create(State);
         state.* = .{
             .counter = 1,
             .buffer = buffer,

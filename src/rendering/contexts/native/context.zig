@@ -40,8 +40,8 @@ pub const ErasedType = struct {
         } else {
             var value: Self = undefined;
 
-            if (comptime std.meta.trait.isSingleItemPtr(Data)) {
-                value.content[0] = @ptrToInt(data);
+            if (comptime mustache.isSingleItemPtr(Data)) {
+                value.content[0] = @intFromPtr(data);
             } else {
 
                 // No need for cast checks here
@@ -49,7 +49,7 @@ pub const ErasedType = struct {
                 // since the context holds the type into the concrete implementation
                 @setRuntimeSafety(false);
 
-                var ptr = @ptrCast(*Data, @alignCast(@alignOf(Data), &value.content));
+                const ptr = @as(*Data, @ptrCast(@alignCast(&value.content)));
                 ptr.* = data;
             }
 
@@ -63,8 +63,8 @@ pub const ErasedType = struct {
         if (comptime data_size == 0) {
             return undefined;
         } else {
-            if (comptime std.meta.trait.isSingleItemPtr(Data)) {
-                return @intToPtr(Data, self.content[0]);
+            if (comptime mustache.isSingleItemPtr(Data)) {
+                return @as(Data, @ptrFromInt(self.content[0]));
             } else {
 
                 // No need for cast checks here
@@ -72,7 +72,7 @@ pub const ErasedType = struct {
                 // since the context holds the type into the concrete implementation
                 @setRuntimeSafety(false);
 
-                const ptr = @ptrCast(*const Data, @alignCast(@alignOf(*const Data), &self.content));
+                const ptr = @as(*const Data, @ptrCast(@alignCast(&self.content)));
                 return ptr.*;
             }
         }
@@ -95,10 +95,10 @@ pub fn ContextInterface(comptime Writer: type, comptime PartialsMap: type, compt
         };
 
         const VTable = struct {
-            get: fn (*const ErasedType, Element.Path, ?usize) PathResolution(Self),
-            capacityHint: fn (*const ErasedType, *DataRender, Element.Path) PathResolution(usize),
-            interpolate: fn (*const ErasedType, *DataRender, Element.Path, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: fn (*const ErasedType, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            get: *const fn (*const ErasedType, Element.Path, ?usize) PathResolution(Self),
+            capacityHint: *const fn (*const ErasedType, *DataRender, Element.Path) PathResolution(usize),
+            interpolate: *const fn (*const ErasedType, *DataRender, Element.Path, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
+            expandLambda: *const fn (*const ErasedType, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
         };
 
         pub const Iterator = ContextIterator(Self);
@@ -317,7 +317,7 @@ const context_tests = struct {
     };
 
     fn getPerson() Person {
-        var person_1 = testing.allocator.create(Person) catch unreachable;
+        const person_1 = testing.allocator.create(Person) catch unreachable;
         person_1.* = Person{
             .id = 1,
             .name = "John Doe",
@@ -343,7 +343,7 @@ const context_tests = struct {
             .additional_information = null,
         };
 
-        var person_2 = Person{
+        const person_2 = Person{
             .id = 2,
             .name = "Someone Jr",
             .address = .{
@@ -392,7 +392,7 @@ const context_tests = struct {
         const Data = @TypeOf(data);
         const by_value = comptime Fields.byValue(Data);
 
-        var ctx = DummyRenderEngine.getContext(if (by_value) data else @as(*const Data, &data));
+        const ctx = DummyRenderEngine.getContext(if (by_value) data else @as(*const Data, &data));
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
@@ -411,7 +411,7 @@ const context_tests = struct {
             .template_options = {},
         };
 
-        var path = try expectPath(testing.allocator, identifier);
+        const path = try expectPath(testing.allocator, identifier);
         defer Element.destroyPath(testing.allocator, false, path);
 
         switch (try ctx.interpolate(&data_render, path, escape)) {
@@ -430,7 +430,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "id");
@@ -475,7 +475,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "salary");
@@ -532,7 +532,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "name");
@@ -589,7 +589,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "address.region");
@@ -622,7 +622,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "active");
@@ -655,7 +655,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "additional_information");
@@ -700,7 +700,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "wrong_name");
@@ -727,7 +727,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "staticLambda");
@@ -768,7 +768,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "selfLambda");
@@ -812,7 +812,7 @@ const context_tests = struct {
         const person_const_ptr: *const Person = &person;
         const person_ptr: *Person = &person;
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Direct access
         try interpolate(writer, person, "selfConstPtrLambda");
@@ -857,10 +857,10 @@ const context_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         {
-            var person = getPerson();
+            const person = getPerson();
             defer if (person.indication) |indication| allocator.destroy(indication);
 
             // Cannot be called from a context by value
@@ -932,10 +932,10 @@ const context_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
-        var person = getPerson();
+        const person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         try interpolate(writer, person, "willFailStaticLambda");
         try testing.expectEqualStrings("", list.items);
@@ -953,10 +953,10 @@ const context_tests = struct {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
-        var person = getPerson();
+        const person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Unexpected arguments
         try interpolate(writer, person, "anythingElse");
@@ -973,7 +973,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Person
 
@@ -1010,7 +1010,7 @@ const context_tests = struct {
 
         // Street
 
-        var street_ctx = street_ctx: {
+        const street_ctx = street_ctx: {
             const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
@@ -1046,7 +1046,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Person
 
@@ -1105,7 +1105,7 @@ const context_tests = struct {
 
         // Street
 
-        var street_ctx = street_ctx: {
+        const street_ctx = street_ctx: {
             const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
@@ -1160,7 +1160,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "wrong_address");
             defer Element.destroyPath(allocator, false, path);
 
-            var wrong_address = person_ctx.get(path, null);
+            const wrong_address = person_ctx.get(path, null);
             try testing.expect(wrong_address == .not_found_in_context);
         }
 
@@ -1182,7 +1182,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "wrong_street");
             defer Element.destroyPath(allocator, false, path);
 
-            var wrong_street = address_ctx.get(path, null);
+            const wrong_street = address_ctx.get(path, null);
             try testing.expect(wrong_street == .not_found_in_context);
         }
 
@@ -1190,7 +1190,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "len");
             defer Element.destroyPath(allocator, false, path);
             // Person.address.street.len
-            var street_len_ctx = switch (street_ctx.get(path, null)) {
+            const street_len_ctx = switch (street_ctx.get(path, null)) {
                 .field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1204,7 +1204,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "wrong_len");
             defer Element.destroyPath(allocator, false, path);
 
-            var wrong_len = street_ctx.get(path, null);
+            const wrong_len = street_ctx.get(path, null);
             try testing.expect(wrong_len == .not_found_in_context);
         }
     }
@@ -1217,7 +1217,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var writer = list.writer();
+        const writer = list.writer();
 
         // Person
         var ctx = DummyRenderEngine.getContext(&person);
@@ -1233,7 +1233,7 @@ const context_tests = struct {
             },
         };
 
-        var item_1 = iterator.next() orelse {
+        const item_1 = iterator.next() orelse {
             try testing.expect(false);
             unreachable;
         };
@@ -1243,7 +1243,7 @@ const context_tests = struct {
         try interpolateCtx(writer, item_1, "name", .Unescaped);
         try testing.expectEqualStrings("item 1", list.items);
 
-        var item_2 = iterator.next() orelse {
+        const item_2 = iterator.next() orelse {
             try testing.expect(false);
             unreachable;
         };
@@ -1253,7 +1253,7 @@ const context_tests = struct {
         try interpolateCtx(writer, item_2, "name", .Unescaped);
         try testing.expectEqualStrings("item 2", list.items);
 
-        var no_more = iterator.next();
+        const no_more = iterator.next();
         try testing.expect(no_more == null);
     }
 
@@ -1279,10 +1279,10 @@ const context_tests = struct {
                 },
             };
 
-            var item_1 = iterator.next();
+            const item_1 = iterator.next();
             try testing.expect(item_1 != null);
 
-            var no_more = iterator.next();
+            const no_more = iterator.next();
             try testing.expect(no_more == null);
         }
 
@@ -1299,7 +1299,7 @@ const context_tests = struct {
                 },
             };
 
-            var no_more = iterator.next();
+            const no_more = iterator.next();
             try testing.expect(no_more == null);
         }
     }
@@ -1326,10 +1326,10 @@ const context_tests = struct {
                 },
             };
 
-            var item_1 = iterator.next();
+            const item_1 = iterator.next();
             try testing.expect(item_1 != null);
 
-            var no_more = iterator.next();
+            const no_more = iterator.next();
             try testing.expect(no_more == null);
         }
 
@@ -1346,7 +1346,7 @@ const context_tests = struct {
                 },
             };
 
-            var no_more = iterator.next();
+            const no_more = iterator.next();
             try testing.expect(no_more == null);
         }
     }

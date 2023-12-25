@@ -55,7 +55,7 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
                     Chars.cr, Chars.space, Chars.tab, Chars.null_char => {},
                     Chars.lf => {
                         assert(index >= self.text_scanner.block_index);
-                        const lf_index = @intCast(u32, index - self.text_scanner.block_index);
+                        const lf_index: u32 = @intCast(index - self.text_scanner.block_index);
 
                         if (self.left_lf == .scanning) {
                             self.left_lf = .{ .found = lf_index };
@@ -158,7 +158,7 @@ test "Line breaks" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("  \nABC\n  ", block.?.content.slice);
 
@@ -181,7 +181,7 @@ test "Line breaks \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("  \r\nABC\r\n  ", block.?.content.slice);
 
@@ -220,7 +220,7 @@ test "Multiple line breaks" {
     try testing.expectEqual(TestingTrimmingIndex.trimmed, block.?.trimming.left);
     try testing.expectEqualStrings("ABC\nABC\n  ", block.?.content.slice);
 
-    var indentation = block.?.trimRight();
+    const indentation = block.?.trimRight();
     try testing.expect(indentation != null);
     try testing.expectEqualStrings("  ", indentation.?.slice);
 
@@ -254,7 +254,7 @@ test "Multiple line breaks \\r\\n" {
     try testing.expectEqual(TestingTrimmingIndex.trimmed, block.?.trimming.left);
     try testing.expectEqualStrings("ABC\r\nABC\r\n  ", block.?.content.slice);
 
-    var indentation = block.?.trimRight();
+    const indentation = block.?.trimRight();
     try testing.expect(indentation != null);
     try testing.expectEqualStrings("  ", indentation.?.slice);
 
@@ -287,7 +287,7 @@ test "Whitespace text trimming" {
     try testing.expectEqual(TestingTrimmingIndex.trimmed, block.?.trimming.left);
     try testing.expectEqualStrings("  ", block.?.content.slice);
 
-    var indentation = block.?.trimRight();
+    const indentation = block.?.trimRight();
     try testing.expect(indentation != null);
     try testing.expectEqualStrings("  ", indentation.?.slice);
 
@@ -305,7 +305,7 @@ test "Whitespace text trimming \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("  \r\n  ", block.?.content.slice);
 
@@ -329,7 +329,7 @@ test "Tabs text trimming" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("\t\t\n\t\t", block.?.content.slice);
 
@@ -353,7 +353,7 @@ test "Whitespace left trimming" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("  \n", block.?.content.slice);
 
@@ -377,7 +377,7 @@ test "Whitespace left trimming \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("  \r\n", block.?.content.slice);
 
@@ -401,7 +401,7 @@ test "Tabs left trimming" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("\t\t\n", block.?.content.slice);
 
@@ -425,7 +425,7 @@ test "Whitespace right trimming" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("\n  ", block.?.content.slice);
 
@@ -449,7 +449,7 @@ test "Whitespace right trimming \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("\r\n  ", block.?.content.slice);
 
@@ -473,7 +473,7 @@ test "Tabs right trimming" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("\n\t\t", block.?.content.slice);
 
@@ -497,7 +497,7 @@ test "Single line break" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("\n", block.?.content.slice);
 
@@ -521,7 +521,7 @@ test "Single line break \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("\r\n", block.?.content.slice);
 
@@ -542,7 +542,7 @@ test "No trimming" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("   ABC\nABC   ", block.?.content.slice);
 
@@ -561,7 +561,7 @@ test "No trimming, no whitespace" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("|\n", block.?.content.slice);
 
@@ -584,7 +584,7 @@ test "No trimming, no whitespace \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("|\r\n", block.?.content.slice);
 
@@ -605,7 +605,7 @@ test "No trimming \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("   ABC\r\nABC   ", block.?.content.slice);
 
@@ -624,7 +624,7 @@ test "No whitespace" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("ABC", block.?.content.slice);
 
@@ -643,7 +643,7 @@ test "Trimming left only" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("   \nABC   ", block.?.content.slice);
 
@@ -664,7 +664,7 @@ test "Trimming left only \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("   \r\nABC   ", block.?.content.slice);
 
@@ -685,7 +685,7 @@ test "Trimming right only" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("   ABC\n   ", block.?.content.slice);
 
@@ -707,7 +707,7 @@ test "Trimming right only \\r\\n" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("   ABC\r\n   ", block.?.content.slice);
 
@@ -729,7 +729,7 @@ test "Only whitespace" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("   ", block.?.content.slice);
 
@@ -752,7 +752,7 @@ test "Only tabs" {
 
     try text_scanner.setDelimiters(.{});
 
-    var block = try text_scanner.next(allocator);
+    const block = try text_scanner.next(allocator);
     try testing.expect(block != null);
     try testing.expectEqualStrings("\t\t\t", block.?.content.slice);
 

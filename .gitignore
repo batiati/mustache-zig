@@ -3,3 +3,4 @@
 lib/
 codecov
 kcov-output
+zig/
