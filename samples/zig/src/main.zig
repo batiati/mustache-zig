@@ -79,10 +79,6 @@ pub fn renderFromJson() anyerror!void {
     const json_text = try std.json.stringifyAlloc(allocator, ctx, .{});
     defer allocator.free(json_text);
 
-    // Parsing into a Json object
-    var parser = std.json.Parser.init(allocator, false);
-    defer parser.deinit();
-
     var tree = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
     defer tree.deinit();
 
@@ -125,7 +121,7 @@ pub fn renderFromCachedTemplate() anyerror!void {
 
     var repeat: u32 = 0;
     while (repeat < 10) : (repeat += 1) {
-        var result = try mustache.allocRender(allocator, cached_template, ctx);
+        const result = try mustache.allocRender(allocator, cached_template, ctx);
         defer allocator.free(result);
 
         var out = std.io.getStdOut();
@@ -192,7 +188,7 @@ pub fn renderComptimePartialTemplate() anyerror!void {
     };
 
     // Runtime value
-    var data: Data = .{ .name = "mustache", .sub_value = .{ .value = 42 } };
+    const data: Data = .{ .name = "mustache", .sub_value = .{ .value = 42 } };
 
     var repeat: u32 = 0;
     while (repeat < 10) : (repeat += 1) {

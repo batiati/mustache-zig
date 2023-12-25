@@ -154,7 +154,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                 ) TError!Result {
                     const decls = comptime std.meta.declarations(TValue);
                     inline for (decls) |decl| {
-                        const has_fn = comptime meta.hasFn(decl.name)(TValue);
+                        const has_fn = comptime meta.hasFn(TValue, decl.name);
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
@@ -417,7 +417,7 @@ fn isOnErrorSet(comptime Error: type, value: anyerror) bool {
     return false;
 }
 
-const comptime_tests_enabled = false; // @import("build_comptime_tests").comptime_tests_enabled;
+const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
 test "isOnErrorSet" {
     const A = error{ a1, a2 };
     const B = error{ b1, b2 };

@@ -251,7 +251,13 @@ fn FieldRef(comptime T: type, comptime field_name: []const u8) type {
         } else if (needsDerref(T)) {
             return FieldRef(meta.Child(T), field_name);
         } else {
-            const instance: T = undefined;
+            const instance: T = switch (@typeInfo(T)) {
+                .Struct => std.mem.zeroInit(T, .{}),
+                .Pointer => @ptrFromInt(@alignOf(T)),
+                .Void => {},
+                else => undefined,
+            };
+
             return if (byValue(TField)) @TypeOf(@field(instance, field_name)) else @TypeOf(&@field(instance, field_name));
         }
     }

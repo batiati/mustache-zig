@@ -113,7 +113,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
                     if (isPartialsTupleElement(TPartials)) {
                         return true;
                     } else {
-                        inline for (meta.fields(TPartials)) |field| {
+                        for (meta.fields(TPartials)) |field| {
                             if (!isPartialsTupleElement(field.type)) {
                                 return false;
                             }

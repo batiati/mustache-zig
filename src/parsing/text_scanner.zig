@@ -153,7 +153,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             if (delimiters.starting_delimiter.len == 0) return ParseError.InvalidDelimiters;
             if (delimiters.ending_delimiter.len == 0) return ParseError.InvalidDelimiters;
 
-            self.delimiter_max_size = @intCast(@max(delimiters.starting_delimiter.len, delimiters.ending_delimiter.len) + 1);
+            self.delimiter_max_size = @as(u32, @intCast(@max(delimiters.starting_delimiter.len, delimiters.ending_delimiter.len))) + 1;
             self.delimiters = delimiters;
         }
 

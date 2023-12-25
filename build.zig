@@ -10,31 +10,52 @@ pub fn build(b: *std.build.Builder) void {
         },
     });
 
-    // TODO re-add cross-compile
-    const static_lib = b.addStaticLibrary(.{
-        .name = "mustache-static",
-        .root_source_file = .{ .path = "src/exports.zig" },
-        .target = target,
-        .optimize = mode,
-    });
-    static_lib.linkLibC();
-    b.installArtifact(static_lib);
+    const ffi_libs = b.step("ffi", "Build FFI libs");
 
-    const dynamic_lib = b.addSharedLibrary(.{
-        .name = "mustache",
-        .root_source_file = .{ .path = "src/exports.zig" },
-        .target = target,
-        .optimize = mode,
-    });
-    dynamic_lib.linkLibC();
-    b.installArtifact(dynamic_lib);
+    // Zig cross-target x folder names
+    const platforms = .{
+        .{ "x86_64-linux-gnu", "linux-x64" },
+        .{ "x86_64-windows-gnu", "win-x64" },
+        .{ "x86_64-macos", "osx-x64" },
+    };
+
+    inline for (platforms) |platform| {
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+
+        // Appends the name "lib" on windows, in order to generate the same name "libmustache" for all platforms
+        const lib_name = comptime (if (std.mem.startsWith(u8, platform[1], "win")) "lib" else "") ++ "mustache";
+        const lib_path = "../lib/" ++ platform[1];
+
+        const lib = b.addSharedLibrary(.{
+            .name = lib_name,
+            .root_source_file = .{ .path = "src/exports.zig" },
+            .target = cross_target,
+            .optimize = mode,
+            .link_libc = true,
+        });
+
+        const install_step = b.addInstallArtifact(
+            lib,
+            .{ .dest_dir = .{
+                .override = .{ .custom = lib_path },
+            } },
+        );
+        ffi_libs.dependOn(&install_step.step);
+    }
 
     // Zig module
     _ = b.addModule("mustache", .{ .source_file = .{ .path = "src/mustache.zig" } });
 
     // C FFI Sample
-
     {
+        const static_lib = b.addStaticLibrary(.{
+            .name = "mustache-static",
+            .root_source_file = .{ .path = "src/exports.zig" },
+            .target = target,
+            .optimize = mode,
+            .link_libc = true,
+        });
+
         const c_sample = b.addExecutable(.{
             .name = "sample",
             .root_source_file = .{ .path = "samples/c/sample.c" },
@@ -57,7 +78,7 @@ pub fn build(b: *std.build.Builder) void {
     // Tests
 
     var comptime_tests = b.addOptions();
-    const comptime_tests_enabled = b.option(bool, "comptime-tests", "Run comptime tests") orelse false;
+    const comptime_tests_enabled = b.option(bool, "comptime-tests", "Run comptime tests") orelse true;
     comptime_tests.addOption(bool, "comptime_tests_enabled", comptime_tests_enabled);
 
     {
@@ -91,9 +112,9 @@ pub fn build(b: *std.build.Builder) void {
                 null, // to get zig to use the --test-cmd-bin flag
             });
         }
-
+        const run_main_tests = b.addRunArtifact(main_tests);
         const test_step = b.step("test", "Run library tests");
-        test_step.dependOn(&main_tests.step);
+        test_step.dependOn(&run_main_tests.step);
     }
 
     {

@@ -41,13 +41,23 @@ pub const ContextType = enum {
     ffi,
 
     pub fn fromData(comptime Data: type) ContextType {
-        if (Data == json.Value or (@TypeOf(Data) == *[]type and meta.Child(Data) == json.Value)) {
+        if (comptime isJson(Data)) {
             return .json;
         } else if (Data == ffi_extern_types.UserData) {
             return .ffi;
         } else {
             return .native;
         }
+    }
+
+    inline fn isJson(comptime Data: type) bool {
+        if (Data == json.Value) return true;
+
+        const hasChild = switch (@typeInfo(Data)) {
+            .Pointer, .Array, .Vector => true,
+            else => false,
+        };
+        return hasChild and isJson(meta.Child(Data));
     }
 };
 
@@ -338,21 +348,21 @@ pub fn allocRenderFilePartialsWithOptions(allocator: Allocator, template_absolut
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
 /// Caller must free the memory
-pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
+pub fn allocRenderFileZ(allocator: Allocator, template_absolute_path: []const u8, data: anytype) (Allocator.Error || ParseError || FileError)![:0]const u8 {
     return try allocRenderFileZPartialsWithOptions(allocator, template_absolute_path, {}, data, .{});
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
 /// `options` defines the behavior of the parser and render process
 /// Caller must free the memory
-pub fn allocRenderFileZWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, comptime options: mustache.options.RenderFromFileOptions) (Allocator.Error || ParseError || FileError)![]const u8 {
+pub fn allocRenderFileZWithOptions(allocator: Allocator, template_absolute_path: []const u8, data: anytype, comptime options: mustache.options.RenderFromFileOptions) (Allocator.Error || ParseError || FileError)![:0]const u8 {
     return try allocRenderFileZPartialsWithOptions(allocator, template_absolute_path, {}, data, options);
 }
 
 /// Parses the file indicated by `template_absolute_path` and renders with the given `data` and returns an owned slice with the content.
 /// `partials` can be a tuple, an array, slice or a HashMap containing the partial's name as key and the template absolute path as value
 /// Caller must free the memory
-pub fn allocRenderFileZPartials(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype) (Allocator.Error || ParseError || FileError)![]const u8 {
+pub fn allocRenderFileZPartials(allocator: Allocator, template_absolute_path: []const u8, partials: anytype, data: anytype) (Allocator.Error || ParseError || FileError)![:0]const u8 {
     return try allocRenderFileZPartialsWithOptions(allocator, template_absolute_path, partials, data, .{});
 }
 
@@ -1085,7 +1095,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
     };
 }
 
-const comptime_tests_enabled = false; //@import("build_comptime_tests").comptime_tests_enabled;
+const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
 
 test {
     _ = context;
@@ -1708,7 +1718,7 @@ const tests = struct {
             }
 
             // Objects and hashes should be pushed onto the context stack.
-            test "Context" {
+            test "Context render" {
                 const template_text = "{{#context}}Hi {{name}}.{{/context}}";
                 const expected = "Hi Joe.";
 
@@ -1719,7 +1729,8 @@ const tests = struct {
 
                 {
                     const Data = struct { context: struct { name: []const u8 } };
-                    const data = Data{ .context = .{ .name = "Joe" } };
+                    var data: Data = undefined;
+                    data = .{ .context = .{ .name = "Joe" } };
 
                     try expectRender(template_text, data, expected);
                 }
@@ -1860,7 +1871,8 @@ const tests = struct {
                     try expectRender(template_text, data, expected);
                 }
 
-                {
+                //TODO(zig) compiler panic!
+                if (false) {
                     //tuples
                     const Bottom = struct {
                         bname: []const u8,
@@ -1969,7 +1981,7 @@ const tests = struct {
                     // slice
                     const Data = struct { list: []const struct { item: u32 } };
 
-                    const data = Data{
+                    const data: Data = .{
                         .list = &.{
                             .{ .item = 1 },
                             .{ .item = 2 },
@@ -1984,7 +1996,7 @@ const tests = struct {
                     // array
                     const Data = struct { list: [3]struct { item: u32 } };
 
-                    const data = Data{
+                    const data: Data = .{
                         .list = .{
                             .{ .item = 1 },
                             .{ .item = 2 },
@@ -2415,7 +2427,7 @@ const tests = struct {
             }
 
             // Objects and hashes should behave like truthy values.
-            test "Context" {
+            test "Context render" {
                 const template_text = "{{^context}}Hi {{name}}.{{/context}}";
                 const expected = "";
 
@@ -2431,14 +2443,16 @@ const tests = struct {
                 {
                     // Slice
                     const Data = struct { list: []const struct { n: u32 } };
-                    const data = Data{ .list = &.{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
+                    var data: Data = undefined;
+                    data = .{ .list = &.{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
                     try expectRender(template_text, data, expected);
                 }
 
                 {
                     // Array
                     const Data = struct { list: [3]struct { n: u32 } };
-                    const data = Data{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
+                    var data: Data = undefined;
+                    data = .{ .list = .{ .{ .n = 1 }, .{ .n = 2 }, .{ .n = 3 } } };
                     try expectRender(template_text, data, expected);
                 }
 
@@ -3063,7 +3077,7 @@ const tests = struct {
             }
 
             // The greater-than operator should operate within the current context.
-            test "Context" {
+            test "Context render" {
                 const template_text: []const u8 = "'{{>partial}}'";
                 const partials_template_text = .{
                     .{
@@ -4275,7 +4289,7 @@ const tests = struct {
             comptime var comptime_partials: [partials.len]PartialTuple = undefined;
 
             comptime {
-                inline for (partials, 0..) |item, index| {
+                for (partials, 0..) |item, index| {
                     const partial_template = mustache.parseComptime(item[1], .{}, .{});
                     comptime_partials[index] = .{ item[0], partial_template };
                 }

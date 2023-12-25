@@ -42,7 +42,7 @@ pub fn FileReader(comptime options: TemplateOptions) type {
             errdefer allocator.free(buffer);
 
             if (prepend.len > 0) {
-                std.mem.copy(u8, buffer, prepend);
+                std.mem.copyForwards(u8, buffer, prepend);
             }
 
             const size = try self.file.read(buffer[prepend.len..]);

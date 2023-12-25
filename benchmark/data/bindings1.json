@@ -1,6 +1,0 @@
-{
-    "title": "What can RabbitMQ do for you?",
-    "txt1": "RabbitMQ ships with an easy-to use management UI that allows you to monitor and control every aspect of your message broker. ",
-    "txt2": "RabbitMQ ships in a state where it can be used straight away in simple cases - just start the server and it's ready to go. If you have more complex needs you may need to adjust your server configuration.",
-    "txt3": "These tutorials cover the basics of creating messaging applications using RabbitMQ. You need to have the RabbitMQ server installed to go through the tutorials, please see the installation guide. Code examples of these tutorials are open source, as is RabbitMQ website. "
-}

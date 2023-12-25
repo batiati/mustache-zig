@@ -12,7 +12,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const exe = b.addExecutable(.{
         .name = "benchmark",
-        .root_source_file = .{ .path = "src/ramhorns_bench.zig" },
+        .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = mode,
     });
@@ -21,9 +21,9 @@ pub fn build(b: *std.build.Builder) void {
         .source_file = .{ .path = "../src/mustache.zig" },
     });
     exe.linkLibC();
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);

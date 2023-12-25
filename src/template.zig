@@ -454,7 +454,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
     };
 }
 
-const comptime_tests_enabled = false; // @import("build_comptime_tests").comptime_tests_enabled;
+const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
 test {
     _ = tests;
     _ = parsing;
@@ -2438,7 +2438,7 @@ const tests = struct {
 
         test "parseComptime API" {
             if (!comptime_tests_enabled) return error.SkipZigTest;
-            const template = mustache.parseComptime("{{hello}}world", .{}, .{});
+            const template = comptime mustache.parseComptime("{{hello}}world", .{}, .{});
             try testing.expectEqual(@as(usize, 2), template.elements.len);
             try testing.expectEqual(Element.Type.interpolation, template.elements[0]);
             try testing.expectEqual(Element.Type.static_text, template.elements[1]);

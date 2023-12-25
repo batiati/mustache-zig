@@ -1,9 +1,9 @@
 name: Matrix Build
 on:
   push: 
-    branches: [ master ]
+    branches: [ stage3 ]
   pull_request:
-    branches: [ master ]
+    branches: [ stage3 ]
   schedule:
     - cron: 0 9 * * *
 jobs:
@@ -17,7 +17,6 @@ jobs:
         #comptime: [true, false]
       
         os: [ubuntu-latest, macos-latest]
-        comptime: [false]
         include:
           #- os: windows-latest
           #  crlf: fix
@@ -40,20 +39,20 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.11.0
+          version: master
 
       - name: Download kcov
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.comptime == false }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
           sudo apt-get install -y kcov
 
       - name: Run Tests
         run: |
           zig version
-          zig build test ${{ matrix.coverage }} -Dcomptime-tests=${{ matrix.comptime }}
+          zig build test ${{ matrix.coverage }} -Dcomptime-tests=false
       
       - name: Upload Codecov
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.comptime == false }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         run: |

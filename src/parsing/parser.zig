@@ -500,7 +500,7 @@ pub fn Parser(comptime options: TemplateOptions) type {
     };
 }
 
-const comptime_tests_enabled = false; // @import("build_comptime_tests").comptime_tests_enabled;
+const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
 fn TesterParser(comptime load_mode: TemplateLoadMode) type {
     return Parser(.{ .source = .{ .string = .{} }, .output = .render, .load_mode = load_mode });
 }

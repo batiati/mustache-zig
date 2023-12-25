@@ -61,15 +61,15 @@ pub fn simpleTemplate(allocator: Allocator, buffer: []u8, comptime mode: Mode, w
     const fmt_template = "<title>{[title]s}</title><h1>{[title]s}</h1><div>{[body]s}</div>";
 
     const Data = struct { title: []const u8, body: []const u8 };
-    var data: Data = .{
+    const data: Data = .{
         .title = "Hello, Mustache!",
         .body = "This is a really simple test of the rendering!",
     };
 
-    var json_text = try std.json.stringifyAlloc(allocator, data, .{});
+    const json_text = try std.json.stringifyAlloc(allocator, data, .{});
     defer allocator.free(json_text);
 
-    var json_data = try std.json.parseFromSlice(std.json.Value, json_text, .{});
+    var json_data = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
     defer json_data.deinit();
 
     var template = (try mustache.parseText(allocator, template_text, .{}, .{ .copy_strings = false, .features = features })).success;
@@ -183,12 +183,12 @@ pub fn partialTemplates(allocator: Allocator, buffer: []u8, comptime mode: Mode,
     };
 
     const Data = struct { title: []const u8, body: []const u8 };
-    var data: Data = .{
+    const data: Data = .{
         .title = "Hello, Mustache!",
         .body = "This is a really simple test of the rendering!",
     };
 
-    var json_text = try std.json.stringifyAlloc(allocator, data, .{});
+    const json_text = try std.json.stringifyAlloc(allocator, data, .{});
     defer allocator.free(json_text);
 
     var json_data = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
@@ -336,7 +336,7 @@ fn preParsed(allocator: Allocator, buffer: []u8, mode: Mode, template: mustache.
 fn preParsedPartials(allocator: Allocator, buffer: []u8, mode: Mode, template: mustache.Template, partial_templates: anytype, data: anytype, writer: anytype) !usize {
     switch (mode) {
         .Buffer => {
-            var ret = try mustache.bufRenderPartials(buffer, template, partial_templates, data);
+            const ret = try mustache.bufRenderPartials(buffer, template, partial_templates, data);
             return ret.len;
         },
         .Writer => {
