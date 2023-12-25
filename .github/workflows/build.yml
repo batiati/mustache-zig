@@ -13,8 +13,8 @@ jobs:
       matrix:      
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
-          #- os: windows-latest
-          #  crlf: fix
+          - os: windows-latest
+            crlf: fix
           - os: ubuntu-latest
             comptime: false
             coverage: -Dtest-coverage
@@ -34,7 +34,7 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.10.0
+          version: master
 
       - name: Download kcov
         if: ${{ matrix.os == 'ubuntu-latest' }}
