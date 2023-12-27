@@ -4,8 +4,6 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 pub const IndentationQueue = struct {
-    const Self = @This();
-
     pub const Null = struct {
         pub inline fn isEmpty(self: @This()) bool {
             _ = self;
@@ -24,7 +22,7 @@ pub const IndentationQueue = struct {
     } = null,
     has_pending: bool = false,
 
-    pub fn indent(self: *Self, node: *Node) void {
+    pub fn indent(self: *IndentationQueue, node: *Node) void {
         if (self.list) |list| {
             list.tail.next = node;
             self.list = .{
@@ -39,7 +37,7 @@ pub const IndentationQueue = struct {
         }
     }
 
-    pub fn unindent(self: *Self) void {
+    pub fn unindent(self: *IndentationQueue) void {
         if (self.list) |list| {
             if (list.head == list.tail) {
                 self.list = null;
@@ -71,7 +69,7 @@ pub const IndentationQueue = struct {
         }
     }
 
-    pub fn write(self: Self, writer: anytype) !void {
+    pub fn write(self: IndentationQueue, writer: anytype) !void {
         if (self.list) |list| {
             var node: ?*const Node = list.head;
             while (node) |level| : (node = level.next) {
@@ -80,7 +78,7 @@ pub const IndentationQueue = struct {
         }
     }
 
-    pub inline fn isEmpty(self: Self) bool {
+    pub inline fn isEmpty(self: IndentationQueue) bool {
         return self.list == null;
     }
 };

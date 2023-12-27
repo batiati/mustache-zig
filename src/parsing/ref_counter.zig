@@ -20,28 +20,26 @@ pub fn RefCounter(comptime options: TemplateOptions) type {
 }
 
 const RefCounterImpl = struct {
-    const Self = @This();
-
     const State = struct {
         counter: usize,
         buffer: []const u8,
     };
 
-    pub const null_ref = Self{};
+    pub const null_ref = RefCounterImpl{};
 
     state: ?*State = null,
 
-    pub fn create(allocator: Allocator, buffer: []const u8) Allocator.Error!Self {
+    pub fn create(allocator: Allocator, buffer: []const u8) Allocator.Error!RefCounterImpl {
         const state = try allocator.create(State);
         state.* = .{
             .counter = 1,
             .buffer = buffer,
         };
 
-        return Self{ .state = state };
+        return RefCounterImpl{ .state = state };
     }
 
-    pub fn ref(self: Self) Self {
+    pub fn ref(self: RefCounterImpl) RefCounterImpl {
         if (self.state) |state| {
             assert(state.counter != 0);
             state.counter += 1;
@@ -51,7 +49,7 @@ const RefCounterImpl = struct {
         }
     }
 
-    pub fn unRef(self: *Self, allocator: Allocator) void {
+    pub fn unRef(self: *RefCounterImpl, allocator: Allocator) void {
         if (self.state) |state| {
             assert(state.counter != 0);
             self.state = null;
@@ -65,22 +63,20 @@ const RefCounterImpl = struct {
 };
 
 const NoOpRefCounter = struct {
-    const Self = @This();
+    pub const null_ref = NoOpRefCounter{};
 
-    pub const null_ref = Self{};
-
-    pub inline fn init(allocator: Allocator, buffer: []const u8) Allocator.Error!Self {
+    pub inline fn init(allocator: Allocator, buffer: []const u8) Allocator.Error!NoOpRefCounter {
         _ = allocator;
         _ = buffer;
         return null_ref;
     }
 
-    pub inline fn ref(self: Self) Self {
+    pub inline fn ref(self: NoOpRefCounter) NoOpRefCounter {
         _ = self;
         return null_ref;
     }
 
-    pub inline fn unRef(self: Self, allocator: Allocator) void {
+    pub inline fn unRef(self: NoOpRefCounter, allocator: Allocator) void {
         _ = self;
         _ = allocator;
     }

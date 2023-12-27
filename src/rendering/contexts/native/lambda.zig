@@ -17,7 +17,7 @@ const LambdaContext = context.LambdaContext;
 
 const rendering = @import("../../rendering.zig");
 
-pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+pub fn LambdaContextImplType(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
 
@@ -34,7 +34,7 @@ pub fn LambdaContextImpl(comptime Writer: type, comptime PartialsMap: type, comp
             .write = write,
         };
 
-        pub fn context(self: *Self, inner_text: []const u8) LambdaContext {
+        pub fn ContextType(self: *Self, inner_text: []const u8) LambdaContext {
             return .{
                 .ptr = self,
                 .vtable = &vtable,

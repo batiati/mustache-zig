@@ -45,17 +45,14 @@ Lambda functions can be called with [dot syntax](https://ziglang.org/documentati
 
 ```Zig
 const Person = struct {
-
-    const Self = @This();
-
     first_name: []const u8,
     last_name: []const u8,
 
-    pub fn name1(self: *Self, ctx: LambdaContext) !void {
+    pub fn name1(self: *Person, ctx: LambdaContext) !void {
         try ctx.writeFormat("{s} {s}", .{ self.first_name, self.last_name });
     }
 
-    pub fn name2(self: Self, ctx: LambdaContext) !void {
+    pub fn name2(self: Person, ctx: LambdaContext) !void {
         try ctx.writeFormat("{s} {s}", .{ self.first_name, self.last_name });
     }
 };

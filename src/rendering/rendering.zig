@@ -20,7 +20,7 @@ const Element = mustache.Element;
 const ParseError = mustache.ParseError;
 const Template = mustache.Template;
 
-const TemplateLoader = @import("../template.zig").TemplateLoader;
+const TemplateLoaderType = @import("../template.zig").TemplateLoaderType;
 
 const context = @import("context.zig");
 const Escape = context.Escape;
@@ -37,12 +37,12 @@ const map = @import("partials_map.zig");
 const FileError = std.fs.File.OpenError || std.fs.File.ReadError;
 const BufError = std.io.FixedBufferStream([]u8).WriteError;
 
-pub const ContextType = enum {
+pub const ContextSource = enum {
     native,
     json,
     ffi,
 
-    pub fn fromData(comptime Data: type) ContextType {
+    pub fn fromData(comptime Data: type) ContextSource {
         if (comptime isJson(Data)) {
             return .json;
         } else if (Data == ffi_extern_types.UserData) {
@@ -380,7 +380,7 @@ pub fn allocRenderFileZPartialsWithOptions(allocator: Allocator, template_absolu
 fn internalRender(template: Template, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
     comptime assert(options == .template);
 
-    const context_type = comptime ContextType.fromData(@TypeOf(data));
+    const context_type = comptime ContextSource.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(context_type, @TypeOf(writer), PartialsMap, options);
 
@@ -393,7 +393,7 @@ fn internalAllocRender(allocator: Allocator, template: Template, partials: anyty
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    const context_type = comptime ContextType.fromData(@TypeOf(data));
+    const context_type = comptime ContextSource.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(context_type, Writer, PartialsMap, options);
@@ -409,7 +409,7 @@ fn internalAllocRender(allocator: Allocator, template: Template, partials: anyty
 fn internalCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, writer: anytype, comptime options: RenderOptions) !void {
     comptime assert(options != .template);
 
-    const context_type = comptime ContextType.fromData(@TypeOf(data));
+    const context_type = comptime ContextSource.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(context_type, @TypeOf(writer), PartialsMap, options);
 
@@ -428,7 +428,7 @@ fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: an
     var list = std.ArrayList(u8).init(allocator);
     defer list.deinit();
 
-    const context_type = comptime ContextType.fromData(@TypeOf(data));
+    const context_type = comptime ContextSource.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(context_type, Writer, PartialsMap, options);
@@ -449,13 +449,13 @@ fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: an
 
 /// Group functions and structs that are denpendent of Writer and RenderOptions
 pub fn RenderEngine(
-    comptime context_type: ContextType,
+    comptime context_type: ContextSource,
     comptime Writer: type,
     comptime TPartialsMap: type,
     comptime options: RenderOptions,
 ) type {
     return struct {
-        pub const Context = context.Context(context_type, Writer, PartialsMap, options);
+        pub const Context = context.ContextType(context_type, Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
         pub const PartialsMap = TPartialsMap;
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
@@ -472,7 +472,6 @@ pub fn RenderEngine(
         };
 
         pub const DataRender = struct {
-            const Self = @This();
             pub const Error = Allocator.Error || Writer.Error;
 
             out_writer: OutWriter,
@@ -481,7 +480,7 @@ pub fn RenderEngine(
             indentation_queue: *IndentationQueue,
             template_options: if (options == .template) *const TemplateOptions else void,
 
-            pub fn collect(self: *Self, allocator: Allocator, template: []const u8) !void {
+            pub fn collect(self: *DataRender, allocator: Allocator, template: []const u8) !void {
                 switch (comptime options) {
                     .string => |string_options| {
                         const template_options = mustache.options.TemplateOptions{
@@ -491,7 +490,7 @@ pub fn RenderEngine(
                             .load_mode = .runtime_loaded,
                         };
 
-                        var template_loader = TemplateLoader(template_options){
+                        var template_loader = TemplateLoaderType(template_options){
                             .allocator = allocator,
                         };
                         errdefer template_loader.deinit();
@@ -499,13 +498,17 @@ pub fn RenderEngine(
                     },
                     .file => |file_options| {
                         const render_file_options = TemplateOptions{
-                            .source = .{ .file = .{ .read_buffer_size = file_options.read_buffer_size } },
+                            .source = .{
+                                .file = .{
+                                    .read_buffer_size = file_options.read_buffer_size,
+                                },
+                            },
                             .output = .render,
                             .features = file_options.features,
                             .load_mode = .runtime_loaded,
                         };
 
-                        var template_loader = TemplateLoader(render_file_options){
+                        var template_loader = TemplateLoaderType(render_file_options){
                             .allocator = allocator,
                         };
                         errdefer template_loader.deinit();
@@ -516,7 +519,7 @@ pub fn RenderEngine(
                 }
             }
 
-            pub fn render(self: *Self, elements: []const Element) !void {
+            pub fn render(self: *DataRender, elements: []const Element) !void {
                 switch (self.out_writer) {
                     .buffer => |buffer| {
                         var list = buffer.context;
@@ -531,7 +534,7 @@ pub fn RenderEngine(
                 try self.renderLevel(elements);
             }
 
-            inline fn lambdasSupported(self: Self) bool {
+            inline fn lambdasSupported(self: DataRender) bool {
                 return switch (options) {
                     .template => self.template_options.features.lambdas == .enabled,
                     .string => |string| string.features.lambdas == .enabled,
@@ -539,7 +542,7 @@ pub fn RenderEngine(
                 };
             }
 
-            inline fn preseveLineBreaksAndIndentation(self: Self) bool {
+            inline fn preseveLineBreaksAndIndentation(self: DataRender) bool {
                 return !PartialsMap.isEmpty() and
                     switch (options) {
                     .template => self.template_options.features.preseve_line_breaks_and_indentation,
@@ -549,7 +552,7 @@ pub fn RenderEngine(
             }
 
             fn renderLevel(
-                self: *Self,
+                self: *DataRender,
                 elements: []const Element,
             ) (Allocator.Error || Writer.Error)!void {
                 var index: usize = 0;
@@ -572,7 +575,13 @@ pub fn RenderEngine(
                                         assert(section.inner_text != null);
                                         assert(section.delimiters != null);
 
-                                        const expand_result = try lambda_ctx.expandLambda(self, &.{}, section.inner_text.?, .Unescaped, section.delimiters.?);
+                                        const expand_result = try lambda_ctx.expandLambda(
+                                            self,
+                                            &.{},
+                                            section.inner_text.?,
+                                            .Unescaped,
+                                            section.delimiters.?,
+                                        );
                                         assert(expand_result == .lambda);
                                         continue;
                                     }
@@ -598,7 +607,11 @@ pub fn RenderEngine(
                             // Lambdas aways evaluate as "true" for inverted section
                             // Broken paths, empty lists, null and false evaluates as "false"
 
-                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else false;
+                            const truthy = if (self.getIterator(section.path)) |iterator|
+                                iterator.truthy()
+                            else
+                                false;
+
                             if (!truthy) {
                                 try self.renderLevel(section_children);
                             }
@@ -636,7 +649,7 @@ pub fn RenderEngine(
             }
 
             fn renderLevelPartials(
-                self: *Self,
+                self: *DataRender,
                 partial_template: PartialsMap.Template,
             ) !void {
                 comptime assert(!PartialsMap.isEmpty());
@@ -652,7 +665,7 @@ pub fn RenderEngine(
             }
 
             fn interpolate(
-                self: *Self,
+                self: *DataRender,
                 path: Element.Path,
                 escape: Escape,
             ) (Allocator.Error || Writer.Error)!void {
@@ -689,7 +702,7 @@ pub fn RenderEngine(
             }
 
             fn getIterator(
-                self: *Self,
+                self: *DataRender,
                 path: Element.Path,
             ) ?Context.Iterator {
                 var level: ?*const ContextStack = self.stack;
@@ -716,7 +729,7 @@ pub fn RenderEngine(
             }
 
             pub fn write(
-                self: *Self,
+                self: *DataRender,
                 value: anytype,
                 escape: Escape,
             ) (Allocator.Error || Writer.Error)!void {
@@ -733,7 +746,7 @@ pub fn RenderEngine(
             }
 
             pub fn countWrite(
-                self: *Self,
+                self: *DataRender,
                 value: anytype,
                 escape: Escape,
             ) (Allocator.Error || Writer.Error)!usize {
@@ -813,7 +826,7 @@ pub fn RenderEngine(
             }
 
             fn flushToWriter(
-                self: *Self,
+                self: *DataRender,
                 writer: anytype,
                 value: []const u8,
                 comptime escape: Escape,
@@ -880,7 +893,7 @@ pub fn RenderEngine(
             }
 
             fn levelCapacityHint(
-                self: *Self,
+                self: *DataRender,
                 elements: []const Element,
             ) usize {
                 var size: usize = 0;
@@ -931,7 +944,7 @@ pub fn RenderEngine(
             }
 
             fn pathCapacityHint(
-                self: *Self,
+                self: *DataRender,
                 path: Element.Path,
             ) usize {
                 var level: ?*const ContextStack = self.stack;
@@ -998,28 +1011,28 @@ pub fn RenderEngine(
             }
         };
 
-        pub inline fn getContext(data: anytype) Context {
+        pub inline fn getContextType(data: anytype) Context {
             const Data = @TypeOf(data);
-            const ContextImpl = context.ContextImpl(context_type, Writer, Data, PartialsMap, options);
+            const ContextImpl = context.ContextImplType(context_type, Writer, Data, PartialsMap, options);
 
             switch (context_type) {
                 .native => {
                     const by_value = comptime Fields.byValue(Data);
                     if (comptime !by_value and !stdx.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
-                    return ContextImpl.context(data);
+                    return ContextImpl.ContextType(data);
                 },
                 .json => {
                     if (comptime Data == json.Value or (stdx.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
-                        return ContextImpl.context(data);
+                        return ContextImpl.ContextType(data);
                     } else if (comptime Data == json.ValueTree or (stdx.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
-                        return ContextImpl.context(data.root);
+                        return ContextImpl.ContextType(data.root);
                     } else {
                         @compileError("Expected a std.json.Value or std.json.ValueTree");
                     }
                 },
                 .ffi => {
                     if (comptime Data != ffi_extern_types.UserData) @compileError("Expected a FFI user data");
-                    return ContextImpl.context(data);
+                    return ContextImpl.ContextType(data);
                 },
             }
         }
@@ -1033,7 +1046,7 @@ pub fn RenderEngine(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
             var data_render = DataRender{
@@ -1056,7 +1069,7 @@ pub fn RenderEngine(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
             var data_render = DataRender{
@@ -1079,7 +1092,7 @@ pub fn RenderEngine(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
             var data_render = DataRender{
@@ -1102,7 +1115,7 @@ pub fn RenderEngine(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContext(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
             var data_render = DataRender{

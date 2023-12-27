@@ -12,47 +12,47 @@ const Delimiters = mustache.Delimiters;
 const Element = mustache.Element;
 
 const rendering = @import("../../rendering.zig");
-const ContextType = rendering.ContextType;
+const ContextSource = rendering.ContextSource;
 
 const context = @import("../../context.zig");
-const PathResolution = context.PathResolution;
+const PathResolutionType = context.PathResolutionType;
 const Escape = context.Escape;
 const ContextIterator = context.ContextIterator;
 
 /// Json context can resolve paths for std.json.Value objects
 /// This struct implements the expected context interface using static dispatch.
 /// Pub functions must be kept in sync with other contexts implementation
-pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+pub fn ContextType(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(.json, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
     const Depth = enum { Root, Leaf };
 
     return struct {
-        const Self = @This();
+        const Context = @This();
 
         pub const ContextStack = struct {
             parent: ?*const @This(),
-            ctx: Self,
+            ctx: Context,
         };
 
-        pub const Iterator = ContextIterator(Self);
+        pub const Iterator = ContextIterator(Context);
 
         ctx: json.Value = undefined,
 
-        pub fn context(json_value: json.Value) Self {
+        pub fn ContextType(json_value: json.Value) Context {
             return .{
                 .ctx = json_value,
             };
         }
 
-        pub fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
+        pub fn get(self: Context, path: Element.Path, index: ?usize) PathResolutionType(Context) {
             const value = getJsonValue(.Root, self.ctx, path, index);
 
             return switch (value) {
                 .not_found_in_context => .not_found_in_context,
                 .chain_broken => .chain_broken,
                 .iterator_consumed => .iterator_consumed,
-                .field => |content| .{ .field = RenderEngine.getContext(content) },
+                .field => |content| .{ .field = RenderEngine.getContextType(content) },
                 .lambda => {
                     assert(false);
                     unreachable;
@@ -61,10 +61,10 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         }
 
         pub fn capacityHint(
-            self: Self,
+            self: Context,
             data_render: *DataRender,
             path: Element.Path,
-        ) PathResolution(usize) {
+        ) PathResolutionType(usize) {
             const value = getJsonValue(.Root, self.ctx, path, null);
 
             return switch (value) {
@@ -88,11 +88,11 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         }
 
         pub inline fn interpolate(
-            self: Self,
+            self: Context,
             data_render: *DataRender,
             path: Element.Path,
             escape: Escape,
-        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        ) (Allocator.Error || Writer.Error)!PathResolutionType(void) {
             const value = getJsonValue(.Root, self.ctx, path, null);
 
             switch (value) {
@@ -118,13 +118,13 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
         }
 
         pub inline fn expandLambda(
-            self: Self,
+            self: Context,
             data_render: *DataRender,
             path: Element.Path,
             inner_text: []const u8,
             escape: Escape,
             delimiters: Delimiters,
-        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        ) (Allocator.Error || Writer.Error)!PathResolutionType(void) {
             _ = self;
             _ = data_render;
             _ = path;
@@ -133,10 +133,10 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             _ = delimiters;
 
             // Json objects cannot have declared lambdas
-            return PathResolution(void).chain_broken;
+            return PathResolutionType(void).chain_broken;
         }
 
-        pub fn iterator(self: *const Self, path: Element.Path) PathResolution(Iterator) {
+        pub fn iterator(self: *const Context, path: Element.Path) PathResolutionType(Iterator) {
             const result = self.get(path, 0);
 
             return switch (result) {
@@ -154,7 +154,7 @@ pub fn Context(comptime Writer: type, comptime PartialsMap: type, comptime optio
             };
         }
 
-        fn getJsonValue(depth: Depth, value: json.Value, path: Element.Path, index: ?usize) PathResolution(json.Value) {
+        fn getJsonValue(depth: Depth, value: json.Value, path: Element.Path, index: ?usize) PathResolutionType(json.Value) {
             if (path.len == 0) {
                 if (index) |current_index| {
                     switch (value) {

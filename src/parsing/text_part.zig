@@ -12,12 +12,12 @@ const parsing = @import("parsing.zig");
 const PartType = parsing.PartType;
 const Delimiters = parsing.Delimiters;
 
-pub fn TextPart(comptime options: TemplateOptions) type {
+pub fn TextPartType(comptime options: TemplateOptions) type {
     const RefCountedSlice = ref_counter.RefCountedSlice(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
 
     return struct {
-        const Self = @This();
+        const TextPart = @This();
 
         part_type: PartType,
         is_stand_alone: bool,
@@ -43,7 +43,7 @@ pub fn TextPart(comptime options: TemplateOptions) type {
             right: TrimmingIndex = .preserve_whitespaces,
         } = .{},
 
-        pub inline fn unRef(self: *Self, allocator: Allocator) void {
+        pub inline fn unRef(self: *TextPart, allocator: Allocator) void {
             self.content.ref_counter.unRef(allocator);
 
             if (self.indentation) |*indentation| {
@@ -52,12 +52,12 @@ pub fn TextPart(comptime options: TemplateOptions) type {
         }
 
         /// Determines if this TextPart is empty
-        pub fn isEmpty(self: *const Self) bool {
+        pub fn isEmpty(self: *const TextPart) bool {
             return self.content.slice.len == 0;
         }
 
         /// Processes the trimming rules for the right side of the slice
-        pub fn trimRight(self: *Self) ?RefCountedSlice {
+        pub fn trimRight(self: *TextPart) ?RefCountedSlice {
             return switch (self.trimming.right) {
                 .preserve_whitespaces, .trimmed => null,
                 .allow_trimming => |right_trimming| indentation: {
@@ -84,7 +84,7 @@ pub fn TextPart(comptime options: TemplateOptions) type {
         }
 
         /// Processes the trimming rules for the left side of the slice
-        pub fn trimLeft(self: *Self) void {
+        pub fn trimLeft(self: *TextPart) void {
             switch (self.trimming.left) {
                 .preserve_whitespaces, .trimmed => {},
                 .allow_trimming => |left_trimming| {
@@ -125,7 +125,7 @@ pub fn TextPart(comptime options: TemplateOptions) type {
             }
         }
 
-        pub fn parseDelimiters(self: *const Self) ?Delimiters {
+        pub fn parseDelimiters(self: *const TextPart) ?Delimiters {
 
             // Delimiters are the only case of match closing tags {{= and =}}
             // Validate if the content ends with the proper "=" symbol before parsing the delimiters

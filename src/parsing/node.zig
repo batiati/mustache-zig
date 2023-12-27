@@ -14,16 +14,16 @@ const parsing = @import("parsing.zig");
 const Delimiters = parsing.Delimiters;
 const IndexBookmark = parsing.IndexBookmark;
 
-pub fn Node(comptime options: TemplateOptions) type {
+pub fn NodeType(comptime options: TemplateOptions) type {
     const RefCounter = ref_counter.RefCounter(options);
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
     const allow_lambdas = options.features.lambdas == .enabled;
 
     return struct {
-        const Self = @This();
+        const Node = @This();
 
-        pub const List = std.ArrayListUnmanaged(Self);
-        pub const TextPart = parsing.TextPart(options);
+        pub const List = std.ArrayListUnmanaged(Node);
+        pub const TextPart = parsing.TextPartType(options);
 
         index: u32 = 0,
         identifier: ?[]const u8,
@@ -38,7 +38,7 @@ pub fn Node(comptime options: TemplateOptions) type {
             bookmark: ?IndexBookmark = null,
         } else void = if (allow_lambdas) .{} else {},
 
-        pub fn unRef(self: *Self, allocator: Allocator) void {
+        pub fn unRef(self: *Node, allocator: Allocator) void {
             if (comptime options.isRefCounted()) {
                 self.text_part.unRef(allocator);
                 if (allow_lambdas) {
@@ -47,7 +47,7 @@ pub fn Node(comptime options: TemplateOptions) type {
             }
         }
 
-        pub fn trimStandAlone(self: *Self, list: *List) void {
+        pub fn trimStandAlone(self: *Node, list: *List) void {
             if (comptime !has_trimming) return;
 
             var text_part = &self.text_part;
@@ -67,7 +67,7 @@ pub fn Node(comptime options: TemplateOptions) type {
             }
         }
 
-        pub fn trimLast(self: *Self, allocator: Allocator, nodes: *List) void {
+        pub fn trimLast(self: *Node, allocator: Allocator, nodes: *List) void {
             if (comptime !has_trimming) return;
             if (nodes.items.len == 0) return;
 
@@ -101,7 +101,7 @@ pub fn Node(comptime options: TemplateOptions) type {
             }
         }
 
-        pub fn getIndentation(self: *const Self) ?[]const u8 {
+        pub fn getIndentation(self: *const Node) ?[]const u8 {
             return if (comptime has_trimming)
                 switch (self.text_part.part_type) {
                     .partial,
@@ -113,7 +113,7 @@ pub fn Node(comptime options: TemplateOptions) type {
                 null;
         }
 
-        pub fn getInnerText(self: *const Self) ?[]const u8 {
+        pub fn getInnerText(self: *const Node) ?[]const u8 {
             if (comptime allow_lambdas) {
                 if (self.inner_text.content) |node_inner_text| {
                     return node_inner_text;
@@ -135,9 +135,12 @@ pub fn Node(comptime options: TemplateOptions) type {
                 if (text_part.part_type == .static_text) {
                     switch (text_part.trimming.right) {
                         .allow_trimming => |trimming| {
-
                             // Non standalone tags must check the previous node
-                            const can_trim = trimming.stand_alone or trimPreviousNodesRight(nodes, prev_index);
+                            const can_trim = trimming.stand_alone or trimPreviousNodesRight(
+                                nodes,
+                                prev_index,
+                            );
+
                             if (can_trim) {
                                 if (text_part.trimRight()) |indentation| {
                                     current_node.text_part.indentation = indentation;

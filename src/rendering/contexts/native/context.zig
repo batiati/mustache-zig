@@ -13,7 +13,7 @@ const Delimiters = mustache.Delimiters;
 
 const context = @import("../../context.zig");
 const Fields = context.Fields;
-const PathResolution = context.PathResolution;
+const PathResolutionType = context.PathResolutionType;
 const Escape = context.Escape;
 const LambdaContext = context.LambdaContext;
 const ContextIterator = context.ContextIterator;
@@ -27,12 +27,11 @@ const invoker = @import("invoker.zig");
 /// It is large enough to hold some context data such as a pointer, a slice, a nullable pointer/slice
 /// and some common primitives passed by value like enums, integers, floats and nullable integer/floats
 pub const ErasedType = struct {
-    const Self = @This();
     const Content = [4]usize;
 
     content: Content,
 
-    pub inline fn put(data: anytype) Self {
+    pub inline fn put(data: anytype) ErasedType {
         const Data = @TypeOf(data);
         const data_size = @sizeOf(Data);
 
@@ -40,13 +39,13 @@ pub const ErasedType = struct {
         if (comptime data_size == 0) {
             return undefined;
         } else {
-            var value: Self = undefined;
+            var value: ErasedType = undefined;
 
             if (comptime stdx.isSingleItemPtr(Data)) {
                 value.content[0] = @intFromPtr(data);
             } else {
 
-                // No need for cast checks here
+                // No need for cast checks hereSelf
                 // We can assure that this pointer will always be the correct type,
                 // since the context holds the type into the concrete implementation
                 @setRuntimeSafety(false);
@@ -59,7 +58,7 @@ pub const ErasedType = struct {
         }
     }
 
-    pub inline fn get(self: *const Self, comptime Data: type) Data {
+    pub inline fn get(self: *const ErasedType, comptime Data: type) Data {
         const data_size = @sizeOf(Data);
 
         if (comptime data_size == 0) {
@@ -84,43 +83,70 @@ pub const ErasedType = struct {
 /// Native context can resolve paths for zig structs and values
 /// This struct implements the expected context interface using dynamic dispatch.
 /// Pub functions must be kept in sync with other contexts implementation
-pub fn ContextInterface(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+pub fn ContextInterfaceType(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
     const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {
-        const Self = @This();
+        const ContextInterface = @This();
 
         pub const ContextStack = struct {
             parent: ?*const @This(),
-            ctx: Self,
+            ctx: ContextInterface,
         };
 
         const VTable = struct {
-            get: *const fn (*const ErasedType, Element.Path, ?usize) PathResolution(Self),
-            capacityHint: *const fn (*const ErasedType, *DataRender, Element.Path) PathResolution(usize),
-            interpolate: *const fn (*const ErasedType, *DataRender, Element.Path, Escape) (Allocator.Error || Writer.Error)!PathResolution(void),
-            expandLambda: *const fn (*const ErasedType, *DataRender, Element.Path, []const u8, Escape, Delimiters) (Allocator.Error || Writer.Error)!PathResolution(void),
+            get: *const fn (
+                *const ErasedType,
+                Element.Path,
+                ?usize,
+            ) PathResolutionType(ContextInterface),
+            capacityHint: *const fn (
+                *const ErasedType,
+                *DataRender,
+                Element.Path,
+            ) PathResolutionType(usize),
+            interpolate: *const fn (
+                *const ErasedType,
+                *DataRender,
+                Element.Path,
+                Escape,
+            ) (Allocator.Error || Writer.Error)!PathResolutionType(void),
+            expandLambda: *const fn (
+                *const ErasedType,
+                *DataRender,
+                Element.Path,
+                []const u8,
+                Escape,
+                Delimiters,
+            ) (Allocator.Error || Writer.Error)!PathResolutionType(void),
         };
 
-        pub const Iterator = ContextIterator(Self);
+        pub const Iterator = ContextIterator(ContextInterface);
 
         ctx: ErasedType = undefined,
         vtable: *const VTable,
 
-        pub inline fn get(self: Self, path: Element.Path, index: ?usize) PathResolution(Self) {
+        pub inline fn get(
+            self: ContextInterface,
+            path: Element.Path,
+            index: ?usize,
+        ) PathResolutionType(ContextInterface) {
             return self.vtable.get(&self.ctx, path, index);
         }
 
         pub inline fn capacityHint(
-            self: Self,
+            self: ContextInterface,
             data_render: *DataRender,
             path: Element.Path,
-        ) PathResolution(usize) {
+        ) PathResolutionType(usize) {
             return self.vtable.capacityHint(&self.ctx, data_render, path);
         }
 
-        pub fn iterator(self: *const Self, path: Element.Path) PathResolution(Iterator) {
+        pub fn iterator(
+            self: *const ContextInterface,
+            path: Element.Path,
+        ) PathResolutionType(Iterator) {
             const result = self.vtable.get(&self.ctx, path, 0);
 
             return switch (result) {
@@ -139,53 +165,72 @@ pub fn ContextInterface(comptime Writer: type, comptime PartialsMap: type, compt
         }
 
         pub inline fn interpolate(
-            self: Self,
+            self: ContextInterface,
             data_render: *DataRender,
             path: Element.Path,
             escape: Escape,
-        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        ) (Allocator.Error || Writer.Error)!PathResolutionType(void) {
             return try self.vtable.interpolate(&self.ctx, data_render, path, escape);
         }
 
         pub inline fn expandLambda(
-            self: Self,
+            self: ContextInterface,
             data_render: *DataRender,
             path: Element.Path,
             inner_text: []const u8,
             escape: Escape,
             delimiters: Delimiters,
-        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
-            return try self.vtable.expandLambda(&self.ctx, data_render, path, inner_text, escape, delimiters);
+        ) (Allocator.Error || Writer.Error)!PathResolutionType(void) {
+            return try self.vtable.expandLambda(
+                &self.ctx,
+                data_render,
+                path,
+                inner_text,
+                escape,
+                delimiters,
+            );
         }
     };
 }
 
 /// Implements the ContextInterface.VTable for the comptime-known data type.
-pub fn ContextImpl(comptime Writer: type, comptime Data: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);
-    const Interface = RenderEngine.Context;
+pub fn ContextImplType(
+    comptime Writer: type,
+    comptime Data: type,
+    comptime PartialsMap: type,
+    comptime options: RenderOptions,
+) type {
+    const RenderEngine = rendering.RenderEngine(
+        .native,
+        Writer,
+        PartialsMap,
+        options,
+    );
+    const Context = RenderEngine.Context;
     const DataRender = RenderEngine.DataRender;
     const Invoker = invoker.Invoker(Writer, PartialsMap, options);
 
     return struct {
-        const vtable = Interface.VTable{
+        const is_zero_size = @sizeOf(Data) == 0;
+        const vtable = Context.VTable{
             .get = get,
             .capacityHint = capacityHint,
             .interpolate = interpolate,
             .expandLambda = expandLambda,
         };
 
-        const is_zero_size = @sizeOf(Data) == 0;
-        const Self = @This();
-
-        pub fn context(data: Data) Interface {
+        pub fn ContextType(data: Data) Context {
             return .{
                 .vtable = &vtable,
                 .ctx = ErasedType.put(data),
             };
         }
 
-        fn get(ctx: *const ErasedType, path: Element.Path, index: ?usize) PathResolution(Interface) {
+        fn get(
+            ctx: *const ErasedType,
+            path: Element.Path,
+            index: ?usize,
+        ) PathResolutionType(Context) {
             return Invoker.get(
                 ctx.get(Data),
                 path,
@@ -197,7 +242,7 @@ pub fn ContextImpl(comptime Writer: type, comptime Data: type, comptime Partials
             ctx: *const ErasedType,
             data_render: *DataRender,
             path: Element.Path,
-        ) PathResolution(usize) {
+        ) PathResolutionType(usize) {
             return Invoker.capacityHint(
                 data_render,
                 ctx.get(Data),
@@ -210,7 +255,7 @@ pub fn ContextImpl(comptime Writer: type, comptime Data: type, comptime Partials
             data_render: *DataRender,
             path: Element.Path,
             escape: Escape,
-        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        ) (Allocator.Error || Writer.Error)!PathResolutionType(void) {
             return Invoker.interpolate(
                 data_render,
                 ctx.get(Data),
@@ -226,7 +271,7 @@ pub fn ContextImpl(comptime Writer: type, comptime Data: type, comptime Partials
             inner_text: []const u8,
             escape: Escape,
             delimiters: Delimiters,
-        ) (Allocator.Error || Writer.Error)!PathResolution(void) {
+        ) (Allocator.Error || Writer.Error)!PathResolutionType(void) {
             return Invoker.expandLambda(
                 data_render,
                 ctx.get(Data),
@@ -380,7 +425,7 @@ const context_tests = struct {
     const DummyRenderEngine = rendering.RenderEngine(.native, DummyWriter, DummyPartialsMap, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
-    const DummyParser = parsing.Parser(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
+    const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
     const dummy_map = DummyPartialsMap.init({});
 
     fn expectPath(allocator: Allocator, path: []const u8) !Element.Path {
@@ -394,7 +439,7 @@ const context_tests = struct {
         const Data = @TypeOf(data);
         const by_value = comptime Fields.byValue(Data);
 
-        const ctx = DummyRenderEngine.getContext(if (by_value) data else @as(*const Data, &data));
+        const ctx = DummyRenderEngine.getContextType(if (by_value) data else @as(*const Data, &data));
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
@@ -979,7 +1024,7 @@ const context_tests = struct {
 
         // Person
 
-        var person_ctx = DummyRenderEngine.getContext(&person);
+        var person_ctx = DummyRenderEngine.getContextType(&person);
 
         {
             list.clearAndFree();
@@ -1052,7 +1097,7 @@ const context_tests = struct {
 
         // Person
 
-        var person_ctx = DummyRenderEngine.getContext(&person);
+        var person_ctx = DummyRenderEngine.getContextType(&person);
 
         {
             list.clearAndFree();
@@ -1142,7 +1187,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var person_ctx = DummyRenderEngine.getContext(&person);
+        var person_ctx = DummyRenderEngine.getContextType(&person);
 
         const address_ctx = address_ctx: {
             const path = try expectPath(allocator, "address");
@@ -1222,7 +1267,7 @@ const context_tests = struct {
         const writer = list.writer();
 
         // Person
-        var ctx = DummyRenderEngine.getContext(&person);
+        var ctx = DummyRenderEngine.getContextType(&person);
 
         const path = try expectPath(allocator, "items");
         defer Element.destroyPath(allocator, false, path);
@@ -1266,7 +1311,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var ctx = DummyRenderEngine.getContext(&person);
+        var ctx = DummyRenderEngine.getContextType(&person);
 
         {
             // iterator over true
@@ -1313,7 +1358,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var ctx = DummyRenderEngine.getContext(&person);
+        var ctx = DummyRenderEngine.getContextType(&person);
 
         {
             // iterator over true

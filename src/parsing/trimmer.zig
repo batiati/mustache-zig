@@ -15,10 +15,10 @@ const TemplateOptions = mustache.options.TemplateOptions;
 
 const parsing = @import("parsing.zig");
 
-pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
+pub fn TrimmerType(comptime TextScanner: type, comptime TrimmingIndex: type) type {
     return if (@typeInfo(TrimmingIndex) == .Union)
         struct {
-            const Self = @This();
+            const Trimmer = @This();
 
             // Simple state-machine to track left and right line breaks while scanning the text
             const LeftLFState = union(enum) { scanning, not_found, found: u32 };
@@ -37,13 +37,13 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
             left_lf: LeftLFState = .scanning,
             right_lf: RightLFState = .waiting,
 
-            pub fn init(text_scanner: *TextScanner) Self {
+            pub fn init(text_scanner: *TextScanner) Trimmer {
                 return .{
                     .text_scanner = text_scanner,
                 };
             }
 
-            pub fn move(self: *Self) void {
+            pub fn move(self: *Trimmer) void {
                 const index = self.text_scanner.index;
                 const char = self.text_scanner.content[index];
 
@@ -75,7 +75,7 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
                 }
             }
 
-            pub fn getLeftTrimmingIndex(self: Self) TrimmingIndex {
+            pub fn getLeftTrimmingIndex(self: Trimmer) TrimmingIndex {
                 return switch (self.left_lf) {
                     .scanning, .not_found => .preserve_whitespaces,
                     .found => |index| .{
@@ -87,7 +87,7 @@ pub fn Trimmer(comptime TextScanner: type, comptime TrimmingIndex: type) type {
                 };
             }
 
-            pub fn getRightTrimmingIndex(self: Self) TrimmingIndex {
+            pub fn getRightTrimmingIndex(self: Trimmer) TrimmingIndex {
                 return switch (self.right_lf) {
                     .waiting => blk: {
 
@@ -144,8 +144,8 @@ const testing_options = TemplateOptions{
     .source = .{ .string = .{} },
     .output = .render,
 };
-const Node = parsing.Node(testing_options);
-const TestingTextScanner = parsing.TextScanner(Node, testing_options);
+const Node = parsing.NodeType(testing_options);
+const TestingTextScanner = parsing.TextScannerType(Node, testing_options);
 const TestingTrimmingIndex = parsing.TrimmingIndex(testing_options);
 
 test "Line breaks" {

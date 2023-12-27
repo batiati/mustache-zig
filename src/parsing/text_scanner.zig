@@ -20,18 +20,18 @@ const DelimiterType = parsing.DelimiterType;
 const Delimiters = parsing.Delimiters;
 const IndexBookmark = parsing.IndexBookmark;
 
-pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type {
+pub fn TextScannerType(comptime Node: type, comptime options: TemplateOptions) type {
     const RefCounter = ref_counter.RefCounter(options);
     const TrimmingIndex = parsing.TrimmingIndex(options);
-    const FileReader = parsing.FileReader(options);
+    const FileReader = parsing.FileReaderType(options);
 
     const allow_lambdas = options.features.lambdas == .enabled;
 
     return struct {
-        const Self = @This();
+        const TextScanner = @This();
 
         const TextPart = Node.TextPart;
-        const Trimmer = parsing.Trimmer(Self, TrimmingIndex);
+        const Trimmer = parsing.TrimmerType(TextScanner, TrimmingIndex);
 
         const Pos = struct {
             lin: u32 = 1,
@@ -89,7 +89,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
                     @setEvalBranchQuota(999999);
                     const allocator: Allocator = undefined;
-                    var scanner = Self.init(comptime_loaded.template_text) catch unreachable;
+                    var scanner = TextScanner.init(comptime_loaded.template_text) catch unreachable;
                     scanner.setDelimiters(comptime_loaded.default_delimiters) catch {
                         // TODO
                         unreachable;
@@ -128,12 +128,15 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
 
         /// Should be the template content if source == .string
         /// or the absolute path if source == .File
-        pub fn init(template: []const u8) if (options.source == .string) error{}!Self else FileReader.OpenError!Self {
+        pub fn init(template: []const u8) if (options.source == .string)
+            error{}!TextScanner
+        else
+            FileReader.OpenError!TextScanner {
             return switch (options.source) {
-                .string => Self{
+                .string => TextScanner{
                     .content = template,
                 },
-                .file => Self{
+                .file => TextScanner{
                     .content = &.{},
                     .file = .{
                         .reader = try FileReader.init(template),
@@ -142,14 +145,14 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             };
         }
 
-        pub fn deinit(self: *Self, allocator: Allocator) void {
+        pub fn deinit(self: *TextScanner, allocator: Allocator) void {
             if (comptime options.source == .file) {
                 self.file.ref_counter.unRef(allocator);
                 self.file.reader.deinit();
             }
         }
 
-        pub fn setDelimiters(self: *Self, delimiters: Delimiters) ParseError!void {
+        pub fn setDelimiters(self: *TextScanner, delimiters: Delimiters) ParseError!void {
             if (delimiters.starting_delimiter.len == 0) return ParseError.InvalidDelimiters;
             if (delimiters.ending_delimiter.len == 0) return ParseError.InvalidDelimiters;
 
@@ -157,11 +160,9 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             self.delimiters = delimiters;
         }
 
-        fn requestContent(self: *Self, allocator: Allocator) !void {
+        fn requestContent(self: *TextScanner, allocator: Allocator) !void {
             if (comptime options.source == .file) {
                 if (!self.file.reader.eof) {
-
-                    //
                     // Requesting a new buffer must preserve some parts of the current slice that are still needed
                     const adjust: struct { off_set: u32, preserve: ?u32 } = adjust: {
 
@@ -217,7 +218,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             }
         }
 
-        pub fn next(self: *Self, allocator: Allocator) !?TextPart {
+        pub fn next(self: *TextScanner, allocator: Allocator) !?TextPart {
             if (self.state == .eos) return null;
 
             self.index = self.block_index;
@@ -283,7 +284,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             return self.produceEos(trimmer);
         }
 
-        inline fn moveLineCounter(self: *Self, char: u8) void {
+        inline fn moveLineCounter(self: *TextScanner, char: u8) void {
             if (char == '\n') {
                 self.current_pos.lin += 1;
                 self.current_pos.col = 1;
@@ -292,7 +293,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             }
         }
 
-        fn produceOpen(self: *Self, trimmer: Trimmer, char: u8) ?TextPart {
+        fn produceOpen(self: *TextScanner, trimmer: Trimmer, char: u8) ?TextPart {
             const skip_current = switch (char) {
                 @intFromEnum(PartType.comments),
                 @intFromEnum(PartType.section),
@@ -366,7 +367,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             } else null;
         }
 
-        fn produceClose(self: *Self, trimmer: Trimmer, char: u8) TextPart {
+        fn produceClose(self: *TextScanner, trimmer: Trimmer, char: u8) TextPart {
             const triple_mustache_close = '}';
             const Mark = struct { block_index: u32, skip_current: bool };
 
@@ -414,7 +415,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             };
         }
 
-        fn produceEos(self: *Self, trimmer: Trimmer) ?TextPart {
+        fn produceEos(self: *TextScanner, trimmer: Trimmer) ?TextPart {
             defer self.state = .eos;
 
             switch (self.state) {
@@ -465,7 +466,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             }
         }
 
-        pub fn beginBookmark(self: *Self, node: *Node) Allocator.Error!void {
+        pub fn beginBookmark(self: *TextScanner, node: *Node) Allocator.Error!void {
             if (allow_lambdas) {
                 assert(node.inner_text.bookmark == null);
                 node.inner_text.bookmark = IndexBookmark{
@@ -484,7 +485,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             }
         }
 
-        pub fn endBookmark(self: *Self, list: *Node.List) Allocator.Error!?[]const u8 {
+        pub fn endBookmark(self: *TextScanner, list: *Node.List) Allocator.Error!?[]const u8 {
             if (allow_lambdas) {
                 if (self.bookmark.node_index) |node_index| {
                     const current = &list.items[node_index];
@@ -508,7 +509,7 @@ pub fn TextScanner(comptime Node: type, comptime options: TemplateOptions) type 
             return null;
         }
 
-        fn adjustBookmarkOffset(self: *Self, node_index: ?u32, off_set: u32) void {
+        fn adjustBookmarkOffset(self: *TextScanner, node_index: ?u32, off_set: u32) void {
             if (allow_lambdas) {
                 if (node_index) |index| {
                     var current = &self.nodes.items[index];
@@ -526,8 +527,8 @@ const testing_options = TemplateOptions{
     .source = .{ .string = .{} },
     .output = .render,
 };
-const TestingNode = parsing.Node(testing_options);
-const TestingTextScanner = parsing.TextScanner(TestingNode, testing_options);
+const TestingNode = parsing.NodeType(testing_options);
+const TestingTextScanner = parsing.TextScannerType(TestingNode, testing_options);
 const TestingTrimmingIndex = parsing.TrimmingIndex(testing_options);
 
 test "basic tests" {

@@ -207,28 +207,27 @@ pub const Element = union(enum) {
     pub fn deinit(self: Element, allocator: Allocator, owns_string: bool) void {
         switch (self) {
             .static_text => |content| if (owns_string) allocator.free(content),
-            .interpolation => |path| destroyPath(allocator, owns_string, path),
-            .unescaped_interpolation => |path| destroyPath(allocator, owns_string, path),
+            inline .interpolation, .unescaped_interpolation => |path| destroyPath(
+                allocator,
+                owns_string,
+                path,
+            ),
             .section => |section| {
                 destroyPath(allocator, owns_string, section.path);
                 if (owns_string) {
                     if (section.inner_text) |inner_text| allocator.free(inner_text);
                 }
             },
-            .inverted_section => |section| {
-                destroyPath(allocator, owns_string, section.path);
-            },
+            .inverted_section => |section| destroyPath(allocator, owns_string, section.path),
             .partial => |partial| {
                 if (owns_string) {
                     allocator.free(partial.key);
                     if (partial.indentation) |indentation| allocator.free(indentation);
                 }
             },
-
             .parent => |parent| {
                 if (owns_string) allocator.free(parent.key);
             },
-
             .block => |block| {
                 if (owns_string) allocator.free(block.key);
             },
@@ -360,7 +359,7 @@ fn parseSource(
         .load_mode = load_mode,
     };
 
-    var template = TemplateLoader(options){
+    var template = TemplateLoaderType(options){
         .allocator = allocator,
         .delimiters = delimiters,
     };
@@ -369,17 +368,24 @@ fn parseSource(
     try template.load(source_content);
 
     switch (template.result) {
-        .elements => |elements| return ParseResult{ .success = .{ .elements = elements, .options = &options } },
-        .parser_error => |last_error| return ParseResult{ .parse_error = last_error },
+        .elements => |elements| return ParseResult{
+            .success = .{
+                .elements = elements,
+                .options = &options,
+            },
+        },
+        .parser_error => |last_error| return ParseResult{
+            .parse_error = last_error,
+        },
         .not_loaded => unreachable,
     }
 }
 
-pub fn TemplateLoader(comptime options: TemplateOptions) type {
+pub fn TemplateLoaderType(comptime options: TemplateOptions) type {
     return struct {
-        const Self = @This();
+        const TemplateLoader = @This();
 
-        const Parser = parsing.Parser(options);
+        const Parser = parsing.ParserType(options);
         const Node = Parser.Node;
 
         const Collector = struct {
@@ -387,7 +393,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
 
             elements: []Element = &.{},
 
-            pub inline fn render(ctx: *@This(), elements: []Element) Error!void {
+            pub inline fn render(ctx: *Collector, elements: []Element) Error!void {
                 ctx.elements = elements;
             }
         };
@@ -400,7 +406,7 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             parser_error: ParseErrorDetail,
         } = .not_loaded,
 
-        pub fn load(self: *Self, template: []const u8) Parser.LoadError!void {
+        pub fn load(self: *TemplateLoader, template: []const u8) Parser.LoadError!void {
             var parser = try Parser.init(self.allocator, template, self.delimiters);
             defer parser.deinit();
 
@@ -414,14 +420,18 @@ pub fn TemplateLoader(comptime options: TemplateOptions) type {
             };
         }
 
-        pub fn collectElements(self: *Self, template_text: []const u8, render: anytype) ErrorSet(Parser, @TypeOf(render))!void {
+        pub fn collectElements(
+            self: *TemplateLoader,
+            template_text: []const u8,
+            render: anytype,
+        ) ErrorSet(Parser, @TypeOf(render))!void {
             var parser = try Parser.init(self.allocator, template_text, self.delimiters);
             defer parser.deinit();
 
             _ = try parser.parse(render);
         }
 
-        pub fn deinit(self: *Self) void {
+        pub fn deinit(self: *TemplateLoader) void {
             if (options.load_mode == .runtime_loaded) {
                 switch (self.result) {
                     .elements => |elements| {
@@ -473,20 +483,20 @@ const tests = struct {
         _ = api;
     }
 
-    fn TesterTemplateLoader(comptime load_mode: TemplateLoadMode) type {
+    fn TesterTemplateLoaderType(comptime load_mode: TemplateLoadMode) type {
         const options = TemplateOptions{
             .source = .{ .string = .{ .copy_strings = false } },
             .output = .cache,
             .load_mode = load_mode,
         };
 
-        return TemplateLoader(options);
+        return TemplateLoaderType(options);
     }
 
-    pub fn getTemplate(template_text: []const u8, comptime load_mode: TemplateLoadMode) !TesterTemplateLoader(load_mode) {
+    pub fn getTemplate(template_text: []const u8, comptime load_mode: TemplateLoadMode) !TesterTemplateLoaderType(load_mode) {
         const allocator = testing.allocator;
 
-        var template_loader = TesterTemplateLoader(load_mode){
+        var template_loader = TesterTemplateLoaderType(load_mode){
             .allocator = allocator,
         };
         errdefer template_loader.deinit();
@@ -507,7 +517,7 @@ const tests = struct {
     }
 
     pub fn expectPath(expected: []const u8, path: Element.Path) !void {
-        const TestParser = TesterTemplateLoader(.runtime_loaded).Parser;
+        const TestParser = TesterTemplateLoaderType(.runtime_loaded).Parser;
         var parser = try TestParser.init(testing.allocator, "", .{});
         defer parser.deinit();
 
@@ -2251,7 +2261,7 @@ const tests = struct {
 
             // Read from a file, assuring that this text should read four times from the buffer
             const read_buffer_size = (template_text.len / 4);
-            const SmallBufferTemplateloader = TemplateLoader(.{
+            const SmallBufferTemplateloader = TemplateLoaderType(.{
                 .source = .{ .file = .{ .read_buffer_size = read_buffer_size } },
                 .output = .cache,
             });
@@ -2351,7 +2361,7 @@ const tests = struct {
 
             // Strings are not ownned by the template,
             // Use this option when creating templates from a static string or when rendering direct to a stream
-            const RefStringsTemplate = TemplateLoader(.{
+            const RefStringsTemplate = TemplateLoaderType(.{
                 .source = .{ .file = .{} },
                 .output = .render,
             });
