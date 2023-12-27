@@ -4,6 +4,8 @@ const Allocator = std.mem.Allocator;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+const stdx = @import("../../../stdx.zig");
+
 const mustache = @import("../../../mustache.zig");
 const Element = mustache.Element;
 const RenderOptions = mustache.options.RenderOptions;
@@ -40,7 +42,7 @@ pub const ErasedType = struct {
         } else {
             var value: Self = undefined;
 
-            if (comptime mustache.isSingleItemPtr(Data)) {
+            if (comptime stdx.isSingleItemPtr(Data)) {
                 value.content[0] = @intFromPtr(data);
             } else {
 
@@ -63,7 +65,7 @@ pub const ErasedType = struct {
         if (comptime data_size == 0) {
             return undefined;
         } else {
-            if (comptime mustache.isSingleItemPtr(Data)) {
+            if (comptime stdx.isSingleItemPtr(Data)) {
                 return @as(Data, @ptrFromInt(self.content[0]));
             } else {
 

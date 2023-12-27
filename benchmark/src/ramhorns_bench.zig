@@ -42,7 +42,7 @@ pub fn main() anyerror!void {
         try simpleTemplate(allocator, &buffer, .Alloc, std.io.null_writer);
         try simpleTemplate(allocator, &buffer, .Writer, file_writer);
         try partialTemplates(allocator, &buffer, .Buffer, std.io.null_writer);
-        try partialTemplates(allocator, &buffer, .Alloc, std.io.null_writer);
+        //try partialTemplates(allocator, &buffer, .Alloc, std.io.null_writer);
         try parseTemplates(allocator);
     } else {
         const allocator = std.heap.c_allocator;
@@ -51,7 +51,7 @@ pub fn main() anyerror!void {
         try simpleTemplate(allocator, &buffer, .Alloc, std.io.null_writer);
         try simpleTemplate(allocator, &buffer, .Writer, file_writer);
         try partialTemplates(allocator, &buffer, .Buffer, std.io.null_writer);
-        try partialTemplates(allocator, &buffer, .Alloc, std.io.null_writer);
+        //try partialTemplates(allocator, &buffer, .Alloc, std.io.null_writer);
         try parseTemplates(allocator);
     }
 }

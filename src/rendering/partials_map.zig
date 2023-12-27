@@ -5,6 +5,8 @@ const Allocator = std.mem.Allocator;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
+
 const mustache = @import("../mustache.zig");
 const RenderOptions = mustache.options.RenderOptions;
 
@@ -20,11 +22,6 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
             .template => mustache.Template,
             .string, .file => []const u8,
         };
-
-        pub fn isEmpty() bool {
-            return TPartials == void or
-                (mustache.isTuple(TPartials) and meta.fields(TPartials).len == 0);
-        }
 
         allocator: if (options != .template and !isEmpty()) Allocator else void,
         partials: TPartials,
@@ -47,6 +44,15 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
                 }
             },
         };
+
+        pub fn isEmpty() bool {
+            return switch (@typeInfo(TPartials)) {
+                .Void => true,
+                .Struct => |info| info.is_tuple and info.fields.len == 0,
+                inline .Array, .Vector => |info| return info.len == 0,
+                else => false,
+            };
+        }
 
         pub fn get(self: Self, key: []const u8) ?Self.Template {
             comptime validatePartials();
@@ -109,7 +115,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         fn isValidTuple() bool {
             comptime {
-                if (mustache.isTuple(TPartials)) {
+                if (stdx.isTuple(TPartials)) {
                     if (isPartialsTupleElement(TPartials)) {
                         return true;
                     } else {
@@ -129,8 +135,8 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         fn isValidIndexable() bool {
             comptime {
-                if (mustache.isIndexable(TPartials) and !mustache.isTuple(TPartials)) {
-                    if (mustache.isSingleItemPtr(TPartials) and mustache.is(.Array)(meta.Child(TPartials))) {
+                if (stdx.isIndexable(TPartials) and !stdx.isTuple(TPartials)) {
+                    if (stdx.isSingleItemPtr(TPartials) and @typeInfo(meta.Child(TPartials)) == .Array) {
                         const Array = meta.Child(TPartials);
                         return isPartialsTupleElement(meta.Child(Array));
                     } else {
@@ -144,13 +150,13 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         fn isPartialsTupleElement(comptime TElement: type) bool {
             comptime {
-                if (mustache.isTuple(TElement)) {
+                if (stdx.isTuple(TElement)) {
                     const fields = meta.fields(TElement);
-                    if (fields.len == 2 and mustache.isZigString(fields[0].type)) {
+                    if (fields.len == 2 and stdx.isZigString(fields[0].type)) {
                         if (fields[1].type == Self.Template) {
                             return true;
                         } else {
-                            return mustache.isZigString(fields[1].type) and mustache.isZigString(Self.Template);
+                            return stdx.isZigString(fields[1].type) and stdx.isZigString(Self.Template);
                         }
                     }
                 }
@@ -160,13 +166,13 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         fn isValidMap() bool {
             comptime {
-                if (mustache.is(.Struct)(TPartials) and mustache.hasDecls(TPartials, .{ "KV", "get" })) {
+                if (@typeInfo(TPartials) == .Struct and stdx.hasDecls(TPartials, .{ "KV", "get" })) {
                     const KV = @field(TPartials, "KV");
-                    if (mustache.is(.Struct)(KV) and mustache.hasFields(KV, .{ "key", "value" })) {
+                    if (@typeInfo(KV) == .Struct and stdx.hasFields(KV, .{ "key", "value" })) {
                         const kv: KV = undefined;
-                        return mustache.isZigString(@TypeOf(kv.key)) and
+                        return stdx.isZigString(@TypeOf(kv.key)) and
                             (@TypeOf(kv.value) == Self.Template or
-                            (mustache.isZigString(@TypeOf(kv.value)) and mustache.isZigString(Self.Template)));
+                            (stdx.isZigString(@TypeOf(kv.value)) and stdx.isZigString(Self.Template)));
                     }
                 }
 

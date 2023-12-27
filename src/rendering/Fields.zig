@@ -4,6 +4,8 @@ const meta = std.meta;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
+
 const mustache = @import("../mustache.zig");
 const Element = mustache.Element;
 
@@ -86,7 +88,7 @@ pub inline fn getRuntimeValue(ctx: anytype) context_type: {
 
 pub inline fn getTupleElement(ctx: anytype, comptime index: usize) element_type: {
     const T = @TypeOf(ctx);
-    assert(mustache.isTuple(T));
+    assert(stdx.isTuple(T));
 
     const ElementType = @TypeOf(ctx[index]);
     if (ElementType == comptime_int) {
@@ -125,7 +127,7 @@ pub inline fn getTupleElement(ctx: anytype, comptime index: usize) element_type:
 pub inline fn getElement(ctx: anytype, index: usize) element_type: {
     const T = @TypeOf(ctx);
 
-    const is_indexable = mustache.isIndexable(T) and !mustache.isTuple(T);
+    const is_indexable = stdx.isIndexable(T) and !stdx.isTuple(T);
     if (!is_indexable) @compileError("Array, slice or vector expected");
 
     const ElementType = @TypeOf(ctx[0]);
@@ -147,7 +149,7 @@ pub inline fn getElement(ctx: anytype, index: usize) element_type: {
 
 fn Lhs(comptime T: type) type {
     comptime {
-        if (mustache.is(.Optional)(T)) {
+        if (@typeInfo(T) == .Optional) {
             return Lhs(meta.Child(T));
         } else if (needsDerref(T)) {
             return Lhs(meta.Child(T));
@@ -158,7 +160,7 @@ fn Lhs(comptime T: type) type {
 }
 
 pub inline fn lhs(comptime T: type, value: T) Lhs(T) {
-    if (comptime mustache.is(.Optional)(T)) {
+    if (@typeInfo(T) == .Optional) {
         return lhs(@TypeOf(value.?), value.?);
     } else if (comptime needsDerref(T)) {
         return lhs(@TypeOf(value.*), value.*);
@@ -169,9 +171,11 @@ pub inline fn lhs(comptime T: type, value: T) Lhs(T) {
 
 pub inline fn needsDerref(comptime T: type) bool {
     comptime {
-        if (mustache.isSingleItemPtr(T)) {
+        if (stdx.isSingleItemPtr(T)) {
             const Child = meta.Child(T);
-            return mustache.isSingleItemPtr(Child) or mustache.isSlice(Child) or mustache.is(.Optional)(Child);
+            return stdx.isSingleItemPtr(Child) or
+                stdx.isSlice(Child) or
+                @typeInfo(Child) == .Optional;
         } else {
             return false;
         }
@@ -180,7 +184,7 @@ pub inline fn needsDerref(comptime T: type) bool {
 
 pub fn byValue(comptime TField: type) bool {
     comptime {
-        if (mustache.is(.EnumLiteral)(TField)) @compileError(
+        if (@typeInfo(TField) == .EnumLiteral) @compileError(
             \\Enum literal is not supported for interpolation
             \\Error: ir_resolve_lazy_recurse. This is a bug in the Zig compiler
             \\Type:
@@ -190,8 +194,8 @@ pub fn byValue(comptime TField: type) bool {
         const size = if (TField == @TypeOf(null)) 0 else @sizeOf(TField);
         const is_zero_size = size == 0;
 
-        const is_pointer = mustache.isSlice(TField) or
-            mustache.isSingleItemPtr(TField);
+        const is_pointer = stdx.isSlice(TField) or
+            stdx.isSingleItemPtr(TField);
 
         const is_json = TField == std.json.Value;
 
@@ -200,12 +204,11 @@ pub fn byValue(comptime TField: type) bool {
         const is_lambda_invoker = size <= max_size and lambda.isLambdaInvoker(TField);
 
         const can_embed = size <= max_size and
-            (mustache.is(.Enum)(TField) or
-            mustache.is(.EnumLiteral)(TField) or
-            TField == bool or
-            mustache.isIntegral(TField) or
-            mustache.isFloat(TField) or
-            (mustache.is(.Optional)(TField) and byValue(meta.Child(TField))));
+            switch (@typeInfo(TField)) {
+            .Enum, .EnumLiteral, .Bool, .Int, .Float => true,
+            .Optional => |info| byValue(info.child),
+            else => false,
+        };
 
         return is_json or is_ffi_userdata or is_zero_size or is_pointer or is_lambda_invoker or can_embed;
     }
@@ -246,7 +249,7 @@ fn FieldRef(comptime T: type, comptime field_name: []const u8) type {
         assert(TField != comptime_float);
         assert(TField != @TypeOf(.Null));
 
-        if (mustache.is(.Optional)(T)) {
+        if (@typeInfo(T) == .Optional) {
             return FieldRef(meta.Child(T), field_name);
         } else if (needsDerref(T)) {
             return FieldRef(meta.Child(T), field_name);
@@ -264,10 +267,10 @@ fn FieldRef(comptime T: type, comptime field_name: []const u8) type {
 }
 
 fn FieldType(comptime T: type, comptime field_name: []const u8) type {
-    if (mustache.is(.Optional)(T)) {
+    if (@typeInfo(T) == .Optional) {
         const Child = meta.Child(T);
         return FieldType(Child, field_name);
-    } else if (mustache.isSingleItemPtr(T)) {
+    } else if (stdx.isSingleItemPtr(T)) {
         const Child = meta.Child(T);
         return FieldType(Child, field_name);
     } else {

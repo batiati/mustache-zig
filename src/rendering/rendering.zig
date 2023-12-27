@@ -6,6 +6,8 @@ const Allocator = std.mem.Allocator;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
+
 const mustache = @import("../mustache.zig");
 const RenderOptions = mustache.options.RenderOptions;
 const TemplateOptions = mustache.options.TemplateOptions;
@@ -411,7 +413,13 @@ fn internalCollect(allocator: Allocator, template: []const u8, partials: anytype
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(context_type, @TypeOf(writer), PartialsMap, options);
 
-    try Engine.collect(allocator, template, data, writer, PartialsMap.init(allocator, partials));
+    try Engine.collect(
+        allocator,
+        template,
+        data,
+        writer,
+        PartialsMap.init(allocator, partials),
+    );
 }
 
 fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: anytype, data: anytype, comptime options: RenderOptions, comptime sentinel: ?u8) !if (sentinel) |z| [:z]const u8 else []const u8 {
@@ -425,7 +433,13 @@ fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: an
     const PartialsMap = map.PartialsMap(@TypeOf(partials), options);
     const Engine = RenderEngine(context_type, Writer, PartialsMap, options);
 
-    try Engine.bufCollect(allocator, list.writer(), template, data, PartialsMap.init(allocator, partials));
+    try Engine.bufCollect(
+        allocator,
+        list.writer(),
+        template,
+        data,
+        PartialsMap.init(allocator, partials),
+    );
 
     return if (comptime sentinel) |z|
         list.toOwnedSliceSentinel(z)
@@ -434,7 +448,12 @@ fn internalAllocCollect(allocator: Allocator, template: []const u8, partials: an
 }
 
 /// Group functions and structs that are denpendent of Writer and RenderOptions
-pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, comptime TPartialsMap: type, comptime options: RenderOptions) type {
+pub fn RenderEngine(
+    comptime context_type: ContextType,
+    comptime Writer: type,
+    comptime TPartialsMap: type,
+    comptime options: RenderOptions,
+) type {
     return struct {
         pub const Context = context.Context(context_type, Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
@@ -766,7 +785,11 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                     .Enum => try self.flushToWriter(writer, @tagName(value), escape),
 
                     .Pointer => |info| switch (info.size) {
-                        .One => return try self.recursiveWrite(writer, value.*, escape),
+                        .One => return if (comptime stdx.canDeref(TValue)) try self.recursiveWrite(
+                            writer,
+                            value.*,
+                            escape,
+                        ) else {},
                         .Slice => {
                             if (info.child == u8) {
                                 try self.flushToWriter(writer, value, escape);
@@ -949,7 +972,7 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
                     => return std.fmt.count("{d}", .{value}),
                     .Enum => return @tagName(value).len,
                     .Pointer => |info| switch (info.size) {
-                        .One => return self.valueCapacityHint(value.*),
+                        .One => return if (comptime stdx.canDeref(TValue)) self.valueCapacityHint(value.*) else 0,
                         .Slice => {
                             if (info.child == u8) {
                                 return value.len;
@@ -982,13 +1005,13 @@ pub fn RenderEngine(comptime context_type: ContextType, comptime Writer: type, c
             switch (context_type) {
                 .native => {
                     const by_value = comptime Fields.byValue(Data);
-                    if (comptime !by_value and !mustache.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
+                    if (comptime !by_value and !stdx.isSingleItemPtr(Data)) @compileError("Expected a pointer to " ++ @typeName(Data));
                     return ContextImpl.context(data);
                 },
                 .json => {
-                    if (comptime Data == json.Value or (mustache.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
+                    if (comptime Data == json.Value or (stdx.isSingleItemPtr(Data) and meta.Child(Data) == json.Value)) {
                         return ContextImpl.context(data);
-                    } else if (comptime Data == json.ValueTree or (mustache.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
+                    } else if (comptime Data == json.ValueTree or (stdx.isSingleItemPtr(Data) and meta.Child(Data) == json.ValueTree)) {
                         return ContextImpl.context(data.root);
                     } else {
                         @compileError("Expected a std.json.Value or std.json.ValueTree");
@@ -4167,7 +4190,7 @@ const tests = struct {
     }
 
     fn hasLambda(comptime Data: type) bool {
-        if (mustache.isSingleItemPtr(Data)) {
+        if (stdx.isSingleItemPtr(Data)) {
             return hasLambda(meta.Child(Data));
         } else {
             const info = @typeInfo(Data);

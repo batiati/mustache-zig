@@ -1,42 +1,35 @@
 const std = @import("std");
 
-const TraitFn = fn (type) bool;
-
-pub fn is(comptime id: std.builtin.TypeId) TraitFn {
-    const Closure = struct {
-        pub fn trait(comptime T: type) bool {
-            return id == @typeInfo(T);
-        }
-    };
-    return Closure.trait;
-}
-
 pub fn isSingleItemPtr(comptime T: type) bool {
-    if (comptime is(.Pointer)(T)) {
-        return @typeInfo(T).Pointer.size == .One;
-    }
-    return false;
+    return switch (@typeInfo(T)) {
+        .Pointer => |info| return info.size == .One,
+        else => false,
+    };
 }
 
 pub fn isTuple(comptime T: type) bool {
-    return is(.Struct)(T) and @typeInfo(T).Struct.is_tuple;
+    return switch (@typeInfo(T)) {
+        .Struct => |info| return info.is_tuple,
+        else => false,
+    };
 }
 
 pub fn isIndexable(comptime T: type) bool {
-    if (comptime is(.Pointer)(T)) {
-        if (@typeInfo(T).Pointer.size == .One) {
-            return (comptime is(.Array)(std.meta.Child(T)));
-        }
-        return true;
-    }
-    return comptime is(.Array)(T) or is(.Vector)(T) or isTuple(T);
+    return switch (@typeInfo(T)) {
+        .Pointer => |info| if (info.size == .One)
+            isIndexable(std.meta.Child(T))
+        else
+            true,
+        .Array, .Vector => true,
+        else => isTuple(T),
+    };
 }
 
 pub fn isSlice(comptime T: type) bool {
-    if (comptime is(.Pointer)(T)) {
-        return @typeInfo(T).Pointer.size == .Slice;
-    }
-    return false;
+    return switch (@typeInfo(T)) {
+        .Pointer => |info| return info.size == .Slice,
+        else => false,
+    };
 }
 
 pub fn isIntegral(comptime T: type) bool {
@@ -95,4 +88,12 @@ pub fn hasFields(comptime T: type, comptime names: anytype) bool {
             return false;
     }
     return true;
+}
+
+pub inline fn canDeref(comptime TValue: type) bool {
+    return isSingleItemPtr(TValue) and
+        switch (@typeInfo(std.meta.Child(TValue))) {
+        .Fn, .Opaque => false,
+        else => true,
+    };
 }

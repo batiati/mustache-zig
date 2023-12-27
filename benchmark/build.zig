@@ -12,7 +12,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const exe = b.addExecutable(.{
         .name = "benchmark",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .path = "src/ramhorns_bench.zig" },
         .target = target,
         .optimize = mode,
     });

@@ -5,6 +5,8 @@ const meta = std.meta;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+const stdx = @import("../../../stdx.zig");
+
 const mustache = @import("../../../mustache.zig");
 const Element = mustache.Element;
 const RenderOptions = mustache.options.RenderOptions;
@@ -212,7 +214,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
                     switch (@typeInfo(TValue)) {
                         .Struct => |info| {
                             if (info.is_tuple) {
-                                const derref = comptime mustache.isSingleItemPtr(Data);
+                                const derref = comptime stdx.isSingleItemPtr(Data);
                                 inline for (0..info.fields.len) |i| {
                                     if (index == i) {
                                         return Result{
@@ -351,7 +353,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             params: anytype,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
-            if (comptime !mustache.isTuple(@TypeOf(params)) and params.len != 2) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
+            if (comptime !stdx.isTuple(@TypeOf(params)) and params.len != 2) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
 
             var data_render: *DataRender = params.@"0";
             const escape: Escape = params.@"1";
@@ -369,7 +371,7 @@ pub fn Invoker(comptime Writer: type, comptime PartialsMap: type, comptime optio
             params: anytype,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
-            if (comptime !mustache.isTuple(@TypeOf(params)) and params.len != 4) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
+            if (comptime !stdx.isTuple(@TypeOf(params)) and params.len != 4) @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
             if (comptime !lambda.isLambdaInvoker(@TypeOf(value))) return;
 
             const Error = Allocator.Error || Writer.Error;
@@ -492,7 +494,7 @@ const invoker_tests = struct {
 
     fn dummyAction(comptime TExpected: type, value: anytype) error{}!bool {
         const TValue = @TypeOf(value);
-        const expected = comptime (TExpected == TValue) or (mustache.isSingleItemPtr(TValue) and meta.Child(TValue) == TExpected);
+        const expected = comptime (TExpected == TValue) or (stdx.isSingleItemPtr(TValue) and meta.Child(TValue) == TExpected);
         if (!expected) {
             std.log.err(
                 \\ Invalid iterator type

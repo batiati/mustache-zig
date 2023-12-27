@@ -16,10 +16,7 @@ jobs:
           - os: windows-latest
             crlf: fix
           - os: ubuntu-latest
-            comptime: false
-            coverage: -Dtest-coverage
-          - os: macos-latest
-            comptime: true
+            coverage: -Dtest-coverage=true
     runs-on: ${{matrix.os}}
     steps:
       - name: Force Line Endings for Windows
@@ -44,7 +41,7 @@ jobs:
       - name: Run Tests
         run: |
           zig version
-          zig build test ${{ matrix.coverage }} -Dcomptime-tests=false
+          zig build test ${{ matrix.coverage }}
       
       - name: Upload Codecov
         if: ${{ matrix.os == 'ubuntu-latest' }}

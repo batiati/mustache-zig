@@ -17,13 +17,6 @@ const Binding1 = struct {
     txt1: []const u8,
     txt2: []const u8,
     txt3: []const u8,
-
-    pub fn free(self: *Binding1, allocator: Allocator) void {
-        allocator.free(self.title);
-        allocator.free(self.txt1);
-        allocator.free(self.txt2);
-        allocator.free(self.txt3);
-    }
 };
 
 const Binding2 = struct {
@@ -33,14 +26,6 @@ const Binding2 = struct {
     short_description: []const u8,
     detail_description: []const u8,
     offer_id: u32,
-
-    pub fn free(self: *Binding2, allocator: Allocator) void {
-        allocator.free(self.title);
-        allocator.free(self.image_url);
-        allocator.free(self.icon_url);
-        allocator.free(self.short_description);
-        allocator.free(self.detail_description);
-    }
 };
 
 const Binding3 = struct {
@@ -52,21 +37,6 @@ const Binding3 = struct {
     person: bool,
     repo: []const Repo,
     repo2: []const Repo,
-
-    pub fn free(self: *Binding3, allocator: Allocator) void {
-        allocator.free(self.name);
-        allocator.free(self.company);
-        for (self.repo) |item| {
-            allocator.free(item.name);
-        }
-
-        for (self.repo2) |item| {
-            allocator.free(item.name);
-        }
-
-        allocator.free(self.repo);
-        allocator.free(self.repo2);
-    }
 };
 
 fn runTemplate(comptime caption: []const u8, comptime TBinding: type, comptime template: []const u8, comptime json: []const u8) !void {
@@ -77,8 +47,8 @@ fn runTemplate(comptime caption: []const u8, comptime TBinding: type, comptime t
     var cached_template = parseTemplate(allocator, template_text);
     defer cached_template.deinit(allocator);
 
-    try runTemplatePreParsed(allocator, caption ++ " - pre-parsed", TBinding, json, cached_template);
-    try runTemplateNotParsed(allocator, caption ++ " - not parsed", TBinding, json, template_text);
+    try runTemplatePreParsed(allocator, caption ++ " - pre-parsed", TBinding, @embedFile(json), cached_template);
+    try runTemplateNotParsed(allocator, caption ++ " - not parsed", TBinding, @embedFile(json), template_text);
 }
 
 fn runTemplatePreParsed(allocator: Allocator, comptime caption: []const u8, comptime TBinding: type, comptime json: []const u8, template: mustache.Template) !void {
