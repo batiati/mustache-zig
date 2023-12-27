@@ -18,18 +18,20 @@ const ErasedType = native_context.ErasedType;
 const extern_types = @import("../ffi/extern_types.zig");
 
 pub inline fn getField(data: anytype, comptime field_name: []const u8) field_type: {
-    const TField = FieldType(@TypeOf(data), field_name);
+    const Data = @TypeOf(data);
+    const TField = FieldType(Data, field_name);
 
-    if (TField == comptime_int) {
-        const comptime_value = @field(data, field_name);
-        break :field_type RuntimeInt(comptime_value);
-    } else if (TField == comptime_float) {
-        const comptime_value = @field(data, field_name);
-        break :field_type RuntimeFloat(comptime_value);
-    } else if (TField == @Type(.Null)) {
-        break :field_type ?u0;
-    } else {
-        break :field_type FieldRef(@TypeOf(data), field_name);
+    switch (@typeInfo(TField)) {
+        .ComptimeInt => {
+            const comptime_value = @field(data, field_name);
+            break :field_type RuntimeInt(comptime_value);
+        },
+        .ComptimeFloat => {
+            const comptime_value = @field(data, field_name);
+            break :field_type RuntimeFloat(comptime_value);
+        },
+        .Null => break :field_type ?u0,
+        else => break :field_type FieldRef(Data, field_name),
     }
 } {
     const Data = @TypeOf(data);
@@ -50,7 +52,13 @@ pub inline fn getField(data: anytype, comptime field_name: []const u8) field_typ
         return runtime_null;
     }
 
-    return if (is_by_value) @field(lhs(Data, data), field_name) else &@field(lhs(Data, data), field_name);
+    return if (is_by_value) @field(
+        lhs(Data, data),
+        field_name,
+    ) else &@field(
+        lhs(Data, data),
+        field_name,
+    );
 }
 
 pub inline fn getRuntimeValue(ctx: anytype) context_type: {
@@ -242,27 +250,25 @@ pub inline fn lenOf(comptime T: type, data: T) ?usize {
 }
 
 fn FieldRef(comptime T: type, comptime field_name: []const u8) type {
-    comptime {
-        const TField = FieldType(T, field_name);
+    const TField = FieldType(T, field_name);
 
-        assert(TField != comptime_int);
-        assert(TField != comptime_float);
-        assert(TField != @TypeOf(.Null));
+    assert(TField != comptime_int);
+    assert(TField != comptime_float);
+    assert(TField != @TypeOf(.Null));
 
-        if (@typeInfo(T) == .Optional) {
-            return FieldRef(meta.Child(T), field_name);
-        } else if (needsDerref(T)) {
-            return FieldRef(meta.Child(T), field_name);
-        } else {
-            const instance: T = switch (@typeInfo(T)) {
-                .Struct => std.mem.zeroInit(T, .{}),
-                .Pointer => @ptrFromInt(@alignOf(T)),
-                .Void => {},
-                else => undefined,
-            };
+    if (@typeInfo(T) == .Optional) {
+        return FieldRef(meta.Child(T), field_name);
+    } else if (needsDerref(T)) {
+        return FieldRef(meta.Child(T), field_name);
+    } else {
+        const instance: T = switch (@typeInfo(T)) {
+            .Struct => std.mem.zeroInit(T, .{}),
+            .Pointer => @ptrFromInt(@alignOf(T)),
+            .Void => {},
+            else => undefined,
+        };
 
-            return if (byValue(TField)) @TypeOf(@field(instance, field_name)) else @TypeOf(&@field(instance, field_name));
-        }
+        return if (byValue(TField)) @TypeOf(@field(instance, field_name)) else @TypeOf(&@field(instance, field_name));
     }
 }
 
@@ -380,12 +386,10 @@ test "comptime floats" {
 }
 
 test "enum literal " {
-
-    // Skip
-    // ir_resolve_lazy_recurse. This is a bug in the Zig compiler
+    // TODO: Not sure if it's a supported use case.
     if (true) return error.SkipZigTest;
 
-    var data = .{ .value = .AreYouSure, .level = .{ .value = .Totally } };
+    const data = .{ .value = .AreYouSure, .level = .{ .value = .Totally } };
 
     const field = getField(&data, "value");
     try std.testing.expectEqual(field, data.value);

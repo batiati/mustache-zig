@@ -100,19 +100,20 @@ pub fn build(b: *std.build.Builder) void {
         main_tests.addOptions("build_comptime_tests", comptime_tests);
         const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
 
+        const run_main_tests = b.addRunArtifact(main_tests);
+
         if (coverage) {
             // with kcov
-            main_tests.setExecCmd(&[_]?[]const u8{
-                "kcov",
-                "--exclude-pattern",
-                "lib/std",
-                "kcov-output",
-                null, // to get zig to use the --test-cmd-bin flag
+            const kcov = b.addSystemCommand(&.{
+                "kcov",    "--exclude-pattern",
+                "lib/std", "kcov-output",
             });
+            kcov.addArtifactArg(main_tests);
+
+            run_main_tests.step.dependOn(&kcov.step);
         }
 
-        const run_main_tests = b.addRunArtifact(main_tests);
-        const test_step = b.step("test", "Run library tests");
+        const test_step = b.step("test", "Run unit tests");
         test_step.dependOn(&run_main_tests.step);
     }
 

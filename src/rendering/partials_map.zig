@@ -199,8 +199,6 @@ test "Map single tuple" {
 }
 
 test "Map single tuple - comptime value" {
-    // TODO: Compiler segfaul
-    if (true) return error.SkipZigTest;
     const data = .{ "hello", "{{hello}}world" };
 
     const dummy_options = RenderOptions{ .string = .{} };
@@ -254,8 +252,6 @@ test "Map multiple tuple" {
 }
 
 test "Map multiple tuple comptime" {
-    // TODO: Compiler segfaul
-    if (true) return error.SkipZigTest;
     const data = .{
         .{ "hello", "{{hello}}world" },
         .{ "hi", "{{hi}}there" },
