@@ -58,7 +58,7 @@ pub const Escape = enum {
 };
 
 pub fn ContextType(
-    comptime context_type: ContextSource,
+    comptime context_source: ContextSource,
     comptime Writer: type,
     comptime PartialsMap: type,
     comptime options: RenderOptions,
@@ -68,7 +68,7 @@ pub fn ContextType(
     // of struct and data-type.
     // The json context uses static dispatch, once the JSON key-value is well known
     // for any possible type.
-    return switch (context_type) {
+    return switch (context_source) {
         .native => native_context.ContextInterfaceType(Writer, PartialsMap, options),
         .json => json_context.ContextType(Writer, PartialsMap, options),
         .ffi => ffi_context.ContextType(Writer, PartialsMap, options),
@@ -76,28 +76,28 @@ pub fn ContextType(
 }
 
 pub fn ContextImplType(
-    comptime context_type: ContextSource,
+    comptime context_source: ContextSource,
     comptime Writer: type,
     comptime Data: type,
     comptime PartialsMap: type,
     comptime options: RenderOptions,
 ) type {
-    if (comptime context_type != ContextSource.fromData(Data)) {
+    if (comptime context_source != ContextSource.fromData(Data)) {
         @compileError(
-            "Unexpected context_type: " ++ @typeName(Data) ++
+            "Unexpected context_source: " ++ @typeName(Data) ++
                 " of type [" ++ @tagName(ContextSource.fromData(Data)) ++ "]" ++
-                " and context_type == [" ++ @tagName(context_type) ++ "]",
+                " and context_source == [" ++ @tagName(context_source) ++ "]",
         );
     }
 
-    return switch (context_type) {
+    return switch (context_source) {
         .native => native_context.ContextImplType(Writer, Data, PartialsMap, options),
         .json => json_context.ContextType(Writer, PartialsMap, options),
         .ffi => ffi_context.ContextType(Writer, PartialsMap, options),
     };
 }
 
-pub fn ContextIterator(comptime ContextInterface: type) type {
+pub fn ContextIteratorType(comptime ContextInterface: type) type {
     return struct {
         const Iterator = @This();
 

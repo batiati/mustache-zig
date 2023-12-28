@@ -13,8 +13,8 @@ const PartType = parsing.PartType;
 const Delimiters = parsing.Delimiters;
 
 pub fn TextPartType(comptime options: TemplateOptions) type {
-    const RefCountedSlice = ref_counter.RefCountedSlice(options);
-    const TrimmingIndex = parsing.TrimmingIndex(options);
+    const RefCountedSlice = ref_counter.RefCountedSliceType(options);
+    const TrimmingIndex = parsing.TrimmingIndexType(options);
 
     return struct {
         const TextPart = @This();

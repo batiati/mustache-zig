@@ -18,8 +18,8 @@ pub fn FileReaderType(comptime options: TemplateOptions) type {
         .string => return void,
     };
 
-    const RefCounter = ref_counter.RefCounter(options);
-    const RefCountedSlice = ref_counter.RefCountedSlice(options);
+    const RefCounter = ref_counter.RefCounterType(options);
+    const RefCountedSlice = ref_counter.RefCountedSliceType(options);
 
     return struct {
         const FileReader = @This();

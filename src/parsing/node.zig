@@ -15,7 +15,7 @@ const Delimiters = parsing.Delimiters;
 const IndexBookmark = parsing.IndexBookmark;
 
 pub fn NodeType(comptime options: TemplateOptions) type {
-    const RefCounter = ref_counter.RefCounter(options);
+    const RefCounter = ref_counter.RefCounterType(options);
     const has_trimming = options.features.preseve_line_breaks_and_indentation;
     const allow_lambdas = options.features.lambdas == .enabled;
 

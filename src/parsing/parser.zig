@@ -35,7 +35,7 @@ pub fn ParserType(comptime options: TemplateOptions) type {
         const TextScanner = parsing.TextScannerType(Node, options);
         const FileReader = parsing.FileReaderType(options);
         const TextPart = Node.TextPart;
-        const RefCounter = ref_counter.RefCounter(options);
+        const RefCounter = ref_counter.RefCounterType(options);
         const comptime_count = if (is_comptime) TextScanner.ComptimeCounter.count() else {};
 
         fn RenderError(comptime TRender: type) type {

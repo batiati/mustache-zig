@@ -16,7 +16,7 @@ const ContextSource = rendering.ContextSource;
 const context = @import("../../context.zig");
 const PathResolutionType = context.PathResolutionType;
 const Escape = context.Escape;
-const ContextIterator = context.ContextIterator;
+const ContextIteratorType = context.ContextIteratorType;
 
 const ffi_exports = @import("../../../exports.zig");
 const extern_types = @import("../../../ffi/extern_types.zig");
@@ -29,7 +29,7 @@ pub fn ContextType(
     comptime PartialsMap: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngine(.ffi, Writer, PartialsMap, options);
+    const RenderEngine = rendering.RenderEngineType(.ffi, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -61,7 +61,7 @@ pub fn ContextType(
             ctx: Context,
         };
 
-        pub const Iterator = ContextIterator(Context);
+        pub const ContextIterator = ContextIteratorType(Context);
 
         user_data: extern_types.UserData = undefined,
 
@@ -350,18 +350,21 @@ pub fn ContextType(
             return .chain_broken;
         }
 
-        pub fn iterator(self: *const Context, path: Element.Path) PathResolutionType(Iterator) {
+        pub fn iterator(
+            self: *const Context,
+            path: Element.Path,
+        ) PathResolutionType(ContextIterator) {
             const result = self.get(path, 0);
 
             return switch (result) {
                 .field => |item| .{
-                    .field = Iterator.initSequence(self, path, item),
+                    .field = ContextIterator.initSequence(self, path, item),
                 },
                 .iterator_consumed => .{
-                    .field = Iterator.initEmpty(),
+                    .field = ContextIterator.initEmpty(),
                 },
                 .lambda => |item| .{
-                    .field = Iterator.initLambda(item),
+                    .field = ContextIterator.initLambda(item),
                 },
                 .chain_broken => .chain_broken,
                 .not_found_in_context => .not_found_in_context,
@@ -376,9 +379,9 @@ test {
 
 const context_tests = struct {
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyPartialsMap = map.PartialsMap(void, dummy_options);
+    const DummyPartialsMap = map.PartialsMapType(void, dummy_options);
     const DummyWriter = std.ArrayList(u8).Writer;
-    const DummyRenderEngine = rendering.RenderEngine(.ffi, DummyWriter, DummyPartialsMap, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngineType(.ffi, DummyWriter, DummyPartialsMap, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
     const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
@@ -650,8 +653,7 @@ const context_tests = struct {
         };
 
         // Expects that the context was set with the field address
-        // The context can be set with any value, this test sets a pointer
-        // TODO put this back
+        // The context can be set with any value, this test sets a pointer.
         try testing.expectEqual(@intFromPtr(&person.boss.?.id), @intFromPtr(id_ctx.user_data.handle));
 
         const name_ctx = name_ctx: {

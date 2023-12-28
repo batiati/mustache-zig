@@ -8,15 +8,18 @@ const testing = std.testing;
 const mustache = @import("../mustache.zig");
 const TemplateOptions = mustache.options.TemplateOptions;
 
-pub fn RefCountedSlice(comptime options: TemplateOptions) type {
+pub fn RefCountedSliceType(comptime options: TemplateOptions) type {
     return struct {
         slice: []const u8,
-        ref_counter: RefCounter(options),
+        ref_counter: RefCounterType(options),
     };
 }
 
-pub fn RefCounter(comptime options: TemplateOptions) type {
-    return if (options.isRefCounted()) RefCounterImpl else NoOpRefCounter;
+pub fn RefCounterType(comptime options: TemplateOptions) type {
+    return if (options.isRefCounted())
+        RefCounterImpl
+    else
+        NoOpRefCounter;
 }
 
 const RefCounterImpl = struct {
@@ -93,7 +96,7 @@ test "ref and free" {
     // No defer here, should be freed by the ref_counter
     const some_text = try allocator.dupe(u8, "some text");
 
-    var counter_1 = try RefCounter(testing_options).create(allocator, some_text);
+    var counter_1 = try RefCounterType(testing_options).create(allocator, some_text);
     var counter_2 = counter_1.ref();
     var counter_3 = counter_2.ref();
 

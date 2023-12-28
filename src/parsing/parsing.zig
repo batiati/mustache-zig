@@ -40,7 +40,7 @@ pub const PartType = enum(u8) {
     }
 };
 
-pub fn TrimmingIndex(comptime options: TemplateOptions) type {
+pub fn TrimmingIndexType(comptime options: TemplateOptions) type {
     return if (options.features.preseve_line_breaks_and_indentation)
         union(enum) {
             preserve_whitespaces,

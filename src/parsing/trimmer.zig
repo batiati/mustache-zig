@@ -146,7 +146,7 @@ const testing_options = TemplateOptions{
 };
 const Node = parsing.NodeType(testing_options);
 const TestingTextScanner = parsing.TextScannerType(Node, testing_options);
-const TestingTrimmingIndex = parsing.TrimmingIndex(testing_options);
+const TestingTrimmingIndex = parsing.TrimmingIndexType(testing_options);
 
 test "Line breaks" {
     const allocator = testing.allocator;

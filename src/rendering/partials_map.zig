@@ -12,9 +12,9 @@ const RenderOptions = mustache.options.RenderOptions;
 
 /// Partials map from a comptime known type
 /// It works like a HashMap, but can be initialized from a tuple, slice or Hashmap
-pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOptions) type {
+pub fn PartialsMapType(comptime TPartials: type, comptime comptime_options: RenderOptions) type {
     return struct {
-        const Self = @This();
+        const PartialsMap = @This();
 
         pub const options: RenderOptions = comptime_options;
 
@@ -28,7 +28,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
 
         pub usingnamespace switch (options) {
             .template => struct {
-                pub fn init(partials: TPartials) Self {
+                pub fn init(partials: TPartials) PartialsMap {
                     return .{
                         .allocator = {},
                         .partials = partials,
@@ -36,7 +36,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
                 }
             },
             .string, .file => struct {
-                pub fn init(allocator: Allocator, partials: TPartials) Self {
+                pub fn init(allocator: Allocator, partials: TPartials) PartialsMap {
                     return .{
                         .allocator = if (comptime isEmpty()) {} else allocator,
                         .partials = partials,
@@ -54,7 +54,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
             };
         }
 
-        pub fn get(self: Self, key: []const u8) ?Self.Template {
+        pub fn get(self: PartialsMap, key: []const u8) ?PartialsMap.Template {
             comptime validatePartials();
 
             if (comptime isValidTuple()) {
@@ -70,7 +70,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
             }
         }
 
-        fn getFromTuple(self: Self, key: []const u8) ?Self.Template {
+        fn getFromTuple(self: PartialsMap, key: []const u8) ?PartialsMap.Template {
             comptime assert(isValidTuple());
 
             if (comptime isPartialsTupleElement(TPartials)) {
@@ -85,7 +85,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
             }
         }
 
-        fn getFromIndexable(self: Self, key: []const u8) ?Self.Template {
+        fn getFromIndexable(self: PartialsMap, key: []const u8) ?PartialsMap.Template {
             comptime assert(isValidIndexable());
 
             for (self.partials) |item| {
@@ -95,7 +95,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
             return null;
         }
 
-        inline fn getFromMap(self: Self, key: []const u8) ?Self.Template {
+        inline fn getFromMap(self: PartialsMap, key: []const u8) ?PartialsMap.Template {
             comptime assert(isValidMap());
             return self.partials.get(key);
         }
@@ -108,7 +108,7 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
                         \\Expected a HashMap or a tuple containing Key/Value pairs
                         \\Key="[]const u8" and Value="{s}"
                         \\Found: "{s}"
-                    , .{ @typeName(Self.Template), @typeName(TPartials) }),
+                    , .{ @typeName(PartialsMap.Template), @typeName(TPartials) }),
                 );
             }
         }
@@ -153,10 +153,10 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
                 if (stdx.isTuple(TElement)) {
                     const fields = meta.fields(TElement);
                     if (fields.len == 2 and stdx.isZigString(fields[0].type)) {
-                        if (fields[1].type == Self.Template) {
+                        if (fields[1].type == PartialsMap.Template) {
                             return true;
                         } else {
-                            return stdx.isZigString(fields[1].type) and stdx.isZigString(Self.Template);
+                            return stdx.isZigString(fields[1].type) and stdx.isZigString(PartialsMap.Template);
                         }
                     }
                 }
@@ -171,8 +171,8 @@ pub fn PartialsMap(comptime TPartials: type, comptime comptime_options: RenderOp
                     if (@typeInfo(KV) == .Struct and stdx.hasFields(KV, .{ "key", "value" })) {
                         const kv: KV = undefined;
                         return stdx.isZigString(@TypeOf(kv.key)) and
-                            (@TypeOf(kv.value) == Self.Template or
-                            (stdx.isZigString(@TypeOf(kv.value)) and stdx.isZigString(Self.Template)));
+                            (@TypeOf(kv.value) == PartialsMap.Template or
+                            (stdx.isZigString(@TypeOf(kv.value)) and stdx.isZigString(PartialsMap.Template)));
                     }
                 }
 
@@ -188,7 +188,7 @@ test "Map single tuple" {
     const data = .{ key, value };
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
     const hello = map.get("hello");
@@ -202,7 +202,7 @@ test "Map single tuple - comptime value" {
     const data = .{ "hello", "{{hello}}world" };
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
     const hello = map.get("hello");
@@ -215,7 +215,7 @@ test "Map single tuple - comptime value" {
 test "Map empty tuple" {
     const data = .{};
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
     try testing.expect(map.get("wrong") == null);
 }
@@ -223,7 +223,7 @@ test "Map empty tuple" {
 test "Map void" {
     const data = {};
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
     try testing.expect(map.get("wrong") == null);
 }
@@ -237,7 +237,7 @@ test "Map multiple tuple" {
     };
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
     const hello = map.get("hello");
@@ -258,7 +258,7 @@ test "Map multiple tuple comptime" {
     };
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
     const hello = map.get("hello");
@@ -279,7 +279,7 @@ test "Map array" {
     };
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
     const hello = map.get("hello");
@@ -300,7 +300,7 @@ test "Map ref array" {
     };
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
     const hello = map.get("hello");
@@ -322,7 +322,7 @@ test "Map slice" {
     const data = array[0..];
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
     const hello = map.get("hello");
@@ -344,7 +344,7 @@ test "Map hashmap" {
     try data.put("hi", "{{hi}}there");
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyMap = PartialsMap(@TypeOf(data), dummy_options);
+    const DummyMap = PartialsMapType(@TypeOf(data), dummy_options);
     var map = DummyMap.init(testing.allocator, data);
 
     const hello = map.get("hello");

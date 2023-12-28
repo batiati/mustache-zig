@@ -21,8 +21,8 @@ const Delimiters = parsing.Delimiters;
 const IndexBookmark = parsing.IndexBookmark;
 
 pub fn TextScannerType(comptime Node: type, comptime options: TemplateOptions) type {
-    const RefCounter = ref_counter.RefCounter(options);
-    const TrimmingIndex = parsing.TrimmingIndex(options);
+    const RefCounter = ref_counter.RefCounterType(options);
+    const TrimmingIndex = parsing.TrimmingIndexType(options);
     const FileReader = parsing.FileReaderType(options);
 
     const allow_lambdas = options.features.lambdas == .enabled;

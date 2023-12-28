@@ -17,25 +17,34 @@ const ContextSource = rendering.ContextSource;
 const context = @import("../../context.zig");
 const PathResolutionType = context.PathResolutionType;
 const Escape = context.Escape;
-const ContextIterator = context.ContextIterator;
+const ContextIteratorType = context.ContextIteratorType;
 
 /// Json context can resolve paths for std.json.Value objects
 /// This struct implements the expected context interface using static dispatch.
 /// Pub functions must be kept in sync with other contexts implementation
-pub fn ContextType(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(.json, Writer, PartialsMap, options);
+pub fn ContextType(
+    comptime Writer: type,
+    comptime PartialsMap: type,
+    comptime options: RenderOptions,
+) type {
+    const RenderEngine = rendering.RenderEngineType(
+        .json,
+        Writer,
+        PartialsMap,
+        options,
+    );
     const DataRender = RenderEngine.DataRender;
     const Depth = enum { Root, Leaf };
 
     return struct {
         const Context = @This();
 
+        pub const ContextIterator = ContextIteratorType(Context);
+
         pub const ContextStack = struct {
             parent: ?*const @This(),
             ctx: Context,
         };
-
-        pub const Iterator = ContextIterator(Context);
 
         ctx: json.Value = undefined,
 
@@ -136,18 +145,21 @@ pub fn ContextType(comptime Writer: type, comptime PartialsMap: type, comptime o
             return PathResolutionType(void).chain_broken;
         }
 
-        pub fn iterator(self: *const Context, path: Element.Path) PathResolutionType(Iterator) {
+        pub fn iterator(
+            self: *const Context,
+            path: Element.Path,
+        ) PathResolutionType(ContextIterator) {
             const result = self.get(path, 0);
 
             return switch (result) {
                 .field => |item| .{
-                    .field = Iterator.initSequence(self, path, item),
+                    .field = ContextIterator.initSequence(self, path, item),
                 },
                 .iterator_consumed => .{
-                    .field = Iterator.initEmpty(),
+                    .field = ContextIterator.initEmpty(),
                 },
                 .lambda => |item| .{
-                    .field = Iterator.initLambda(item),
+                    .field = ContextIterator.initLambda(item),
                 },
                 .chain_broken => .chain_broken,
                 .not_found_in_context => .not_found_in_context,

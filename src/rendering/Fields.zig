@@ -61,20 +61,16 @@ pub inline fn getField(data: anytype, comptime field_name: []const u8) field_typ
     );
 }
 
-pub inline fn getRuntimeValue(ctx: anytype) context_type: {
+pub inline fn getRuntimeValue(ctx: anytype) type: {
     const TContext = @TypeOf(ctx);
-
-    if (TContext == comptime_int) {
-        const comptime_value = ctx;
-        break :context_type RuntimeInt(comptime_value);
-    } else if (TContext == comptime_float) {
-        const comptime_value = ctx;
-        break :context_type RuntimeFloat(comptime_value);
-    } else if (TContext == @Type(.Null)) {
-        break :context_type ?u0;
-    } else {
-        break :context_type TContext;
-    }
+    break :type if (TContext == comptime_int)
+        RuntimeInt(ctx)
+    else if (TContext == comptime_float)
+        RuntimeFloat(ctx)
+    else if (TContext == @Type(.Null))
+        ?u0
+    else
+        TContext;
 } {
     const TContext = @TypeOf(ctx);
 

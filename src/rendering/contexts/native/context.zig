@@ -16,7 +16,7 @@ const Fields = context.Fields;
 const PathResolutionType = context.PathResolutionType;
 const Escape = context.Escape;
 const LambdaContext = context.LambdaContext;
-const ContextIterator = context.ContextIterator;
+const ContextIteratorType = context.ContextIteratorType;
 
 const rendering = @import("../../rendering.zig");
 const map = @import("../../partials_map.zig");
@@ -24,38 +24,40 @@ const lambda = @import("lambda.zig");
 const invoker = @import("invoker.zig");
 
 /// This type is a type-erasure container
-/// It is large enough to hold some context data such as a pointer, a slice, a nullable pointer/slice
-/// and some common primitives passed by value like enums, integers, floats and nullable integer/floats
+/// It is large enough to hold primitives passed by value like pointers,
+/// slices, enums, integers, floats and nullables.
 pub const ErasedType = struct {
-    const Content = [4]usize;
+    const Content = u256;
 
-    content: Content,
+    content: Content = 0,
 
     pub inline fn put(data: anytype) ErasedType {
         const Data = @TypeOf(data);
         const data_size = @sizeOf(Data);
 
-        if (comptime data_size > @sizeOf(Content)) @compileError(std.fmt.comptimePrint("Type {s} size {} exceeds the maxinum by-val size of {}", .{ data_size, data_size, @sizeOf(Content) }));
-        if (comptime data_size == 0) {
-            return undefined;
-        } else {
-            var value: ErasedType = undefined;
-
-            if (comptime stdx.isSingleItemPtr(Data)) {
-                value.content[0] = @intFromPtr(data);
-            } else {
-
-                // No need for cast checks hereSelf
-                // We can assure that this pointer will always be the correct type,
-                // since the context holds the type into the concrete implementation
-                @setRuntimeSafety(false);
-
-                const ptr = @as(*Data, @ptrCast(@alignCast(&value.content)));
-                ptr.* = data;
-            }
-
-            return value;
+        if (comptime data_size > @sizeOf(Content)) {
+            @compileError(std.fmt.comptimePrint(
+                "Type {s} size {} exceeds the maxinum by-val size of {}",
+                .{
+                    @typeName(Data),
+                    data_size,
+                    @sizeOf(Content),
+                },
+            ));
         }
+
+        var value: ErasedType = .{};
+        if (comptime data_size > 0) {
+            // No need for cast checks here
+            // We can assure that this pointer will always be the correct type,
+            // since the context holds the type into the concrete implementation.
+            @setRuntimeSafety(false);
+
+            const ptr: *Data = @ptrCast(@alignCast(&value.content));
+            ptr.* = data;
+        }
+
+        return value;
     }
 
     pub inline fn get(self: *const ErasedType, comptime Data: type) Data {
@@ -64,18 +66,13 @@ pub const ErasedType = struct {
         if (comptime data_size == 0) {
             return undefined;
         } else {
-            if (comptime stdx.isSingleItemPtr(Data)) {
-                return @as(Data, @ptrFromInt(self.content[0]));
-            } else {
+            // No need for cast checks here
+            // We can assure that this pointer will always be the correct type,
+            // since the context holds the type into the concrete implementation
+            @setRuntimeSafety(false);
 
-                // No need for cast checks here
-                // We can assure that this pointer will always be the correct type,
-                // since the context holds the type into the concrete implementation
-                @setRuntimeSafety(false);
-
-                const ptr = @as(*const Data, @ptrCast(@alignCast(&self.content)));
-                return ptr.*;
-            }
+            const ptr = @as(*const Data, @ptrCast(@alignCast(&self.content)));
+            return ptr.*;
         }
     }
 };
@@ -83,8 +80,12 @@ pub const ErasedType = struct {
 /// Native context can resolve paths for zig structs and values
 /// This struct implements the expected context interface using dynamic dispatch.
 /// Pub functions must be kept in sync with other contexts implementation
-pub fn ContextInterfaceType(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
-    const RenderEngine = rendering.RenderEngine(.native, Writer, PartialsMap, options);
+pub fn ContextInterfaceType(
+    comptime Writer: type,
+    comptime PartialsMap: type,
+    comptime options: RenderOptions,
+) type {
+    const RenderEngine = rendering.RenderEngineType(.native, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -122,7 +123,7 @@ pub fn ContextInterfaceType(comptime Writer: type, comptime PartialsMap: type, c
             ) (Allocator.Error || Writer.Error)!PathResolutionType(void),
         };
 
-        pub const Iterator = ContextIterator(ContextInterface);
+        pub const ContextIterator = ContextIteratorType(ContextInterface);
 
         ctx: ErasedType = undefined,
         vtable: *const VTable,
@@ -146,18 +147,18 @@ pub fn ContextInterfaceType(comptime Writer: type, comptime PartialsMap: type, c
         pub fn iterator(
             self: *const ContextInterface,
             path: Element.Path,
-        ) PathResolutionType(Iterator) {
+        ) PathResolutionType(ContextIterator) {
             const result = self.vtable.get(&self.ctx, path, 0);
 
             return switch (result) {
                 .field => |item| .{
-                    .field = Iterator.initSequence(self, path, item),
+                    .field = ContextIterator.initSequence(self, path, item),
                 },
                 .iterator_consumed => .{
-                    .field = Iterator.initEmpty(),
+                    .field = ContextIterator.initEmpty(),
                 },
                 .lambda => |item| .{
-                    .field = Iterator.initLambda(item),
+                    .field = ContextIterator.initLambda(item),
                 },
                 .chain_broken => .chain_broken,
                 .not_found_in_context => .not_found_in_context,
@@ -200,7 +201,7 @@ pub fn ContextImplType(
     comptime PartialsMap: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngine(
+    const RenderEngine = rendering.RenderEngineType(
         .native,
         Writer,
         PartialsMap,
@@ -208,7 +209,7 @@ pub fn ContextImplType(
     );
     const Context = RenderEngine.Context;
     const DataRender = RenderEngine.DataRender;
-    const Invoker = invoker.Invoker(Writer, PartialsMap, options);
+    const Invoker = invoker.InvokerType(Writer, PartialsMap, options);
 
     return struct {
         const is_zero_size = @sizeOf(Data) == 0;
@@ -420,9 +421,9 @@ const context_tests = struct {
     }
 
     const dummy_options = RenderOptions{ .string = .{} };
-    const DummyPartialsMap = map.PartialsMap(void, dummy_options);
+    const DummyPartialsMap = map.PartialsMapType(void, dummy_options);
     const DummyWriter = std.ArrayList(u8).Writer;
-    const DummyRenderEngine = rendering.RenderEngine(.native, DummyWriter, DummyPartialsMap, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngineType(.native, DummyWriter, DummyPartialsMap, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
     const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
