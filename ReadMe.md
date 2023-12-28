@@ -60,7 +60,7 @@ pub fn main() !void {
         \\{{/features}}
     ;
 
-    var data = .{
+    const data = .{
         .name = "friends",
         .features = .{
             .{ .name = "interpolation" },
@@ -95,11 +95,11 @@ const std = @import("std");
 const mustache = @import("mustache");
 
 pub fn main() !void {
-
     const template_text = "It's a comptime loaded template, with a {{value}}";
     const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
     
-    var data = .{
+    const Data = struct { value: []const u8 };
+    const data: Data = .{
         .value = "runtime value"
     };
 
@@ -124,21 +124,23 @@ const std = @import("std");
 const mustache = @import("mustache");
 
 pub fn main() !void {
-    const template = "Hello {{name}} from Zig";
-
     const allocator = std.testing.allocator;
 
-    var parser = std.json.Parser.init(allocator, false);
-    defer parser.deinit();
-
-    // Parsing an arbitrary json string
-    var json = try parser.parse(
+    // Parsing an arbitrary (dynamic) json string:
+    const json_source =
         \\{
         \\   "name": "friends"
         \\}
+    ;    
+    var json = try std.json.parseFromSlice(
+        std.json.Value,
+        allocator,
+        json_source,
+        .{},
     );
     defer json.deinit();
 
+    const template = "Hello {{name}} from Zig";
     const result = try mustache.allocRenderText(allocator, template, json);
     defer allocator.free(result);
 
