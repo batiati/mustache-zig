@@ -1,7 +1,7 @@
 const std = @import("std");
 const CrossTarget = std.zig.CrossTarget;
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.Build) void {
     const mode = b.standardOptimizeOption(.{});
 
     const target = b.standardTargetOptions(.{
@@ -29,7 +29,7 @@ pub fn build(b: *std.build.Builder) void {
         const lib = b.addSharedLibrary(.{
             .name = lib_name,
             .root_source_file = .{ .path = "src/exports.zig" },
-            .target = cross_target,
+            .target = b.resolveTargetQuery(cross_target),
             .optimize = mode,
             .link_libc = true,
         });
@@ -44,7 +44,7 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     // Zig module
-    _ = b.addModule("mustache", .{ .source_file = .{ .path = "src/mustache.zig" } });
+    _ = b.addModule("mustache", .{ .root_source_file = .{ .path = "src/mustache.zig" } });
 
     // C FFI Sample
     {
@@ -97,7 +97,7 @@ pub fn build(b: *std.build.Builder) void {
             .filter = filter,
         });
 
-        main_tests.addOptions("build_comptime_tests", comptime_tests);
+        main_tests.root_module.addOptions("build_comptime_tests", comptime_tests);
         const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
 
         const run_main_tests = b.addRunArtifact(main_tests);
@@ -124,7 +124,7 @@ pub fn build(b: *std.build.Builder) void {
             .target = target,
             .optimize = mode,
         });
-        test_exe.addOptions("build_comptime_tests", comptime_tests);
+        test_exe.root_module.addOptions("build_comptime_tests", comptime_tests);
 
         const test_exe_install = b.addInstallArtifact(test_exe, .{});
 
