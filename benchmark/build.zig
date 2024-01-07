@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{
         .default_target = .{
             .cpu_model = .baseline,
@@ -16,9 +16,8 @@ pub fn build(b: *std.build.Builder) void {
         .target = target,
         .optimize = mode,
     });
-
-    exe.addAnonymousModule("mustache", .{
-        .source_file = .{ .path = "../src/mustache.zig" },
+    exe.root_module.addAnonymousImport("mustache", .{
+        .root_source_file = .{ .path = "../src/mustache.zig" },
     });
     exe.linkLibC();
     b.installArtifact(exe);

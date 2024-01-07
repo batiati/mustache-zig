@@ -58,9 +58,12 @@ pub fn build(b: *std.Build) void {
 
         const c_sample = b.addExecutable(.{
             .name = "sample",
-            .root_source_file = .{ .path = "samples/c/sample.c" },
+            .root_source_file = null,
             .target = target,
             .optimize = mode,
+        });
+        c_sample.root_module.addCSourceFile(.{
+            .file = .{ .path = "samples/c/sample.c" },
         });
         c_sample.linkLibrary(static_lib);
         c_sample.linkLibC();
