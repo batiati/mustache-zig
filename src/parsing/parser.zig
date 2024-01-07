@@ -570,63 +570,63 @@ test "Basic parse" {
 
                     {
                         const element = elements[0];
-                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqual(Element.Type.static_text, std.meta.activeTag(element));
                         try testing.expectEqualStrings("  Hello\n", element.static_text);
                     }
 
                     {
                         const element = elements[1];
-                        try testing.expectEqual(Element.Type.section, element);
+                        try testing.expectEqual(Element.Type.section, std.meta.activeTag(element));
                         try testing.expectEqualStrings("section", element.section.path[0]);
                         try testing.expectEqual(@as(u32, 8), element.section.children_count);
                     }
 
                     {
                         const element = elements[2];
-                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqual(Element.Type.static_text, std.meta.activeTag(element));
                         try testing.expectEqualStrings("Name: ", element.static_text);
                     }
 
                     {
                         const element = elements[3];
-                        try testing.expectEqual(Element.Type.interpolation, element);
+                        try testing.expectEqual(Element.Type.interpolation, std.meta.activeTag(element));
                         try testing.expectEqualStrings("name", element.interpolation[0]);
                     }
 
                     {
                         const element = elements[4];
-                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqual(Element.Type.static_text, std.meta.activeTag(element));
                         try testing.expectEqualStrings("\nComments: ", element.static_text);
                     }
 
                     {
                         const element = elements[5];
-                        try testing.expectEqual(Element.Type.unescaped_interpolation, element);
+                        try testing.expectEqual(Element.Type.unescaped_interpolation, std.meta.activeTag(element));
                         try testing.expectEqualStrings("comments", element.unescaped_interpolation[0]);
                     }
 
                     {
                         const element = elements[6];
-                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqual(Element.Type.static_text, std.meta.activeTag(element));
                         try testing.expectEqualStrings("\n", element.static_text);
                     }
 
                     {
                         const element = elements[7];
-                        try testing.expectEqual(Element.Type.inverted_section, element);
+                        try testing.expectEqual(Element.Type.inverted_section, std.meta.activeTag(element));
                         try testing.expectEqualStrings("inverted", element.inverted_section.path[0]);
                         try testing.expectEqual(@as(u32, 1), element.inverted_section.children_count);
                     }
 
                     {
                         const element = elements[8];
-                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqual(Element.Type.static_text, std.meta.activeTag(element));
                         try testing.expectEqualStrings("Inverted text", element.static_text);
                     }
 
                     {
                         const element = elements[9];
-                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqual(Element.Type.static_text, std.meta.activeTag(element));
                         try testing.expectEqualStrings("\n", element.static_text);
                     }
                 },
@@ -635,7 +635,7 @@ test "Basic parse" {
 
                     {
                         const element = elements[0];
-                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqual(Element.Type.static_text, std.meta.activeTag(element));
                         try testing.expectEqualStrings("World", element.static_text);
                     }
                 },
@@ -696,7 +696,7 @@ test "Scan standAlone tags" {
 
                     {
                         const element = elements[0];
-                        try testing.expectEqual(Element.Type.static_text, element);
+                        try testing.expectEqual(Element.Type.static_text, std.meta.activeTag(element));
                         try testing.expectEqualStrings("Hello", element.static_text);
                     }
                 },
@@ -755,7 +755,7 @@ test "Scan delimiters Tags" {
 
                     {
                         const element = elements[0];
-                        try testing.expectEqual(Element.Type.interpolation, element);
+                        try testing.expectEqual(Element.Type.interpolation, std.meta.activeTag(element));
                         try testing.expectEqualStrings("interpolation", element.interpolation[0]);
                         try testing.expectEqualStrings("value", element.interpolation[1]);
                     }
