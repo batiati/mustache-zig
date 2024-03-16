@@ -1070,7 +1070,7 @@ pub fn RenderEngineType(
                     .Float, .ComptimeFloat => {
                         var buf: [128]u8 = undefined;
                         var fbs = std.io.fixedBufferStream(&buf);
-                        std.fmt.formatFloatDecimal(value, .{}, fbs.writer()) catch unreachable;
+                        std.fmt.format(fbs.writer(), "{d}", .{value}) catch unreachable;
                         try self.flushToWriter(writer, buf[0..fbs.pos], escape);
                     },
                     .Enum => try self.flushToWriter(writer, @tagName(value), escape),
