@@ -4465,7 +4465,7 @@ const tests = struct {
         }
     };
 
-    fn expectRender(comptime template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
+    fn expectRender(comptime template_text: []const u8, comptime data: anytype, expected: []const u8) anyerror!void {
         try expectCachedRender(template_text, data, expected);
         try expectComptimeRender(template_text, data, expected);
         try expectStreamedRender(template_text, data, expected);
@@ -4475,7 +4475,7 @@ const tests = struct {
         if (!has_lambda) try expectJsonRender(template_text, data, expected);
     }
 
-    fn expectRenderPartials(comptime template_text: []const u8, comptime partials: anytype, data: anytype, expected: []const u8) anyerror!void {
+    fn expectRenderPartials(comptime template_text: []const u8, comptime partials: anytype, comptime data: anytype, expected: []const u8) anyerror!void {
         try expectCachedRenderPartials(template_text, partials, data, expected);
         try expectComptimeRenderPartials(template_text, partials, data, expected);
         try expectStreamedRenderPartials(template_text, partials, data, expected);
@@ -4546,14 +4546,14 @@ const tests = struct {
         try testing.expectEqualStrings(expected, result);
     }
 
-    fn expectComptimeRender(comptime template_text: []const u8, data: anytype, expected: []const u8) anyerror!void {
+    fn expectComptimeRender(comptime template_text: []const u8, comptime data: anytype, expected: []const u8) anyerror!void {
         if (comptime_tests_enabled) {
             const allocator = testing.allocator;
 
             // Comptime template render
             const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
 
-            const result = try allocRender(allocator, comptime_template, data);
+            const result = comptime try allocRender(allocator, comptime_template, data);
             defer allocator.free(result);
             try testing.expectEqualStrings(expected, result);
         }
@@ -4623,23 +4623,24 @@ const tests = struct {
         try testing.expectEqualStrings(expected, result);
     }
 
-    fn expectComptimeRenderPartials(comptime template_text: []const u8, comptime partials: anytype, data: anytype, expected: []const u8) anyerror!void {
+    fn expectComptimeRenderPartials(comptime template_text: []const u8, comptime partials: anytype, comptime data: anytype, expected: []const u8) anyerror!void {
         if (comptime_tests_enabled) {
             const allocator = testing.allocator;
             // Cached template render
             const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
 
             const PartialTuple = std.meta.Tuple(&[_]type{ []const u8, Template });
-            comptime var comptime_partials: [partials.len]PartialTuple = undefined;
 
-            comptime {
+            const comptime_partials = comptime blk: {
+                var cp: [partials.len]PartialTuple = undefined;
                 for (partials, 0..) |item, index| {
                     const partial_template = mustache.parseComptime(item[1], .{}, .{});
-                    comptime_partials[index] = .{ item[0], partial_template };
+                    cp[index] = .{ item[0], partial_template };
                 }
-            }
+                break :blk cp;
+            };
 
-            const result = try allocRenderPartials(allocator, comptime_template, comptime_partials, data);
+            const result = comptime try allocRenderPartials(allocator, comptime_template, comptime_partials, data);
             defer allocator.free(result);
 
             try testing.expectEqualStrings(expected, result);
