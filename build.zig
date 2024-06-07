@@ -28,7 +28,7 @@ pub fn build(b: *std.Build) void {
 
         const lib = b.addSharedLibrary(.{
             .name = lib_name,
-            .root_source_file = .{ .path = "src/exports.zig" },
+            .root_source_file = b.path("src/exports.zig"),
             .target = b.resolveTargetQuery(cross_target),
             .optimize = mode,
             .link_libc = true,
@@ -44,13 +44,13 @@ pub fn build(b: *std.Build) void {
     }
 
     // Zig module
-    _ = b.addModule("mustache", .{ .root_source_file = .{ .path = "src/mustache.zig" } });
+    _ = b.addModule("mustache", .{ .root_source_file = b.path("src/mustache.zig") });
 
     // C FFI Sample
     {
         const static_lib = b.addStaticLibrary(.{
             .name = "mustache-static",
-            .root_source_file = .{ .path = "src/exports.zig" },
+            .root_source_file = b.path("src/exports.zig"),
             .target = target,
             .optimize = mode,
             .link_libc = true,
@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) void {
             .optimize = mode,
         });
         c_sample.root_module.addCSourceFile(.{
-            .file = .{ .path = "samples/c/sample.c" },
+            .file = b.path("samples/c/sample.c"),
         });
         c_sample.linkLibrary(static_lib);
         c_sample.linkLibC();
@@ -94,7 +94,7 @@ pub fn build(b: *std.Build) void {
 
         const main_tests = b.addTest(.{
             .name = "tests",
-            .root_source_file = .{ .path = "src/mustache.zig" },
+            .root_source_file = b.path("src/mustache.zig"),
             .target = target,
             .optimize = mode,
             .filter = filter,
@@ -123,7 +123,7 @@ pub fn build(b: *std.Build) void {
     {
         const test_exe = b.addTest(.{
             .name = "tests",
-            .root_source_file = .{ .path = "src/mustache.zig" },
+            .root_source_file = b.path("src/mustache.zig"),
             .target = target,
             .optimize = mode,
         });
