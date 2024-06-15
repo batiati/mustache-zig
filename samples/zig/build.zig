@@ -14,13 +14,13 @@ pub fn build(b: *std.Build) void {
     const exe = b.addExecutable(
         .{
             .name = "samples",
-            .root_source_file = .{ .path = "src/main.zig" },
+            .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = mode,
         },
     );
     exe.root_module.addAnonymousImport("mustache", .{
-        .root_source_file = .{ .path = "../../src/mustache.zig" },
+        .root_source_file = b.path("../../src/mustache.zig"),
     });
     b.installArtifact(exe);
 

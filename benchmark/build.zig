@@ -12,12 +12,12 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "benchmark",
-        .root_source_file = .{ .path = "src/ramhorns_bench.zig" },
+        .root_source_file = b.path("src/ramhorns_bench.zig"),
         .target = target,
         .optimize = mode,
     });
     exe.root_module.addAnonymousImport("mustache", .{
-        .root_source_file = .{ .path = "../src/mustache.zig" },
+        .root_source_file = b.path("../src/mustache.zig"),
     });
     exe.linkLibC();
     b.installArtifact(exe);

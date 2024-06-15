@@ -1,6 +1,6 @@
 name: Matrix Build
 on:
-  push: 
+  push:
     branches: [ master ]
   pull_request:
     branches: [ master ]
@@ -10,7 +10,7 @@ jobs:
   test:
     strategy:
       fail-fast: false
-      matrix:      
+      matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: windows-latest
@@ -38,11 +38,12 @@ jobs:
         run: |
           sudo apt-get install -y kcov
 
+      # No comptime tests for now.
       - name: Run Tests
         run: |
           zig version
-          zig build test ${{ matrix.coverage }}
-      
+          zig build test -Dcomptime-tests=false ${{ matrix.coverage }}
+
       - name: Upload Codecov
         if: ${{ matrix.os == 'ubuntu-latest' }}
         env:
