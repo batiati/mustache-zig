@@ -134,7 +134,7 @@ pub fn TextPartType(comptime options: TemplateOptions) type {
             if (content[last_index] != @intFromEnum(PartType.delimiters)) return null;
 
             content = content[0..last_index];
-            var iterator = std.mem.tokenize(u8, content, " \t");
+            var iterator = std.mem.tokenizeAny(u8, content, " \t");
 
             const starting_delimiter = iterator.next() orelse return null;
             const ending_delimiter = iterator.next() orelse return null;

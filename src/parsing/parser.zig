@@ -337,7 +337,7 @@ pub fn ParserType(comptime options: TemplateOptions) type {
                 => return null,
 
                 else => {
-                    var tokenizer = std.mem.tokenize(u8, text_part.content.slice, " \t");
+                    var tokenizer = std.mem.tokenizeAny(u8, text_part.content.slice, " \t");
                     if (tokenizer.next()) |value| {
                         if (tokenizer.next() == null) {
                             return value;
@@ -413,7 +413,11 @@ pub fn ParserType(comptime options: TemplateOptions) type {
 
         pub fn parsePath(self: *Parser, identifier: []const u8) Allocator.Error!Element.Path {
             const action = struct {
-                pub fn action(ctx: *Parser, iterator: *std.mem.TokenIterator(u8, .any), index: usize) Allocator.Error!?[][]const u8 {
+                pub fn action(
+                    ctx: *Parser,
+                    iterator: *std.mem.TokenIterator(u8, .scalar),
+                    index: usize,
+                ) Allocator.Error!?[][]const u8 {
                     if (iterator.next()) |part| {
                         var path = (try action(ctx, iterator, index + 1)) orelse unreachable;
                         path[index] = try ctx.dupe(part);
@@ -445,8 +449,8 @@ pub fn ParserType(comptime options: TemplateOptions) type {
             if (identifier.len == 0) {
                 return empty;
             } else {
-                const path_separator = ".";
-                var iterator = std.mem.tokenize(u8, identifier, path_separator);
+                const path_separator = '.';
+                var iterator = std.mem.tokenizeScalar(u8, identifier, path_separator);
                 return (try action(self, &iterator, 0)) orelse empty;
             }
         }
@@ -676,9 +680,9 @@ test "Basic parse" {
 
 test "Scan standAlone tags" {
     const template_text =
-        \\   {{!           
-        \\   Comments block 
-        \\   }}            
+        \\   {{!
+        \\   Comments block
+        \\   }}
         \\Hello
     ;
 

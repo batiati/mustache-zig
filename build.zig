@@ -1,5 +1,5 @@
 const std = @import("std");
-const CrossTarget = std.zig.CrossTarget;
+const Query = std.Target.Query;
 
 pub fn build(b: *std.Build) void {
     const mode = b.standardOptimizeOption(.{});
@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     };
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        const cross_target = Query.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
         // Appends the name "lib" on windows, in order to generate the same name "libmustache" for all platforms
         const lib_name = comptime (if (std.mem.startsWith(u8, platform[1], "win")) "lib" else "") ++ "mustache";
