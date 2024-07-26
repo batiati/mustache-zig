@@ -754,6 +754,7 @@ pub fn RenderEngineType(
 
             out_writer: OutWriter,
             stack: *const ContextStack,
+            stack_global_lambdas: ?*const ContextStack = null,
             partials_map: PartialsMap,
             indentation_queue: *IndentationQueue,
             template_options: if (options == .template) *const TemplateOptions else void,
@@ -820,12 +821,12 @@ pub fn RenderEngineType(
                 };
             }
 
-            inline fn preseveLineBreaksAndIndentation(self: DataRender) bool {
+            inline fn preserveLineBreaksAndIndentation(self: DataRender) bool {
                 return !PartialsMap.isEmpty() and
                     switch (options) {
-                    .template => self.template_options.features.preseve_line_breaks_and_indentation,
-                    .string => |string| string.features.preseve_line_breaks_and_indentation,
-                    .file => |file| file.features.preseve_line_breaks_and_indentation,
+                    .template => self.template_options.features.preserve_line_breaks_and_indentation,
+                    .string => |string| string.features.preserve_line_breaks_and_indentation,
+                    .file => |file| file.features.preserve_line_breaks_and_indentation,
                 };
             }
 
@@ -899,7 +900,7 @@ pub fn RenderEngineType(
                             if (comptime PartialsMap.isEmpty()) continue;
 
                             if (self.partials_map.get(partial.key)) |partial_template| {
-                                if (self.preseveLineBreaksAndIndentation()) {
+                                if (self.preserveLineBreaksAndIndentation()) {
                                     if (partial.indentation) |value| {
                                         const prev_has_pending = self.indentation_queue.has_pending;
                                         var node = IndentationQueue.Node{ .indentation = value };
@@ -942,6 +943,38 @@ pub fn RenderEngineType(
                 }
             }
 
+            fn interpolateGlobalLambda(
+                self: *DataRender,
+                path: Element.Path,
+                escape: Escape,
+            ) (Allocator.Error || Writer.Error)!void {
+                var level: ?*const ContextStack = self.stack_global_lambdas;
+
+                while (level) |current| : (level = current.parent) {
+                    const path_resolution = try current.ctx.interpolate(self, path, escape);
+
+                    switch (path_resolution) {
+                        .lambda => {
+
+                            // Expand the lambda against the current context and break the loop
+                            const expand_result = try current.ctx.expandLambda(self, path, "", escape, .{});
+                            assert(expand_result == .lambda);
+                            break;
+                        },
+
+                        .field, .iterator_consumed, .chain_broken => {
+                            // Not rendered, but should NOT try against the parent context
+                            break;
+                        },
+
+                        .not_found_in_context => {
+                            // Not rendered, should try against the parent context
+                            continue;
+                        },
+                    }
+                }
+            }
+
             fn interpolate(
                 self: *DataRender,
                 path: Element.Path,
@@ -962,7 +995,9 @@ pub fn RenderEngineType(
 
                             // Expand the lambda against the current context and break the loop
                             const expand_result = try current.ctx.expandLambda(self, path, "", escape, .{});
-                            assert(expand_result == .lambda);
+                            if (expand_result != .lambda) {
+                                try self.interpolateGlobalLambda(path, escape);
+                            }
                             break;
                         },
 
@@ -1113,7 +1148,7 @@ pub fn RenderEngineType(
                 const indentation_supported = comptime !PartialsMap.isEmpty();
 
                 if (escaped or indentation_supported) {
-                    const indentation_empty: if (indentation_supported) bool else void = if (indentation_supported) self.indentation_queue.isEmpty() or !self.preseveLineBreaksAndIndentation() else {};
+                    const indentation_empty: if (indentation_supported) bool else void = if (indentation_supported) self.indentation_queue.isEmpty() or !self.preserveLineBreaksAndIndentation() else {};
 
                     var index: usize = 0;
 
@@ -1421,10 +1456,26 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
+            //@compileLog(options);
+            var context_stack_global_lamdbas: ?ContextStack = null;
+            switch (options) {
+                inline else => |value| {
+                    if (value.global_lambdas) |global_lambdas| {
+                        const GlobalLambdas = @TypeOf(global_lambdas);
+                        const gl_by_value = comptime Fields.byValue(GlobalLambdas);
+                        context_stack_global_lamdbas = .{
+                            .parent = null,
+                            .ctx = getContextType(if (gl_by_value) global_lambdas else @as(*const GlobalLambdas, &global_lambdas)),
+                        };
+                    }
+                },
+            }
+
             var data_render = DataRender{
                 .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
+                .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
             };
