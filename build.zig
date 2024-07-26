@@ -134,4 +134,23 @@ pub fn build(b: *std.Build) void {
         const test_build = b.step("build_tests", "Build library tests");
         test_build.dependOn(&test_exe_install.step);
     }
+
+    // TODO: delete this when the POC is validated
+    {
+        // run command: zig build -Dcomptime-tests=false poc
+        const poc = b.addTest(.{
+            .name = "poc",
+            .root_source_file = b.path("src/poc.zig"),
+            .target = target,
+            .optimize = mode,
+        });
+        poc.root_module.addOptions("build_comptime_tests", comptime_tests);
+        poc.step.dependOn(b.getInstallStep());
+
+        const run_poc = b.addRunArtifact(poc);
+        if (b.args) |args| for (args) |arg| run_poc.addArg(b.dupe(arg));
+
+        const poc_step = b.step("poc", "Run the POC");
+        poc_step.dependOn(&run_poc.step);
+    }
 }
