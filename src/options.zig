@@ -138,6 +138,10 @@ pub const RenderFromStringOptions = struct {
     /// Those options affect both performance and supported Mustache features.
     /// Defaults to full-spec compatible.
     features: Features = .{},
+
+    /// TODO: doc
+    /// TODO: generalize to other Options types
+    global_lambdas: type = void,
 };
 
 pub const RenderFromFileOptions = struct {
