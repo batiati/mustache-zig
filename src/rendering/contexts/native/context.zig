@@ -244,7 +244,6 @@ pub fn ContextImplType(
             data_render: *DataRender,
             path: Element.Path,
         ) PathResolutionType(usize) {
-
             return Invoker.capacityHint(
                 data_render,
                 ctx.get(Data),

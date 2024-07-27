@@ -107,8 +107,7 @@ pub fn InvokerType(
                                 index,
                             );
                         },
-                        .Pointer => |info| {
-                            switch (info.size) {
+                        .Pointer => |info| switch (info.size) {
                             .One => return try recursiveFind(
                                 depth,
                                 info.child,
@@ -131,7 +130,7 @@ pub fn InvokerType(
                             },
                             .Many => @compileError("[*] pointers not supported"),
                             .C => @compileError("[*c] pointers not supported"),
-                        }},
+                        },
                         .Optional => |info| {
                             if (!Fields.isNull(Data, data)) {
                                 return try recursiveFind(

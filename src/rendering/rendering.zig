@@ -861,7 +861,6 @@ pub fn RenderEngineType(
                                             .Unescaped,
                                             section.delimiters.?,
                                         );
-
                                         assert(expand_result == .lambda);
                                         continue;
                                     }
