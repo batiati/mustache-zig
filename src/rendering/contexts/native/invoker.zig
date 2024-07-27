@@ -57,6 +57,7 @@ pub fn InvokerType(
                     path: Element.Path,
                     index: ?usize,
                 ) TError!PathResolution {
+            std.debug.print ("path = {s}\n", .{path});
                     return find(.Root, action_param, data, path, index);
                 }
 
@@ -76,6 +77,7 @@ pub fn InvokerType(
                         return PathResolution{ .lambda = try action_fn(action_param, ctx) };
                     } else {
                         if (path.len > 0) {
+                            std.debug.print ("HERE 2\n", .{});
                             return recursiveFind(depth, Data, action_param, ctx, path[0], path[1..], index);
                         } else if (index) |current_index| {
                             return iterateAt(Data, action_param, ctx, current_index);
@@ -95,8 +97,11 @@ pub fn InvokerType(
                     index: ?usize,
                 ) TError!PathResolution {
                     const Data = @TypeOf(data);
+                    std.debug.print ("recursiveFind Data = {s}\n", .{@typeName(Data)});
+                    std.debug.print ("recursiveFind TValue = {s}\n", .{@typeName (TValue)});
                     switch (@typeInfo(TValue)) {
                         .Struct => {
+                            std.debug.print ("{s}\n", .{@tagName(@typeInfo (TValue))});
                             return findFieldPath(
                                 depth,
                                 TValue,
@@ -107,7 +112,9 @@ pub fn InvokerType(
                                 index,
                             );
                         },
-                        .Pointer => |info| switch (info.size) {
+                        .Pointer => |info| {
+                            std.debug.print ("{s}\n", .{@tagName(@typeInfo (TValue))});
+                            switch (info.size) {
                             .One => return try recursiveFind(
                                 depth,
                                 info.child,
@@ -130,8 +137,9 @@ pub fn InvokerType(
                             },
                             .Many => @compileError("[*] pointers not supported"),
                             .C => @compileError("[*c] pointers not supported"),
-                        },
+                        }},
                         .Optional => |info| {
+                            std.debug.print ("{s}\n", .{@tagName(@typeInfo (TValue))});
                             if (!Fields.isNull(Data, data)) {
                                 return try recursiveFind(
                                     depth,
@@ -145,6 +153,7 @@ pub fn InvokerType(
                             }
                         },
                         .Array, .Vector => {
+                            std.debug.print ("{s}\n", .{@tagName(@typeInfo (TValue))});
                             //Slice supports the "len" field,
                             if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
                                 return if (next_path_parts.len == 0)
@@ -170,6 +179,7 @@ pub fn InvokerType(
                     next_path_parts: Element.Path,
                     index: ?usize,
                 ) TError!PathResolution {
+                    std.debug.print ("{s}\n", .{@src().fn_name});
                     const fields = std.meta.fields(TValue);
                     inline for (fields) |field| {
                         if (std.mem.eql(u8, field.name, current_path_part)) {
@@ -191,6 +201,7 @@ pub fn InvokerType(
                     data: anytype,
                     current_path_part: []const u8,
                 ) TError!PathResolution {
+                    std.debug.print ("{s}\n", .{@src().fn_name});
                     const decls = comptime std.meta.declarations(TValue);
                     inline for (decls) |decl| {
                         const has_fn = comptime meta.hasFn(TValue, decl.name);
@@ -205,6 +216,7 @@ pub fn InvokerType(
                                         bound_fn,
                                     );
                                 } else {
+                                    std.debug.print ("CHAIN BROKEN BECAUSE INVALID LAMBDA\n", .{});
                                     return .chain_broken;
                                 }
                             }
@@ -219,6 +231,7 @@ pub fn InvokerType(
                     data: anytype,
                     bound_fn: anytype,
                 ) TError!PathResolution {
+                    std.debug.print ("{s}\n", .{@src().fn_name});
                     const TData = @TypeOf(data);
                     const TFn = @TypeOf(bound_fn);
                     const params_len = @typeInfo(TFn).Fn.params.len;
@@ -249,6 +262,7 @@ pub fn InvokerType(
                     data: anytype,
                     index: usize,
                 ) TError!PathResolution {
+                    std.debug.print ("{s}\n", .{@src().fn_name});
                     const Data = @TypeOf(data);
                     switch (@typeInfo(TValue)) {
                         .Struct => |info| {
@@ -355,6 +369,7 @@ pub fn InvokerType(
             index: ?usize,
         ) PathResolutionType(Context) {
             const GetPathInvoker = PathInvokerType(error{}, Context, getAction);
+            std.debug.print ("GET\n", .{});
             return GetPathInvoker.call(
                 {},
                 data,
@@ -374,6 +389,7 @@ pub fn InvokerType(
                 void,
                 interpolateAction,
             );
+            std.debug.print ("INTERPOLATE\n", .{});
             return InterpolatePathInvoker.call(
                 .{ data_render, escape },
                 data,
@@ -388,6 +404,7 @@ pub fn InvokerType(
             path: Element.Path,
         ) PathResolutionType(usize) {
             const CapacityHintPathInvoker = PathInvokerType(error{}, usize, capacityHintAction);
+            std.debug.print ("CAP HINT {s}\n", .{@typeName(@TypeOf(data))});
             return CapacityHintPathInvoker.call(
                 data_render,
                 data,
@@ -409,6 +426,7 @@ pub fn InvokerType(
                 void,
                 expandLambdaAction,
             );
+            std.debug.print ("EXPAND LAMBDA\n", .{});
             return ExpandLambdaPathInvoker.call(
                 .{ data_render, inner_text, escape, delimiters },
                 data,
@@ -439,6 +457,7 @@ pub fn InvokerType(
             params: anytype,
             value: anytype,
         ) error{}!usize {
+            std.debug.print ("capacityHintAction\n", .{});
             return params.valueCapacityHint(value);
         }
 

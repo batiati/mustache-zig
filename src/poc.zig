@@ -6,7 +6,7 @@ const lower_text = "An awesome text !";
 const upper_text = "AN AWESOME TEXT !";
 
 const PocLambdas = struct {
-    pub fn upperSection(text: *const Text, ctx: mustache.LambdaContext) !void {
+    pub fn upperSection(const Text, ctx: mustache.LambdaContext) !void {
         _ = text;
         try ctx.write(bad_text);
     }
@@ -16,7 +16,12 @@ const PocLambdas = struct {
         try ctx.write(bad_text);
     }
 
-    pub const upperInterpolation = upperSection;
+    pub fn upperInterpolation(text: *const Text, ctx: mustache.LambdaContext) !void {
+        _ = text;
+        try ctx.write(bad_text);
+    }
+
+    //pub const upperInterpolation = upperSection;
     pub const upperInterpolation2 = upperSection2;
 };
 
