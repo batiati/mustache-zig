@@ -127,6 +127,10 @@ pub const RenderFromTemplateOptions = struct {
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
     context_misses: ContextMisses = if (builtin.mode == .Debug) .fail else .empty,
+
+    /// TODO: doc
+    /// TODO: generalize to other Options types
+    global_lambdas: ?type = null,
 };
 
 pub const RenderFromStringOptions = struct {

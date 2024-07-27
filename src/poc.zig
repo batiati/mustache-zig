@@ -6,43 +6,44 @@ const lower_text = "An awesome text !";
 const upper_text = "AN AWESOME TEXT !";
 
 const PocLambdas = struct {
-    pub fn upperSection(const Text, ctx: mustache.LambdaContext) !void {
+    pub fn upper1arg(ctx: mustache.LambdaContext) !void {
+        try ctx.write(bad_text);
+    }
+
+    pub fn upper(text: *const Text, ctx: mustache.LambdaContext) !void {
         _ = text;
         try ctx.write(bad_text);
     }
 
-    pub fn upperSection2(text: *const AllocatedText, ctx: mustache.LambdaContext) !void {
+    // Conflicting methods
+    pub fn upperSectionConflict(text: *const TextWithAllocator, ctx: mustache.LambdaContext) !void {
         _ = text;
         try ctx.write(bad_text);
     }
 
-    pub fn upperInterpolation(text: *const Text, ctx: mustache.LambdaContext) !void {
+    pub fn upperInterpolationConflict(text: *const TextWithAllocator, ctx: mustache.LambdaContext) !void {
         _ = text;
         try ctx.write(bad_text);
     }
-
-    //pub const upperInterpolation = upperSection;
-    pub const upperInterpolation2 = upperSection2;
 };
 
+// struct without methods: no conflicts with global lambdas
 const Text = struct {
     content: []const u8,
-    //pub fn upperInterpolation(_: *const @This(), ctx: mustache.LambdaContext) !void {
-    //    try ctx.write(upper_text);
-    //}
 };
 
-const AllocatedText = struct {
+// struct with conflicting methods
+const TextWithAllocator = struct {
     allocator: std.mem.Allocator,
     content: []const u8,
 
-    pub fn upperInterpolation2(self: *const @This(), ctx: mustache.LambdaContext) !void {
+    pub fn upperInterpolationConflict(self: *const @This(), ctx: mustache.LambdaContext) !void {
         const upper_content = try std.ascii.allocUpperString(self.allocator, self.content);
         defer self.allocator.free(upper_content);
         try ctx.writeFormat("{s}", .{ upper_content, });
     }
 
-    pub fn upperSection2(self: *const @This(), ctx: mustache.LambdaContext) !void {
+    pub fn upperSectionConflict(self: *const @This(), ctx: mustache.LambdaContext) !void {
         const content = try ctx.renderAlloc(self.allocator, ctx.inner_text);
         defer self.allocator.free(content);
         const upper_content = try std.ascii.allocUpperString(self.allocator, content);
@@ -51,6 +52,7 @@ const AllocatedText = struct {
     }
 };
 
+// a bit of color to enlight my tests
 fn ok (comptime str: [] const u8) !void
 {
     const tty: std.io.tty.Config = .escape_codes;
@@ -59,36 +61,17 @@ fn ok (comptime str: [] const u8) !void
     try tty.setColor(std.io.getStdErr().writer(), .reset);
 }
 
-//test "section: basic" {
-//    const allocator = std.testing.allocator;
-//
-//    const template = "{{#upperSection}}{{content}}{{/upperSection}}";
-//    const text = Text{ .content = lower_text, };
-//    const const_ptr_text = &text;
-//
-//    const result = try mustache.allocRenderTextWithOptions(
-//        allocator,
-//        template,
-//        const_ptr_text,
-//        .{ .global_lambdas = PocLambdas, }
-//    );
-//    defer allocator.free(result);
-//
-//    try std.testing.expectEqualStrings(bad_text, result);
-//    try ok(@src().fn_name);
-//}
-
-test "interpolation: basic" {
+test "interpolation: only LambdaContext" {
     const allocator = std.testing.allocator;
 
-    const template = "{{upperInterpolation}}";
+    const template = "{{upper1arg}}";
     const text = Text{ .content = lower_text, };
-    const const_ptr_text = &text;
+    const ptr_text = &text;
 
     const result = try mustache.allocRenderTextWithOptions(
         allocator,
         template,
-        const_ptr_text,
+        ptr_text,
         .{ .global_lambdas = PocLambdas, }
     );
     defer allocator.free(result);
@@ -97,18 +80,75 @@ test "interpolation: basic" {
     try ok(@src().fn_name);
 }
 
-//test "section: AllocatedText lambda override global lambda" {
+test "section: only LambdaContext" {
+    const allocator = std.testing.allocator;
+
+    const template = "{{#upper1arg}}poc{{/upper1arg}}";
+    const text = Text{ .content = lower_text, };
+    const ptr_text = &text;
+
+    const result = try mustache.allocRenderTextWithOptions(
+        allocator,
+        template,
+        ptr_text,
+        .{ .global_lambdas = PocLambdas, }
+    );
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings(bad_text, result);
+    try ok(@src().fn_name);
+}
+
+//test "interpolation: struct + LambdaContext" {
 //    const allocator = std.testing.allocator;
 //
-//    const template = "{{#upperSection2}}{{content}}{{/upperSection2}}";
-//
-//    const text = AllocatedText{ .allocator = allocator, .content = lower_text, };
-//    const const_ptr_text = &text;
+//    const template = "{{#upper}}";
+//    const text = Text{ .content = lower_text, };
+//    const ptr_text = &text;
 //
 //    const result = try mustache.allocRenderTextWithOptions(
 //        allocator,
 //        template,
-//        const_ptr_text,
+//        ptr_text,
+//        .{ .global_lambdas = PocLambdas, }
+//    );
+//    defer allocator.free(result);
+//
+//    try std.testing.expectEqualStrings(bad_text, result);
+//    try ok(@src().fn_name);
+//}
+
+//test "section: struct + LambdaContext" {
+//    const allocator = std.testing.allocator;
+//
+//    const template = "{{#upper}}{{content}}{{/upper}}";
+//    const text = Text{ .content = lower_text, };
+//    const ptr_text = &text;
+//
+//    const result = try mustache.allocRenderTextWithOptions(
+//        allocator,
+//        template,
+//        ptr_text,
+//        .{ .global_lambdas = PocLambdas, }
+//    );
+//    defer allocator.free(result);
+//
+//    try std.testing.expectEqualStrings(bad_text, result);
+//    try ok(@src().fn_name);
+//}
+
+//test "interpolation: conflict between TextWithAllocator lambda and global lambda" {
+//    const allocator = std.testing.allocator;
+//
+//    const template = "{{upperInterpolationConflict}}";
+//
+//    const text = TextWithAllocator{ .allocator = allocator, .content = lower_text, };
+//    const ptr_text = &text;
+//
+//    const result = try mustache.allocRenderTextWithOptions(
+//        allocator,
+//        template,
+//        ptr_text,
 //        .{ .global_lambdas = PocLambdas, }
 //    );
 //    defer allocator.free(result);
@@ -117,18 +157,18 @@ test "interpolation: basic" {
 //    try ok(@src().fn_name);
 //}
 
-//test "interpolation: AllocatedText lambda override global lambda" {
+//test "section: conflict between TextWithAllocator lambda and global lambda" {
 //    const allocator = std.testing.allocator;
 //
-//    const template = "{{upperInterpolation2}}";
+//    const template = "{{#upperSectionConflict}}{{content}}{{/upperSectionConflict}}";
 //
-//    const text = AllocatedText{ .allocator = allocator, .content = lower_text, };
-//    const const_ptr_text = &text;
+//    const text = TextWithAllocator{ .allocator = allocator, .content = lower_text, };
+//    const ptr_text = &text;
 //
 //    const result = try mustache.allocRenderTextWithOptions(
 //        allocator,
 //        template,
-//        const_ptr_text,
+//        ptr_text,
 //        .{ .global_lambdas = PocLambdas, }
 //    );
 //    defer allocator.free(result);
