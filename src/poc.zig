@@ -40,7 +40,9 @@ const TextWithAllocator = struct {
     pub fn upperInterpolationConflict(self: *const @This(), ctx: mustache.LambdaContext) !void {
         const upper_content = try std.ascii.allocUpperString(self.allocator, self.content);
         defer self.allocator.free(upper_content);
-        try ctx.writeFormat("{s}", .{ upper_content, });
+        try ctx.writeFormat("{s}", .{
+            upper_content,
+        });
     }
 
     pub fn upperSectionConflict(self: *const @This(), ctx: mustache.LambdaContext) !void {
@@ -48,13 +50,14 @@ const TextWithAllocator = struct {
         defer self.allocator.free(content);
         const upper_content = try std.ascii.allocUpperString(self.allocator, content);
         defer self.allocator.free(upper_content);
-        try ctx.writeFormat("{s}", .{ upper_content, });
+        try ctx.writeFormat("{s}", .{
+            upper_content,
+        });
     }
 };
 
 // a bit of color to enlight my tests
-fn ok (comptime str: [] const u8) !void
-{
+fn ok(comptime str: []const u8) !void {
     const tty: std.io.tty.Config = .escape_codes;
     try tty.setColor(std.io.getStdErr().writer(), .green);
     std.debug.print("[POC global lambdas] " ++ str[5..] ++ ": OK\n", .{});
@@ -65,15 +68,14 @@ test "interpolation: only LambdaContext" {
     const allocator = std.testing.allocator;
 
     const template = "{{upper1arg}}";
-    const text = Text{ .content = lower_text, };
+    const text = Text{
+        .content = lower_text,
+    };
     const ptr_text = &text;
 
-    const result = try mustache.allocRenderTextWithOptions(
-        allocator,
-        template,
-        ptr_text,
-        .{ .global_lambdas = PocLambdas, }
-    );
+    const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{
+        .global_lambdas = PocLambdas,
+    });
     defer allocator.free(result);
 
     try std.testing.expectEqualStrings(bad_text, result);
@@ -84,15 +86,14 @@ test "section: only LambdaContext" {
     const allocator = std.testing.allocator;
 
     const template = "{{#upper1arg}}poc{{/upper1arg}}";
-    const text = Text{ .content = lower_text, };
+    const text = Text{
+        .content = lower_text,
+    };
     const ptr_text = &text;
 
-    const result = try mustache.allocRenderTextWithOptions(
-        allocator,
-        template,
-        ptr_text,
-        .{ .global_lambdas = PocLambdas, }
-    );
+    const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{
+        .global_lambdas = PocLambdas,
+    });
     defer allocator.free(result);
 
     try std.testing.expectEqualStrings(bad_text, result);

@@ -976,7 +976,7 @@ pub fn RenderEngineType(
                             // Not rendered, should try against the parent context
                             var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
                             while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                                path_resolution = try current_global_lambdas.ctx.interpolate(self, path,escape);
+                                path_resolution = try current_global_lambdas.ctx.interpolate(self, path, escape);
                                 switch (path_resolution) {
                                     .lambda => {
                                         const expand_result = try current_global_lambdas.ctx.expandLambda(self, path, "", escape, .{});
