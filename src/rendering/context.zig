@@ -216,6 +216,7 @@ pub const LambdaContext = struct {
     vtable: *const VTable,
 
     inner_text: []const u8,
+    allocator: ?std.mem.Allocator,
 
     pub const VTable = struct {
         renderAlloc: *const fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,

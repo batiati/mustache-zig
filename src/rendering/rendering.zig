@@ -652,7 +652,13 @@ fn internalAllocRender(
         options,
     );
 
-    try RenderEngine.bufRender(list.writer(), template, data, PartialsMap.init(partials));
+    try RenderEngine.bufRender(
+        allocator,
+        list.writer(),
+        template,
+        data,
+        PartialsMap.init(partials),
+    );
 
     return if (comptime sentinel) |z|
         list.toOwnedSliceSentinel(z)
@@ -758,6 +764,7 @@ pub fn RenderEngineType(
             partials_map: PartialsMap,
             indentation_queue: *IndentationQueue,
             template_options: if (options == .template) *const TemplateOptions else void,
+            allocator: ?std.mem.Allocator = null,
 
             pub fn collect(self: *DataRender, allocator: Allocator, template: []const u8) !void {
                 switch (comptime options) {
@@ -1396,7 +1403,13 @@ pub fn RenderEngineType(
             try data_render.render(template.elements);
         }
 
-        pub fn bufRender(writer: std.ArrayList(u8).Writer, template: Template, data: anytype, partials_map: PartialsMap) !void {
+        pub fn bufRender(
+            allocator: std.mem.Allocator,
+            writer: std.ArrayList(u8).Writer,
+            template: Template,
+            data: anytype,
+            partials_map: PartialsMap,
+        ) !void {
             comptime assert(options == .template);
 
             const Data = @TypeOf(data);
@@ -1427,6 +1440,7 @@ pub fn RenderEngineType(
                 .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
+                .allocator = allocator,
             };
 
             try data_render.render(template.elements);
@@ -1511,6 +1525,7 @@ pub fn RenderEngineType(
                 .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
+                .allocator = allocator,
             };
 
             try data_render.collect(allocator, template);

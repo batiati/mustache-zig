@@ -44,6 +44,7 @@ pub fn LambdaContextImplType(comptime Writer: type, comptime PartialsMap: type, 
                 .ptr = self,
                 .vtable = &vtable,
                 .inner_text = inner_text,
+                .allocator = self.data_render.allocator,
             };
         }
 

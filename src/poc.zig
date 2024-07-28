@@ -7,52 +7,52 @@ const upper_text = "AN AWESOME TEXT !";
 
 const PocLambdas = struct {
     pub fn upper1arg(ctx: mustache.LambdaContext) !void {
-        try ctx.write(bad_text);
+        var content = try ctx.renderAlloc(ctx.allocator.?, ctx.inner_text);
+        defer ctx.allocator.?.free(content);
+        for (content, 0..) |char, i| {
+            content[i] = std.ascii.toUpper(char);
+        }
+        try ctx.write(content);
     }
 
-    pub fn upper(text: *const Text, ctx: mustache.LambdaContext) !void {
+    pub fn upper(text: *const Dummy, ctx: mustache.LambdaContext) !void {
         _ = text;
         try ctx.write(bad_text);
     }
 
     // Conflicting methods
-    pub fn upperSectionConflict(text: *const TextWithAllocator, ctx: mustache.LambdaContext) !void {
+    pub fn upperSectionConflict(text: *const Text, ctx: mustache.LambdaContext) !void {
         _ = text;
         try ctx.write(bad_text);
     }
 
-    pub fn upperInterpolationConflict(text: *const TextWithAllocator, ctx: mustache.LambdaContext) !void {
+    pub fn upperInterpolationConflict(text: *const Text, ctx: mustache.LambdaContext) !void {
         _ = text;
         try ctx.write(bad_text);
     }
 };
 
 // struct without methods: no conflicts with global lambdas
-const Text = struct {
+const Dummy = struct {
     content: []const u8,
 };
 
 // struct with conflicting methods
-const TextWithAllocator = struct {
-    allocator: std.mem.Allocator,
+const Text = struct {
     content: []const u8,
 
     pub fn upperInterpolationConflict(self: *const @This(), ctx: mustache.LambdaContext) !void {
-        const upper_content = try std.ascii.allocUpperString(self.allocator, self.content);
-        defer self.allocator.free(upper_content);
-        try ctx.writeFormat("{s}", .{
-            upper_content,
-        });
+        const upper_content = try std.ascii.allocUpperString(ctx.allocator.?, self.content);
+        defer ctx.allocator.?.free(upper_content);
+        try ctx.write(upper_content);
     }
 
-    pub fn upperSectionConflict(self: *const @This(), ctx: mustache.LambdaContext) !void {
-        const content = try ctx.renderAlloc(self.allocator, ctx.inner_text);
-        defer self.allocator.free(content);
-        const upper_content = try std.ascii.allocUpperString(self.allocator, content);
-        defer self.allocator.free(upper_content);
-        try ctx.writeFormat("{s}", .{
-            upper_content,
-        });
+    pub fn upperSectionConflict(_: *const @This(), ctx: mustache.LambdaContext) !void {
+        const content = try ctx.renderAlloc(ctx.allocator.?, ctx.inner_text);
+        defer ctx.allocator.?.free(content);
+        const upper_content = try std.ascii.allocUpperString(ctx.allocator.?, content);
+        defer ctx.allocator.?.free(upper_content);
+        try ctx.write(upper_content);
     }
 };
 
@@ -64,29 +64,11 @@ fn ok(comptime str: []const u8) !void {
     try tty.setColor(std.io.getStdErr().writer(), .reset);
 }
 
-test "interpolation: only LambdaContext" {
-    const allocator = std.testing.allocator;
-
-    const template = "{{upper1arg}}";
-    const text = Text{
-        .content = lower_text,
-    };
-    const ptr_text = &text;
-
-    const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{
-        .global_lambdas = PocLambdas,
-    });
-    defer allocator.free(result);
-
-    try std.testing.expectEqualStrings(bad_text, result);
-    try ok(@src().fn_name);
-}
-
 test "section: only LambdaContext" {
     const allocator = std.testing.allocator;
 
-    const template = "{{#upper1arg}}poc{{/upper1arg}}";
-    const text = Text{
+    const template = "{{#upper1arg}}" ++ lower_text ++ "{{/upper1arg}}";
+    const text = Dummy{
         .content = lower_text,
     };
     const ptr_text = &text;
@@ -96,7 +78,7 @@ test "section: only LambdaContext" {
     });
     defer allocator.free(result);
 
-    try std.testing.expectEqualStrings(bad_text, result);
+    try std.testing.expectEqualStrings(upper_text, result);
     try ok(@src().fn_name);
 }
 
@@ -104,7 +86,7 @@ test "section: only LambdaContext" {
 //    const allocator = std.testing.allocator;
 //
 //    const template = "{{#upper}}";
-//    const text = Text{ .content = lower_text, };
+//    const text = Dummy{ .content = lower_text, };
 //    const ptr_text = &text;
 //
 //    const result = try mustache.allocRenderTextWithOptions(
@@ -123,7 +105,7 @@ test "section: only LambdaContext" {
 //    const allocator = std.testing.allocator;
 //
 //    const template = "{{#upper}}{{content}}{{/upper}}";
-//    const text = Text{ .content = lower_text, };
+//    const text = Dummy{ .content = lower_text, };
 //    const ptr_text = &text;
 //
 //    const result = try mustache.allocRenderTextWithOptions(
@@ -138,12 +120,12 @@ test "section: only LambdaContext" {
 //    try ok(@src().fn_name);
 //}
 
-//test "interpolation: conflict between TextWithAllocator lambda and global lambda" {
+//test "interpolation: conflict between Text lambda and global lambda" {
 //    const allocator = std.testing.allocator;
 //
 //    const template = "{{upperInterpolationConflict}}";
 //
-//    const text = TextWithAllocator{ .allocator = allocator, .content = lower_text, };
+//    const text = Text{ .allocator = allocator, .content = lower_text, };
 //    const ptr_text = &text;
 //
 //    const result = try mustache.allocRenderTextWithOptions(
@@ -158,12 +140,12 @@ test "section: only LambdaContext" {
 //    try ok(@src().fn_name);
 //}
 
-//test "section: conflict between TextWithAllocator lambda and global lambda" {
+//test "section: conflict between Text lambda and global lambda" {
 //    const allocator = std.testing.allocator;
 //
 //    const template = "{{#upperSectionConflict}}{{content}}{{/upperSectionConflict}}";
 //
-//    const text = TextWithAllocator{ .allocator = allocator, .content = lower_text, };
+//    const text = Text{ .allocator = allocator, .content = lower_text, };
 //    const ptr_text = &text;
 //
 //    const result = try mustache.allocRenderTextWithOptions(

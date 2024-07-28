@@ -212,7 +212,6 @@ pub fn ContextImplType(
     const Invoker = invoker.InvokerType(Writer, PartialsMap, options);
 
     return struct {
-        const is_zero_size = @sizeOf(Data) == 0;
         const vtable = Context.VTable{
             .get = get,
             .capacityHint = capacityHint,
