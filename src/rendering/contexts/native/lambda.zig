@@ -17,11 +17,17 @@ const LambdaContext = context.LambdaContext;
 
 const rendering = @import("../../rendering.zig");
 
-pub fn LambdaContextImplType(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+pub fn LambdaContextImplType(
+    comptime Writer: type,
+    comptime PartialsMap: type,
+    comptime TUserData: type,
+    comptime options: RenderOptions,
+) type {
     const RenderEngine = rendering.RenderEngineType(
         .native,
         Writer,
         PartialsMap,
+        TUserData,
         options,
     );
     const DataRender = RenderEngine.DataRender;

@@ -25,12 +25,14 @@ const ContextIteratorType = context.ContextIteratorType;
 pub fn ContextType(
     comptime Writer: type,
     comptime PartialsMap: type,
+    comptime TUserData: type,
     comptime options: RenderOptions,
 ) type {
     const RenderEngine = rendering.RenderEngineType(
         .json,
         Writer,
         PartialsMap,
+        TUserData,
         options,
     );
     const DataRender = RenderEngine.DataRender;

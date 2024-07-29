@@ -61,6 +61,7 @@ pub fn ContextType(
     comptime context_source: ContextSource,
     comptime Writer: type,
     comptime PartialsMap: type,
+    comptime TUserData: type,
     comptime options: RenderOptions,
 ) type {
 
@@ -69,9 +70,9 @@ pub fn ContextType(
     // The json context uses static dispatch, once the JSON key-value is well known
     // for any possible type.
     return switch (context_source) {
-        .native => native_context.ContextInterfaceType(Writer, PartialsMap, options),
-        .json => json_context.ContextType(Writer, PartialsMap, options),
-        .ffi => ffi_context.ContextType(Writer, PartialsMap, options),
+        .native => native_context.ContextInterfaceType(Writer, PartialsMap, TUserData, options),
+        .json => json_context.ContextType(Writer, PartialsMap, TUserData, options),
+        .ffi => ffi_context.ContextType(Writer, PartialsMap, TUserData, options),
     };
 }
 
@@ -80,6 +81,7 @@ pub fn ContextImplType(
     comptime Writer: type,
     comptime Data: type,
     comptime PartialsMap: type,
+    comptime TUserData: type,
     comptime options: RenderOptions,
 ) type {
     if (comptime context_source != ContextSource.fromData(Data)) {
@@ -91,9 +93,9 @@ pub fn ContextImplType(
     }
 
     return switch (context_source) {
-        .native => native_context.ContextImplType(Writer, Data, PartialsMap, options),
-        .json => json_context.ContextType(Writer, PartialsMap, options),
-        .ffi => ffi_context.ContextType(Writer, PartialsMap, options),
+        .native => native_context.ContextImplType(Writer, Data, PartialsMap, TUserData, options),
+        .json => json_context.ContextType(Writer, PartialsMap, TUserData, options),
+        .ffi => ffi_context.ContextType(Writer, PartialsMap, TUserData, options),
     };
 }
 

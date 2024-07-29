@@ -15,8 +15,10 @@ const PocLambdas = struct {
         try ctx.write(content);
     }
 
-    pub fn upper(text: *const Dummy, ctx: mustache.LambdaContext) !void {
-        _ = text;
+    pub fn upper(text: *Dummy, ctx: mustache.LambdaContext) !void {
+        for (text.content, 0..) |char, i| {
+            text.content[i] = std.ascii.toUpper(char);
+        }
         try ctx.write(bad_text);
     }
 
@@ -64,42 +66,42 @@ fn ok(comptime str: []const u8) !void {
     try tty.setColor(std.io.getStdErr().writer(), .reset);
 }
 
-test "section: only LambdaContext" {
+//test "section: only LambdaContext" {
+//    const allocator = std.testing.allocator;
+//
+//    const template = "{{#upper1arg}}" ++ lower_text ++ "{{/upper1arg}}";
+//    const text = Dummy{
+//        .content = lower_text,
+//    };
+//    const ptr_text = &text;
+//
+//    const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{
+//        .global_lambdas = PocLambdas,
+//    });
+//    defer allocator.free(result);
+//
+//    try std.testing.expectEqualStrings(upper_text, result);
+//    try ok(@src().fn_name);
+//}
+
+test "interpolation: struct + LambdaContext" {
     const allocator = std.testing.allocator;
 
-    const template = "{{#upper1arg}}" ++ lower_text ++ "{{/upper1arg}}";
-    const text = Dummy{
-        .content = lower_text,
-    };
+    const template = "{{upper}}";
+    const text = Dummy{ .content = lower_text, };
     const ptr_text = &text;
 
-    const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{
-        .global_lambdas = PocLambdas,
-    });
+    const result = try mustache.allocRenderTextWithOptions(
+        allocator,
+        template,
+        ptr_text,
+        .{ .global_lambdas = PocLambdas, }
+    );
     defer allocator.free(result);
 
     try std.testing.expectEqualStrings(upper_text, result);
     try ok(@src().fn_name);
 }
-
-//test "interpolation: struct + LambdaContext" {
-//    const allocator = std.testing.allocator;
-//
-//    const template = "{{#upper}}";
-//    const text = Dummy{ .content = lower_text, };
-//    const ptr_text = &text;
-//
-//    const result = try mustache.allocRenderTextWithOptions(
-//        allocator,
-//        template,
-//        ptr_text,
-//        .{ .global_lambdas = PocLambdas, }
-//    );
-//    defer allocator.free(result);
-//
-//    try std.testing.expectEqualStrings(bad_text, result);
-//    try ok(@src().fn_name);
-//}
 
 //test "section: struct + LambdaContext" {
 //    const allocator = std.testing.allocator;

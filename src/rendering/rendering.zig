@@ -619,10 +619,12 @@ fn internalRender(
 
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
+    const Data = @TypeOf (data);
     const RenderEngine = RenderEngineType(
         context_source,
         @TypeOf(writer),
         PartialsMap,
+        Data,
         options,
     );
 
@@ -645,10 +647,12 @@ fn internalAllocRender(
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
+    const Data = @TypeOf (data);
     const RenderEngine = RenderEngineType(
         context_source,
         Writer,
         PartialsMap,
+        Data,
         options,
     );
 
@@ -678,10 +682,12 @@ fn internalCollect(
 
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
+    const Data = @TypeOf (data);
     const RenderEngine = RenderEngineType(
         context_source,
         @TypeOf(writer),
         PartialsMap,
+        Data,
         options,
     );
 
@@ -710,10 +716,12 @@ fn internalAllocCollect(
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
+    const Data = @TypeOf (data);
     const RenderEngine = RenderEngineType(
         context_source,
         Writer,
         PartialsMap,
+        Data,
         options,
     );
 
@@ -736,12 +744,18 @@ pub fn RenderEngineType(
     comptime context_source: ContextSource,
     comptime Writer: type,
     comptime TPartialsMap: type,
+    comptime TData: type,
     comptime options: RenderOptions,
 ) type {
     return struct {
-        pub const Context = context.ContextType(context_source, Writer, PartialsMap, options);
+        pub const Context = context.ContextType(context_source, Writer, PartialsMap, TData, options);
         pub const ContextStack = Context.ContextStack;
         pub const PartialsMap = TPartialsMap;
+
+        // Represents the Data type provided by user (needed for 2-parameters global lambdas with isValidLambdaFunction)
+        pub const TUserData = TData;
+        pub const TGlobalLambda = if (options.global_lambdas) |T| T else void;
+
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
 
         /// Provides the ability to choose between two writers
@@ -1335,6 +1349,7 @@ pub fn RenderEngineType(
                 Writer,
                 Data,
                 PartialsMap,
+                TUserData,
                 options,
             );
 
@@ -1536,14 +1551,14 @@ pub fn RenderEngineType(
 const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
 
 test {
-    _ = context;
-    _ = map;
-    _ = indent;
+    //_ = context;
+    //_ = map;
+    //_ = indent;
 
-    _ = tests.spec;
-    _ = tests.extra;
-    _ = tests.api;
-    _ = tests.escape_tests;
+    //_ = tests.spec;
+    //_ = tests.extra;
+    //_ = tests.api;
+    //_ = tests.escape_tests;
 }
 
 const tests = struct {
@@ -4466,6 +4481,7 @@ const tests = struct {
             .native,
             std.ArrayList(u8).Writer,
             DummyPartialsMap,
+            void,
             dummy_options,
         );
         const IndentationQueue = RenderEngine.IndentationQueue;

@@ -26,12 +26,14 @@ const LambdaInvokerType = lambda.LambdaInvokerType;
 pub fn InvokerType(
     comptime Writer: type,
     comptime PartialsMap: type,
+    comptime TUserData: type,
     comptime options: RenderOptions,
 ) type {
     const RenderEngine = rendering.RenderEngineType(
         .native,
         Writer,
         PartialsMap,
+        TUserData,
         options,
     );
     const Context = RenderEngine.Context;
@@ -197,7 +199,24 @@ pub fn InvokerType(
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
                             // TODO: How to pass Data type when TValue is the global lambda type here ??
-                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
+                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(
+                                if (((std.meta.activeTag(@typeInfo(@TypeOf(action_param))) == .Struct and
+                                      @hasDecl(@TypeOf(action_param), "TGlobalLambda") and
+                                      @hasDecl(@TypeOf(action_param), "TUserData")) or
+                                     (std.meta.activeTag(@typeInfo(@TypeOf(action_param))) == .Pointer and
+                                      std.meta.activeTag(@typeInfo(@typeInfo(@TypeOf(action_param)).Pointer.child)) == .Struct and
+                                      @hasDecl(@TypeOf(action_param.*), "TGlobalLambda") and
+                                      @hasDecl(@TypeOf(action_param.*), "TUserData"))) and
+                                    action_param.TGlobalLambda == TValue) action_param.TUserData else TValue, @TypeOf(bound_fn));
+                                std.debug.print("decl = {s}, is_valid_lambda = {}, TValue = {s}\n", .{decl.name, is_valid_lambda, @typeName(TValue)});
+                                //comptime if (((std.meta.activeTag(@typeInfo(@TypeOf(action_param))) == .Struct and
+                                //      @hasDecl(@TypeOf(action_param), "TGlobalLambda") and
+                                //      @hasDecl(@TypeOf(action_param), "TUserData")) or
+                                //     (std.meta.activeTag(@typeInfo(@TypeOf(action_param))) == .Pointer and
+                                //      std.meta.activeTag(@typeInfo(@typeInfo(@TypeOf(action_param)).Pointer.child)) == .Struct and
+                                //      @hasDecl(@TypeOf(action_param.*), "TGlobalLambda") and
+                                //      @hasDecl(@TypeOf(action_param.*), "TUserData"))) and
+                                //    action_param.TGlobalLambda == TValue) std.debug.print("decl = {s}, is_valid_lambda = {}, TValue = {s}, TGlobalLambda = {s}\n", .{decl.name, is_valid_lambda, @typeName(TValue), @typeName(action_param.TGlobalLambda)}) else @compileLog(@TypeOf(action_param));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
                                     return try getLambda(
@@ -460,7 +479,7 @@ pub fn InvokerType(
             const escape: Escape = params.@"2";
             const delimiters: Delimiters = params.@"3";
 
-            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, options);
+            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, TUserData,  options);
             var impl = Impl{
                 .data_render = data_render,
                 .escape = escape,

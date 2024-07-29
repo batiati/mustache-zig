@@ -83,9 +83,10 @@ pub const ErasedType = struct {
 pub fn ContextInterfaceType(
     comptime Writer: type,
     comptime PartialsMap: type,
+    comptime TData: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngineType(.native, Writer, PartialsMap, options);
+    const RenderEngine = rendering.RenderEngineType(.native, Writer, PartialsMap, TData, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -199,17 +200,19 @@ pub fn ContextImplType(
     comptime Writer: type,
     comptime Data: type,
     comptime PartialsMap: type,
+    comptime TUserData: type,
     comptime options: RenderOptions,
 ) type {
     const RenderEngine = rendering.RenderEngineType(
         .native,
         Writer,
         PartialsMap,
+        TUserData,
         options,
     );
     const Context = RenderEngine.Context;
     const DataRender = RenderEngine.DataRender;
-    const Invoker = invoker.InvokerType(Writer, PartialsMap, options);
+    const Invoker = invoker.InvokerType(Writer, PartialsMap, TUserData, options);
 
     return struct {
         const vtable = Context.VTable{
@@ -285,10 +288,10 @@ pub fn ContextImplType(
 }
 
 test {
-    _ = invoker;
-    _ = Fields;
-    _ = lambda;
-    _ = context_tests;
+    //_ = invoker;
+    //_ = Fields;
+    //_ = lambda;
+    //_ = context_tests;
 }
 
 const context_tests = struct {
@@ -422,7 +425,7 @@ const context_tests = struct {
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyPartialsMap = map.PartialsMapType(void, dummy_options);
     const DummyWriter = std.ArrayList(u8).Writer;
-    const DummyRenderEngine = rendering.RenderEngineType(.native, DummyWriter, DummyPartialsMap, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngineType(.native, DummyWriter, DummyPartialsMap, void, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
     const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });

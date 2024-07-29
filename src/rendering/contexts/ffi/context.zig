@@ -27,9 +27,10 @@ const extern_types = @import("../../../ffi/extern_types.zig");
 pub fn ContextType(
     comptime Writer: type,
     comptime PartialsMap: type,
+    comptime TUserData: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngineType(.ffi, Writer, PartialsMap, options);
+    const RenderEngine = rendering.RenderEngineType(.ffi, Writer, PartialsMap, TUserData, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -381,7 +382,7 @@ const context_tests = struct {
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyPartialsMap = map.PartialsMapType(void, dummy_options);
     const DummyWriter = std.ArrayList(u8).Writer;
-    const DummyRenderEngine = rendering.RenderEngineType(.ffi, DummyWriter, DummyPartialsMap, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngineType(.ffi, DummyWriter, DummyPartialsMap, void, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
     const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
