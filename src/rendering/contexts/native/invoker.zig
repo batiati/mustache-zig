@@ -74,7 +74,7 @@ pub fn InvokerType(
 
                     const ctx = Fields.getRuntimeValue(data);
 
-                    if (comptime lambda.isLambdaInvoker(Data)) {
+                    if (comptime lambda.isLambdaInvoker(if (@hasField(@TypeOf(action_param), "0") and DataRender.TGlobalLambdas == Data) TUserData else Data)) {
                         return PathResolution{ .lambda = try action_fn(action_param, ctx) };
                     } else {
                         if (path.len > 0) {
@@ -200,23 +200,7 @@ pub fn InvokerType(
                             const bound_fn = @field(TValue, decl.name);
                             // TODO: How to pass Data type when TValue is the global lambda type here ??
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(
-                                if (((std.meta.activeTag(@typeInfo(@TypeOf(action_param))) == .Struct and
-                                      @hasDecl(@TypeOf(action_param), "TGlobalLambda") and
-                                      @hasDecl(@TypeOf(action_param), "TUserData")) or
-                                     (std.meta.activeTag(@typeInfo(@TypeOf(action_param))) == .Pointer and
-                                      std.meta.activeTag(@typeInfo(@typeInfo(@TypeOf(action_param)).Pointer.child)) == .Struct and
-                                      @hasDecl(@TypeOf(action_param.*), "TGlobalLambda") and
-                                      @hasDecl(@TypeOf(action_param.*), "TUserData"))) and
-                                    action_param.TGlobalLambda == TValue) action_param.TUserData else TValue, @TypeOf(bound_fn));
-                                std.debug.print("decl = {s}, is_valid_lambda = {}, TValue = {s}\n", .{decl.name, is_valid_lambda, @typeName(TValue)});
-                                //comptime if (((std.meta.activeTag(@typeInfo(@TypeOf(action_param))) == .Struct and
-                                //      @hasDecl(@TypeOf(action_param), "TGlobalLambda") and
-                                //      @hasDecl(@TypeOf(action_param), "TUserData")) or
-                                //     (std.meta.activeTag(@typeInfo(@TypeOf(action_param))) == .Pointer and
-                                //      std.meta.activeTag(@typeInfo(@typeInfo(@TypeOf(action_param)).Pointer.child)) == .Struct and
-                                //      @hasDecl(@TypeOf(action_param.*), "TGlobalLambda") and
-                                //      @hasDecl(@TypeOf(action_param.*), "TUserData"))) and
-                                //    action_param.TGlobalLambda == TValue) std.debug.print("decl = {s}, is_valid_lambda = {}, TValue = {s}, TGlobalLambda = {s}\n", .{decl.name, is_valid_lambda, @typeName(TValue), @typeName(action_param.TGlobalLambda)}) else @compileLog(@TypeOf(action_param));
+                                if (@hasField(@TypeOf(action_param), "0") and DataRender.TGlobalLambdas == TValue) TUserData else TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
                                     return try getLambda(
@@ -251,13 +235,16 @@ pub fn InvokerType(
                     const LambdaInvoker = if (params_len == 1)
                         LambdaInvokerType(void, TFn)
                     else
-                        LambdaInvokerType(TData, TFn);
+                        LambdaInvokerType(if (@hasField(@TypeOf(action_param), "0") and DataRender.TGlobalLambdas == TData) TUserData else TData, TFn);
 
                     // TData is likely a pointer, or a primitive value (See Field.byValue)
                     // This struct will be copied by value to the lambda context
                     const invoker = LambdaInvoker{
                         .bound_fn = bound_fn,
-                        .data = if (params_len == 1) {} else data,
+                        .data = if (params_len == 1) {}
+                                else if (@hasField(@TypeOf(action_param), "0") and DataRender.TGlobalLambdas == TData)
+                                    action_param.@"0".stack.ctx.ctx.get(TUserData)
+                                else data,
                     };
 
                     return PathResolution{ .lambda = try action_fn(action_param, invoker) };
@@ -376,7 +363,7 @@ pub fn InvokerType(
         ) PathResolutionType(Context) {
             const GetPathInvoker = PathInvokerType(error{}, Context, getAction);
             return GetPathInvoker.call(
-                {},
+                .{},
                 data,
                 path,
                 index,
@@ -409,7 +396,7 @@ pub fn InvokerType(
         ) PathResolutionType(usize) {
             const CapacityHintPathInvoker = PathInvokerType(error{}, usize, capacityHintAction);
             return CapacityHintPathInvoker.call(
-                data_render,
+                .{ data_render },
                 data,
                 path,
                 null,
@@ -437,8 +424,8 @@ pub fn InvokerType(
             );
         }
 
-        fn getAction(param: void, value: anytype) error{}!Context {
-            _ = param;
+        fn getAction(params: anytype, value: anytype) error{}!Context {
+            _ = params;
             return RenderEngine.getContextType(value);
         }
 
@@ -459,7 +446,8 @@ pub fn InvokerType(
             params: anytype,
             value: anytype,
         ) error{}!usize {
-            return params.valueCapacityHint(value);
+            const data_render: *DataRender = params.@"0";
+            return data_render.valueCapacityHint(value);
         }
 
         fn expandLambdaAction(
@@ -479,7 +467,7 @@ pub fn InvokerType(
             const escape: Escape = params.@"2";
             const delimiters: Delimiters = params.@"3";
 
-            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, TUserData,  options);
+            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, TUserData, options);
             var impl = Impl{
                 .data_render = data_render,
                 .escape = escape,

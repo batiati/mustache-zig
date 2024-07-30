@@ -753,8 +753,6 @@ pub fn RenderEngineType(
         pub const PartialsMap = TPartialsMap;
 
         // Represents the Data type provided by user (needed for 2-parameters global lambdas with isValidLambdaFunction)
-        pub const TUserData = TData;
-        pub const TGlobalLambda = if (options.global_lambdas) |T| T else void;
 
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
 
@@ -771,6 +769,8 @@ pub fn RenderEngineType(
 
         pub const DataRender = struct {
             pub const Error = Allocator.Error || Writer.Error;
+            pub const TUserData = TData;
+            pub const TGlobalLambdas = switch (options) { inline else => |value| if (value.global_lambdas) |T| T else void, };
 
             out_writer: OutWriter,
             stack: *const ContextStack,
@@ -1349,7 +1349,7 @@ pub fn RenderEngineType(
                 Writer,
                 Data,
                 PartialsMap,
-                TUserData,
+                TData,
                 options,
             );
 
