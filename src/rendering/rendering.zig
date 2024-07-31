@@ -619,7 +619,7 @@ fn internalRender(
 
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
-    const Data = @TypeOf (data);
+    const Data = @TypeOf(data);
     const RenderEngine = RenderEngineType(
         context_source,
         @TypeOf(writer),
@@ -647,7 +647,7 @@ fn internalAllocRender(
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
-    const Data = @TypeOf (data);
+    const Data = @TypeOf(data);
     const RenderEngine = RenderEngineType(
         context_source,
         Writer,
@@ -682,7 +682,7 @@ fn internalCollect(
 
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
-    const Data = @TypeOf (data);
+    const Data = @TypeOf(data);
     const RenderEngine = RenderEngineType(
         context_source,
         @TypeOf(writer),
@@ -716,7 +716,7 @@ fn internalAllocCollect(
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
-    const Data = @TypeOf (data);
+    const Data = @TypeOf(data);
     const RenderEngine = RenderEngineType(
         context_source,
         Writer,
@@ -769,7 +769,9 @@ pub fn RenderEngineType(
 
         pub const DataRender = struct {
             pub const Error = Allocator.Error || Writer.Error;
-            pub const TGlobalLambdas = switch (options) { inline else => |value| if (value.global_lambdas) |T| T else void, };
+            pub const TGlobalLambdas = switch (options) {
+                inline else => |value| if (value.global_lambdas) |T| T else void,
+            };
 
             out_writer: OutWriter,
             stack: *const ContextStack,

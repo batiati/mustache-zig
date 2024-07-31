@@ -99,14 +99,18 @@ test "interpolation: struct + LambdaContext" {
     const allocator = std.testing.allocator;
 
     const template = "{{upper}}";
-    var text = Dummy{ .content = lower_text, };
+    var text = Dummy{
+        .content = lower_text,
+    };
     const ptr_text = &text;
 
     const result = try mustache.allocRenderTextWithOptions(
         allocator,
         template,
         ptr_text,
-        .{ .global_lambdas = PocLambdas, },
+        .{
+            .global_lambdas = PocLambdas,
+        },
     );
     defer allocator.free(result);
 

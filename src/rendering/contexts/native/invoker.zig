@@ -199,8 +199,7 @@ pub fn InvokerType(
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
                             // TODO: How to pass Data type when TValue is the global lambda type here ??
-                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(
-                                if (action_param.len > 0 and DataRender.TGlobalLambdas == TValue) UserData else TValue, @TypeOf(bound_fn));
+                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(if (action_param.len > 0 and DataRender.TGlobalLambdas == TValue) UserData else TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
                                     return try getLambda(
@@ -241,10 +240,10 @@ pub fn InvokerType(
                     // This struct will be copied by value to the lambda context
                     const invoker = LambdaInvoker{
                         .bound_fn = bound_fn,
-                        .data = if (params_len == 1) {}
-                                else if (action_param.len > 0 and DataRender.TGlobalLambdas == TData)
-                                    action_param.@"0".stack.ctx.ctx.get(UserData)
-                                else data,
+                        .data = if (params_len == 1) {} else if (action_param.len > 0 and DataRender.TGlobalLambdas == TData)
+                            action_param.@"0".stack.ctx.ctx.get(UserData)
+                        else
+                            data,
                     };
 
                     return PathResolution{ .lambda = try action_fn(action_param, invoker) };
@@ -396,7 +395,7 @@ pub fn InvokerType(
         ) PathResolutionType(usize) {
             const CapacityHintPathInvoker = PathInvokerType(error{}, usize, capacityHintAction);
             return CapacityHintPathInvoker.call(
-                .{ data_render },
+                .{data_render},
                 data,
                 path,
                 null,
