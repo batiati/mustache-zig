@@ -362,7 +362,7 @@ pub fn InvokerType(
         ) PathResolutionType(Context) {
             const GetPathInvoker = PathInvokerType(error{}, Context, getAction);
             return GetPathInvoker.call(
-                .{ data_render },
+                .{data_render},
                 data,
                 path,
                 index,

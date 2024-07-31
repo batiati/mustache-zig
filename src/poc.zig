@@ -124,14 +124,18 @@ test "section: struct + LambdaContext" {
     const allocator = std.testing.allocator;
 
     const template = "{{#lower_and_upper}}{{content}}{{/lower_and_upper}}";
-    var text = Text{ .content = lower_text, };
+    var text = Text{
+        .content = lower_text,
+    };
     const ptr_text = &text;
 
     const result = try mustache.allocRenderTextWithOptions(
         allocator,
         template,
         ptr_text,
-        .{ .global_lambdas = PocLambdas, },
+        .{
+            .global_lambdas = PocLambdas,
+        },
     );
     defer allocator.free(result);
 
@@ -144,15 +148,14 @@ test "interpolation: conflict between ConflictingText lambda and global lambda" 
 
     const template = "{{upperInterpolationConflict}}";
 
-    const text = ConflictingText{ .content = lower_text, };
+    const text = ConflictingText{
+        .content = lower_text,
+    };
     const ptr_text = &text;
 
-    const result = try mustache.allocRenderTextWithOptions(
-        allocator,
-        template,
-        ptr_text,
-        .{ .global_lambdas = PocLambdas, }
-    );
+    const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{
+        .global_lambdas = PocLambdas,
+    });
     defer allocator.free(result);
 
     try std.testing.expectEqualStrings(upper_text, result);
@@ -164,15 +167,14 @@ test "section: conflict between ConflictingText lambda and global lambda" {
 
     const template = "{{#upperSectionConflict}}{{content}}{{/upperSectionConflict}}";
 
-    const text = ConflictingText{ .content = lower_text, };
+    const text = ConflictingText{
+        .content = lower_text,
+    };
     const ptr_text = &text;
 
-    const result = try mustache.allocRenderTextWithOptions(
-        allocator,
-        template,
-        ptr_text,
-        .{ .global_lambdas = PocLambdas, }
-    );
+    const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{
+        .global_lambdas = PocLambdas,
+    });
     defer allocator.free(result);
 
     try std.testing.expectEqualStrings(lower_text ++ " " ++ upper_text, result);
