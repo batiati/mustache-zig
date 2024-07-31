@@ -100,6 +100,7 @@ pub fn ContextInterfaceType(
         const VTable = struct {
             get: *const fn (
                 *const ErasedType,
+                *DataRender,
                 Element.Path,
                 ?usize,
             ) PathResolutionType(ContextInterface),
@@ -124,17 +125,18 @@ pub fn ContextInterfaceType(
             ) (Allocator.Error || Writer.Error)!PathResolutionType(void),
         };
 
-        pub const ContextIterator = ContextIteratorType(ContextInterface);
+        pub const ContextIterator = ContextIteratorType(ContextInterface, DataRender);
 
         ctx: ErasedType = undefined,
         vtable: *const VTable,
 
         pub inline fn get(
             self: ContextInterface,
+            data_render: *DataRender,
             path: Element.Path,
             index: ?usize,
         ) PathResolutionType(ContextInterface) {
-            return self.vtable.get(&self.ctx, path, index);
+            return self.vtable.get(&self.ctx, data_render, path, index);
         }
 
         pub inline fn capacityHint(
@@ -147,13 +149,14 @@ pub fn ContextInterfaceType(
 
         pub fn iterator(
             self: *const ContextInterface,
+            data_render: *DataRender,
             path: Element.Path,
         ) PathResolutionType(ContextIterator) {
-            const result = self.vtable.get(&self.ctx, path, 0);
+            const result = self.vtable.get(&self.ctx, data_render, path, 0);
 
             return switch (result) {
                 .field => |item| .{
-                    .field = ContextIterator.initSequence(self, path, item),
+                    .field = ContextIterator.initSequence(self, path, data_render, item),
                 },
                 .iterator_consumed => .{
                     .field = ContextIterator.initEmpty(),
@@ -231,10 +234,12 @@ pub fn ContextImplType(
 
         fn get(
             ctx: *const ErasedType,
+            data_render: *DataRender,
             path: Element.Path,
             index: ?usize,
         ) PathResolutionType(Context) {
             return Invoker.get(
+                data_render,
                 ctx.get(Data),
                 path,
                 index,
@@ -1025,6 +1030,8 @@ const context_tests = struct {
 
         const writer = list.writer();
 
+        var data_render: DummyRenderEngine.DataRender = undefined;
+
         // Person
 
         var person_ctx = DummyRenderEngine.getContextType(&person);
@@ -1042,7 +1049,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (person_ctx.get(path, null)) {
+            switch (person_ctx.get(&data_render, path, null)) {
                 .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1064,7 +1071,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (address_ctx.get(path, null)) {
+            switch (address_ctx.get(&data_render, path, null)) {
                 .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1098,6 +1105,8 @@ const context_tests = struct {
 
         const writer = list.writer();
 
+        var data_render: DummyRenderEngine.DataRender = undefined;
+
         // Person
 
         var person_ctx = DummyRenderEngine.getContextType(&person);
@@ -1115,7 +1124,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "indication");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (person_ctx.get(path, null)) {
+            switch (person_ctx.get(&data_render, path, null)) {
                 .field => |found| break :indication_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1137,7 +1146,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (indication_ctx.get(path, null)) {
+            switch (indication_ctx.get(&data_render, path, null)) {
                 .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1159,7 +1168,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "street");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (address_ctx.get(path, null)) {
+            switch (address_ctx.get(&data_render, path, null)) {
                 .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1192,12 +1201,14 @@ const context_tests = struct {
 
         var person_ctx = DummyRenderEngine.getContextType(&person);
 
+        var data_render: DummyRenderEngine.DataRender = undefined;
+
         const address_ctx = address_ctx: {
             const path = try expectPath(allocator, "address");
             defer Element.destroyPath(allocator, false, path);
 
             // Person.address
-            switch (person_ctx.get(path, null)) {
+            switch (person_ctx.get(&data_render, path, null)) {
                 .field => |found| break :address_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1210,7 +1221,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "wrong_address");
             defer Element.destroyPath(allocator, false, path);
 
-            const wrong_address = person_ctx.get(path, null);
+            const wrong_address = person_ctx.get(&data_render, path, null);
             try testing.expect(wrong_address == .not_found_in_context);
         }
 
@@ -1219,7 +1230,7 @@ const context_tests = struct {
             defer Element.destroyPath(allocator, false, path);
 
             // Person.address.street
-            switch (address_ctx.get(path, null)) {
+            switch (address_ctx.get(&data_render, path, null)) {
                 .field => |found| break :street_ctx found,
                 else => {
                     try testing.expect(false);
@@ -1232,7 +1243,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "wrong_street");
             defer Element.destroyPath(allocator, false, path);
 
-            const wrong_street = address_ctx.get(path, null);
+            const wrong_street = address_ctx.get(&data_render, path, null);
             try testing.expect(wrong_street == .not_found_in_context);
         }
 
@@ -1240,7 +1251,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "len");
             defer Element.destroyPath(allocator, false, path);
             // Person.address.street.len
-            const street_len_ctx = switch (street_ctx.get(path, null)) {
+            const street_len_ctx = switch (street_ctx.get(&data_render, path, null)) {
                 .field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1254,7 +1265,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "wrong_len");
             defer Element.destroyPath(allocator, false, path);
 
-            const wrong_len = street_ctx.get(path, null);
+            const wrong_len = street_ctx.get(&data_render, path, null);
             try testing.expect(wrong_len == .not_found_in_context);
         }
     }
@@ -1272,10 +1283,12 @@ const context_tests = struct {
         // Person
         var ctx = DummyRenderEngine.getContextType(&person);
 
+        var data_render: DummyRenderEngine.DataRender = undefined;
+
         const path = try expectPath(allocator, "items");
         defer Element.destroyPath(allocator, false, path);
 
-        var iterator = switch (ctx.iterator(path)) {
+        var iterator = switch (ctx.iterator(&data_render, path)) {
             .field => |found| found,
             else => {
                 try testing.expect(false);
@@ -1312,6 +1325,7 @@ const context_tests = struct {
 
         // Person
         var person = getPerson();
+        var data_render: DummyRenderEngine.DataRender = undefined;
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         var ctx = DummyRenderEngine.getContextType(&person);
@@ -1321,7 +1335,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "active");
             defer Element.destroyPath(allocator, false, path);
 
-            var iterator = switch (ctx.iterator(path)) {
+            var iterator = switch (ctx.iterator(&data_render, path)) {
                 .field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1341,7 +1355,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "indication.active");
             defer Element.destroyPath(allocator, false, path);
 
-            var iterator = switch (ctx.iterator(path)) {
+            var iterator = switch (ctx.iterator(&data_render, path)) {
                 .field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1359,6 +1373,7 @@ const context_tests = struct {
 
         // Person
         var person = getPerson();
+        var data_render: DummyRenderEngine.DataRender = undefined;
         defer if (person.indication) |indication| allocator.destroy(indication);
 
         var ctx = DummyRenderEngine.getContextType(&person);
@@ -1368,7 +1383,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "additional_information");
             defer Element.destroyPath(allocator, false, path);
 
-            var iterator = switch (ctx.iterator(path)) {
+            var iterator = switch (ctx.iterator(&data_render, path)) {
                 .field => |found| found,
                 else => {
                     try testing.expect(false);
@@ -1388,7 +1403,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "indication.additional_information");
             defer Element.destroyPath(allocator, false, path);
 
-            var iterator = switch (ctx.iterator(path)) {
+            var iterator = switch (ctx.iterator(&data_render, path)) {
                 .field => |found| found,
                 else => {
                     try testing.expect(false);

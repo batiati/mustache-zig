@@ -41,7 +41,7 @@ pub fn ContextType(
     return struct {
         const Context = @This();
 
-        pub const ContextIterator = ContextIteratorType(Context);
+        pub const ContextIterator = ContextIteratorType(Context, DataRender);
 
         pub const ContextStack = struct {
             parent: ?*const @This(),
@@ -56,7 +56,7 @@ pub fn ContextType(
             };
         }
 
-        pub fn get(self: Context, path: Element.Path, index: ?usize) PathResolutionType(Context) {
+        pub fn get(self: Context, _: *DataRender, path: Element.Path, index: ?usize) PathResolutionType(Context) {
             const value = getJsonValue(.Root, self.ctx, path, index);
 
             return switch (value) {
@@ -149,13 +149,14 @@ pub fn ContextType(
 
         pub fn iterator(
             self: *const Context,
+            data_render: *DataRender,
             path: Element.Path,
         ) PathResolutionType(ContextIterator) {
-            const result = self.get(path, 0);
+            const result = self.get(data_render, path, 0);
 
             return switch (result) {
                 .field => |item| .{
-                    .field = ContextIterator.initSequence(self, path, item),
+                    .field = ContextIterator.initSequence(self, path, data_render, item),
                 },
                 .iterator_consumed => .{
                     .field = ContextIterator.initEmpty(),

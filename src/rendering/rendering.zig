@@ -1022,7 +1022,7 @@ pub fn RenderEngineType(
                 var level: ?*const ContextStack = self.stack;
 
                 while (level) |current| : (level = current.parent) {
-                    switch (current.ctx.iterator(path)) {
+                    switch (current.ctx.iterator(self, path)) {
                         .field => |found| return found,
 
                         .lambda => |found| return found,
@@ -1036,7 +1036,7 @@ pub fn RenderEngineType(
                             // Should try against the parent context
                             var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
                             while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                                const path_resolution = current_global_lambdas.ctx.iterator(path);
+                                const path_resolution = current_global_lambdas.ctx.iterator(self, path);
                                 switch (path_resolution) {
                                     .field, .lambda => |found| return found,
                                     .iterator_consumed, .chain_broken => break,

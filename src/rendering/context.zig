@@ -99,7 +99,7 @@ pub fn ContextImplType(
     };
 }
 
-pub fn ContextIteratorType(comptime ContextInterface: type) type {
+pub fn ContextIteratorType(comptime ContextInterface: type, comptime DataRender: type) type {
     return struct {
         const Iterator = @This();
 
@@ -109,6 +109,7 @@ pub fn ContextIteratorType(comptime ContextInterface: type) type {
             sequence: struct {
                 context: *const ContextInterface,
                 path: Element.Path,
+                data_render: *DataRender,
                 state: union(enum) {
                     fetching: struct {
                         item: ContextInterface,
@@ -118,7 +119,7 @@ pub fn ContextIteratorType(comptime ContextInterface: type) type {
                 },
 
                 fn fetch(self: @This(), index: usize) ?ContextInterface {
-                    const result = self.context.get(self.path, index);
+                    const result = self.context.get(self.data_render, self.path, index);
 
                     return switch (result) {
                         .field => |item| item,
@@ -146,6 +147,7 @@ pub fn ContextIteratorType(comptime ContextInterface: type) type {
         pub fn initSequence(
             parent_ctx: *const ContextInterface,
             path: Element.Path,
+            data_render: *DataRender,
             item: ContextInterface,
         ) Iterator {
             return .{
@@ -153,6 +155,7 @@ pub fn ContextIteratorType(comptime ContextInterface: type) type {
                     .sequence = .{
                         .context = parent_ctx,
                         .path = path,
+                        .data_render = data_render,
                         .state = .{
                             .fetching = .{
                                 .item = item,

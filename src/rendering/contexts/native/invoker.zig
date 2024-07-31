@@ -74,7 +74,7 @@ pub fn InvokerType(
 
                     const ctx = Fields.getRuntimeValue(data);
 
-                    if (comptime lambda.isLambdaInvoker(if (action_param.len > 0 and DataRender.TGlobalLambdas == Data) UserData else Data)) {
+                    if (comptime lambda.isLambdaInvoker(if (DataRender.TGlobalLambdas == Data) UserData else Data)) {
                         return PathResolution{ .lambda = try action_fn(action_param, ctx) };
                     } else {
                         if (path.len > 0) {
@@ -198,8 +198,7 @@ pub fn InvokerType(
                         const has_fn = comptime meta.hasFn(TValue, decl.name);
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
-                            // TODO: How to pass Data type when TValue is the global lambda type here ??
-                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(if (action_param.len > 0 and DataRender.TGlobalLambdas == TValue) UserData else TValue, @TypeOf(bound_fn));
+                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(if (DataRender.TGlobalLambdas == TValue) UserData else TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
                                     return try getLambda(
@@ -234,13 +233,13 @@ pub fn InvokerType(
                     const LambdaInvoker = if (params_len == 1)
                         LambdaInvokerType(void, TFn)
                     else
-                        LambdaInvokerType(if (action_param.len > 0 and DataRender.TGlobalLambdas == TData) UserData else TData, TFn);
+                        LambdaInvokerType(if (DataRender.TGlobalLambdas == TData) UserData else TData, TFn);
 
                     // TData is likely a pointer, or a primitive value (See Field.byValue)
                     // This struct will be copied by value to the lambda context
                     const invoker = LambdaInvoker{
                         .bound_fn = bound_fn,
-                        .data = if (params_len == 1) {} else if (action_param.len > 0 and DataRender.TGlobalLambdas == TData)
+                        .data = if (params_len == 1) {} else if (DataRender.TGlobalLambdas == TData)
                             action_param.@"0".stack.ctx.ctx.get(UserData)
                         else
                             data,
@@ -356,13 +355,14 @@ pub fn InvokerType(
         }
 
         pub inline fn get(
+            data_render: *DataRender,
             data: anytype,
             path: Element.Path,
             index: ?usize,
         ) PathResolutionType(Context) {
             const GetPathInvoker = PathInvokerType(error{}, Context, getAction);
             return GetPathInvoker.call(
-                .{},
+                .{ data_render },
                 data,
                 path,
                 index,
