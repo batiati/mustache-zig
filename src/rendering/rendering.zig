@@ -744,11 +744,11 @@ pub fn RenderEngineType(
     comptime context_source: ContextSource,
     comptime Writer: type,
     comptime TPartialsMap: type,
-    comptime TData: type,
+    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
     return struct {
-        pub const Context = context.ContextType(context_source, Writer, PartialsMap, TData, options);
+        pub const Context = context.ContextType(context_source, Writer, PartialsMap, UserData, options);
         pub const ContextStack = Context.ContextStack;
         pub const PartialsMap = TPartialsMap;
 
@@ -769,7 +769,6 @@ pub fn RenderEngineType(
 
         pub const DataRender = struct {
             pub const Error = Allocator.Error || Writer.Error;
-            pub const TUserData = TData;
             pub const TGlobalLambdas = switch (options) { inline else => |value| if (value.global_lambdas) |T| T else void, };
 
             out_writer: OutWriter,
@@ -1349,7 +1348,7 @@ pub fn RenderEngineType(
                 Writer,
                 Data,
                 PartialsMap,
-                TData,
+                UserData,
                 options,
             );
 
@@ -1551,14 +1550,14 @@ pub fn RenderEngineType(
 const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
 
 test {
-    //_ = context;
-    //_ = map;
-    //_ = indent;
+    _ = context;
+    _ = map;
+    _ = indent;
 
-    //_ = tests.spec;
-    //_ = tests.extra;
-    //_ = tests.api;
-    //_ = tests.escape_tests;
+    _ = tests.spec;
+    _ = tests.extra;
+    _ = tests.api;
+    _ = tests.escape_tests;
 }
 
 const tests = struct {

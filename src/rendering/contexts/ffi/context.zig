@@ -27,10 +27,10 @@ const extern_types = @import("../../../ffi/extern_types.zig");
 pub fn ContextType(
     comptime Writer: type,
     comptime PartialsMap: type,
-    comptime TUserData: type,
+    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngineType(.ffi, Writer, PartialsMap, TUserData, options);
+    const RenderEngine = rendering.RenderEngineType(.ffi, Writer, PartialsMap, UserData, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {

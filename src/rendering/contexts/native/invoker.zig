@@ -26,14 +26,14 @@ const LambdaInvokerType = lambda.LambdaInvokerType;
 pub fn InvokerType(
     comptime Writer: type,
     comptime PartialsMap: type,
-    comptime TUserData: type,
+    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
     const RenderEngine = rendering.RenderEngineType(
         .native,
         Writer,
         PartialsMap,
-        TUserData,
+        UserData,
         options,
     );
     const Context = RenderEngine.Context;
@@ -74,7 +74,7 @@ pub fn InvokerType(
 
                     const ctx = Fields.getRuntimeValue(data);
 
-                    if (comptime lambda.isLambdaInvoker(if (@hasField(@TypeOf(action_param), "0") and DataRender.TGlobalLambdas == Data) TUserData else Data)) {
+                    if (comptime lambda.isLambdaInvoker(if (action_param.len > 0 and DataRender.TGlobalLambdas == Data) UserData else Data)) {
                         return PathResolution{ .lambda = try action_fn(action_param, ctx) };
                     } else {
                         if (path.len > 0) {
@@ -200,7 +200,7 @@ pub fn InvokerType(
                             const bound_fn = @field(TValue, decl.name);
                             // TODO: How to pass Data type when TValue is the global lambda type here ??
                             const is_valid_lambda = comptime lambda.isValidLambdaFunction(
-                                if (@hasField(@TypeOf(action_param), "0") and DataRender.TGlobalLambdas == TValue) TUserData else TValue, @TypeOf(bound_fn));
+                                if (action_param.len > 0 and DataRender.TGlobalLambdas == TValue) UserData else TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
                                     return try getLambda(
@@ -235,15 +235,15 @@ pub fn InvokerType(
                     const LambdaInvoker = if (params_len == 1)
                         LambdaInvokerType(void, TFn)
                     else
-                        LambdaInvokerType(if (@hasField(@TypeOf(action_param), "0") and DataRender.TGlobalLambdas == TData) TUserData else TData, TFn);
+                        LambdaInvokerType(if (action_param.len > 0 and DataRender.TGlobalLambdas == TData) UserData else TData, TFn);
 
                     // TData is likely a pointer, or a primitive value (See Field.byValue)
                     // This struct will be copied by value to the lambda context
                     const invoker = LambdaInvoker{
                         .bound_fn = bound_fn,
                         .data = if (params_len == 1) {}
-                                else if (@hasField(@TypeOf(action_param), "0") and DataRender.TGlobalLambdas == TData)
-                                    action_param.@"0".stack.ctx.ctx.get(TUserData)
+                                else if (action_param.len > 0 and DataRender.TGlobalLambdas == TData)
+                                    action_param.@"0".stack.ctx.ctx.get(UserData)
                                 else data,
                     };
 
@@ -467,7 +467,7 @@ pub fn InvokerType(
             const escape: Escape = params.@"2";
             const delimiters: Delimiters = params.@"3";
 
-            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, TUserData, options);
+            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, UserData, options);
             var impl = Impl{
                 .data_render = data_render,
                 .escape = escape,

@@ -21,6 +21,18 @@ const PocLambdas = struct {
         try ctx.write(text.content);
     }
 
+    pub fn lower_and_upper(text: *Dummy, ctx: mustache.LambdaContext) !void {
+        _ = text;
+        const content = try ctx.renderAlloc(ctx.allocator.?, ctx.inner_text);
+        defer ctx.allocator.?.free(content);
+        //for (content, 0..) |char, i| {
+        //    content[i] = std.ascii.toUpper(char);
+        //}
+        //try ctx.write(text.content);
+        //try ctx.write(" ");
+        try ctx.write(content);
+    }
+
     // Conflicting methods
     pub fn upperSectionConflict(text: *const Text, ctx: mustache.LambdaContext) !void {
         _ = text;
@@ -94,7 +106,7 @@ test "interpolation: struct + LambdaContext" {
         allocator,
         template,
         ptr_text,
-        .{ .global_lambdas = PocLambdas, }
+        .{ .global_lambdas = PocLambdas, },
     );
     defer allocator.free(result);
 
@@ -105,19 +117,19 @@ test "interpolation: struct + LambdaContext" {
 //test "section: struct + LambdaContext" {
 //    const allocator = std.testing.allocator;
 //
-//    const template = "{{#upper}}{{content}}{{/upper}}";
-//    const text = Dummy{ .content = lower_text, };
+//    const template = "{{#lower_and_upper}}{{content}}{{/lower_and_upper}}";
+//    var text = Dummy{ .content = lower_text, };
 //    const ptr_text = &text;
 //
 //    const result = try mustache.allocRenderTextWithOptions(
 //        allocator,
 //        template,
 //        ptr_text,
-//        .{ .global_lambdas = PocLambdas, }
+//        .{ .global_lambdas = PocLambdas, },
 //    );
 //    defer allocator.free(result);
 //
-//    try std.testing.expectEqualStrings(bad_text, result);
+//    try std.testing.expectEqualStrings(lower_text ++ " " ++ upper_text, result);
 //    try ok(@src().fn_name);
 //}
 
