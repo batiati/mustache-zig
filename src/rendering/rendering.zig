@@ -657,7 +657,6 @@ fn internalAllocRender(
     );
 
     try RenderEngine.bufRender(
-        allocator,
         list.writer(),
         template,
         data,
@@ -1420,7 +1419,6 @@ pub fn RenderEngineType(
         }
 
         pub fn bufRender(
-            allocator: std.mem.Allocator,
             writer: std.ArrayList(u8).Writer,
             template: Template,
             data: anytype,
@@ -1456,7 +1454,7 @@ pub fn RenderEngineType(
                 .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
-                .allocator = allocator,
+                .allocator = writer.context.allocator,
             };
 
             try data_render.render(template.elements);
