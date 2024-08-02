@@ -481,7 +481,7 @@ pub fn InvokerType(
             data_render: *DataRender,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
-            if (comptime !stdx.isTuple(@TypeOf(params)) and params.len != 4) {
+            if (comptime !stdx.isTuple(@TypeOf(params)) and params.len != 3) {
                 @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
             }
 
