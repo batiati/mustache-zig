@@ -778,7 +778,6 @@ pub fn RenderEngineType(
             partials_map: PartialsMap,
             indentation_queue: *IndentationQueue,
             template_options: if (options == .template) *const TemplateOptions else void,
-            allocator: ?std.mem.Allocator = null,
 
             pub fn collect(self: *DataRender, allocator: Allocator, template: []const u8) !void {
                 switch (comptime options) {
@@ -1454,7 +1453,6 @@ pub fn RenderEngineType(
                 .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
-                .allocator = writer.context.allocator,
             };
 
             try data_render.render(template.elements);
@@ -1539,7 +1537,6 @@ pub fn RenderEngineType(
                 .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
-                .allocator = allocator,
             };
 
             try data_render.collect(allocator, template);

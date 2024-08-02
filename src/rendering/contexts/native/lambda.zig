@@ -50,7 +50,7 @@ pub fn LambdaContextImplType(
                 .ptr = self,
                 .vtable = &vtable,
                 .inner_text = inner_text,
-                .allocator = self.data_render.allocator,
+                .allocator = if (std.meta.activeTag(self.data_render.out_writer) == .buffer) self.data_render.out_writer.buffer.context.allocator else null,
             };
         }
 
