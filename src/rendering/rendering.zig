@@ -997,7 +997,7 @@ pub fn RenderEngineType(
                 }
 
                 // Try the global lambdas context
-                var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
+                var level_global_lambdas = self.stack_global_lambdas;
                 while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
                     path_resolution = try current_global_lambdas.ctx.interpolate(self, path, escape);
                     switch (path_resolution) {
@@ -1037,7 +1037,7 @@ pub fn RenderEngineType(
                 }
 
                 // Try the global lambdas context
-                var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
+                var level_global_lambdas = self.stack_global_lambdas;
                 while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
                     const path_resolution = current_global_lambdas.ctx.iterator(self, path);
                     switch (path_resolution) {
@@ -1291,7 +1291,7 @@ pub fn RenderEngineType(
                 }
 
                 // Try the global lambdas context
-                var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
+                var level_global_lambdas = self.stack_global_lambdas;
                 while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
                     path_resolution = current_global_lambdas.ctx.capacityHint(self, path);
                     switch (path_resolution) {
@@ -1397,11 +1397,11 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
-            var context_stack_global_lamdbas: ?ContextStack = null;
+            var context_stack_global_lambdas: ?ContextStack = null;
             switch (options) {
                 inline else => |value| {
                     if (value.global_lambdas) |global_lambdas| {
-                        context_stack_global_lamdbas = .{
+                        context_stack_global_lambdas = .{
                             .parent = null,
                             .ctx = getContextType(global_lambdas{}),
                         };
@@ -1413,7 +1413,7 @@ pub fn RenderEngineType(
                 .out_writer = .{ .writer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
-                .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
+                .stack_global_lambdas = if (context_stack_global_lambdas != null) &context_stack_global_lambdas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
             };
@@ -1438,11 +1438,11 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
-            var context_stack_global_lamdbas: ?ContextStack = null;
+            var context_stack_global_lambdas: ?ContextStack = null;
             switch (options) {
                 inline else => |value| {
                     if (value.global_lambdas) |global_lambdas| {
-                        context_stack_global_lamdbas = .{
+                        context_stack_global_lambdas = .{
                             .parent = null,
                             .ctx = getContextType(global_lambdas{}),
                         };
@@ -1454,7 +1454,7 @@ pub fn RenderEngineType(
                 .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
-                .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
+                .stack_global_lambdas = if (context_stack_global_lambdas != null) &context_stack_global_lambdas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
             };
@@ -1480,11 +1480,11 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
-            var context_stack_global_lamdbas: ?ContextStack = null;
+            var context_stack_global_lambdas: ?ContextStack = null;
             switch (options) {
                 inline else => |value| {
                     if (value.global_lambdas) |global_lambdas| {
-                        context_stack_global_lamdbas = .{
+                        context_stack_global_lambdas = .{
                             .parent = null,
                             .ctx = getContextType(global_lambdas{}),
                         };
@@ -1496,7 +1496,7 @@ pub fn RenderEngineType(
                 .out_writer = .{ .writer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
-                .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
+                .stack_global_lambdas = if (context_stack_global_lambdas != null) &context_stack_global_lambdas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
             };
@@ -1522,11 +1522,11 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
-            var context_stack_global_lamdbas: ?ContextStack = null;
+            var context_stack_global_lambdas: ?ContextStack = null;
             switch (options) {
                 inline else => |value| {
                     if (value.global_lambdas) |global_lambdas| {
-                        context_stack_global_lamdbas = .{
+                        context_stack_global_lambdas = .{
                             .parent = null,
                             .ctx = getContextType(global_lambdas{}),
                         };
@@ -1538,7 +1538,7 @@ pub fn RenderEngineType(
                 .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
-                .stack_global_lambdas = if (context_stack_global_lamdbas != null) &context_stack_global_lamdbas.? else null,
+                .stack_global_lambdas = if (context_stack_global_lambdas != null) &context_stack_global_lambdas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
             };
