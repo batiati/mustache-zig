@@ -747,12 +747,9 @@ pub fn RenderEngineType(
     comptime options: RenderOptions,
 ) type {
     return struct {
+        pub const PartialsMap = TPartialsMap;
         pub const Context = context.ContextType(context_source, Writer, PartialsMap, UserData, options);
         pub const ContextStack = Context.ContextStack;
-        pub const PartialsMap = TPartialsMap;
-
-        // Represents the Data type provided by user (needed for 2-parameters global lambdas with isValidLambdaFunction)
-
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
 
         /// Provides the ability to choose between two writers
@@ -969,46 +966,48 @@ pub fn RenderEngineType(
                 escape: Escape,
             ) (Allocator.Error || Writer.Error)!void {
                 var level: ?*const ContextStack = self.stack;
+                var path_resolution: context.PathResolutionType(void) = undefined;
 
                 while (level) |current| : (level = current.parent) {
-                    var path_resolution = try current.ctx.interpolate(self, path, escape);
+                    path_resolution = try current.ctx.interpolate(self, path, escape);
 
                     switch (path_resolution) {
                         .field => {
                             // Success, break the loop
-                            break;
+                            return;
                         },
 
                         .lambda => {
-
                             // Expand the lambda against the current context and break the loop
                             const expand_result = try current.ctx.expandLambda(self, path, "", escape, .{});
                             assert(expand_result == .lambda);
-                            break;
+                            return;
                         },
 
                         .iterator_consumed, .chain_broken => {
                             // Not rendered, but should NOT try against the parent context
-                            break;
+                            return;
                         },
 
                         .not_found_in_context => {
                             // Not rendered, should try against the parent context
-                            var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
-                            while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                                path_resolution = try current_global_lambdas.ctx.interpolate(self, path, escape);
-                                switch (path_resolution) {
-                                    .lambda => {
-                                        const expand_result = try current_global_lambdas.ctx.expandLambda(self, path, "", escape, .{});
-                                        assert(expand_result == .lambda);
-                                        break;
-                                    },
-                                    .iterator_consumed, .chain_broken, .field => break,
-                                    else => continue,
-                                }
-                            }
                             continue;
                         },
+                    }
+                }
+
+                // Try the global lambdas context
+                var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
+                while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
+                    path_resolution = try current_global_lambdas.ctx.interpolate(self, path, escape);
+                    switch (path_resolution) {
+                        .lambda => {
+                            const expand_result = try current_global_lambdas.ctx.expandLambda(self, path, "", escape, .{});
+                            assert(expand_result == .lambda);
+                            break;
+                        },
+                        .iterator_consumed, .chain_broken, .field => break,
+                        else => continue,
                     }
                 }
             }
@@ -1027,22 +1026,24 @@ pub fn RenderEngineType(
 
                         .iterator_consumed, .chain_broken => {
                             // Not found, but should NOT try against the parent context
-                            break;
+                            return null;
                         },
 
                         .not_found_in_context => {
                             // Should try against the parent context
-                            var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
-                            while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                                const path_resolution = current_global_lambdas.ctx.iterator(self, path);
-                                switch (path_resolution) {
-                                    .field, .lambda => |found| return found,
-                                    .iterator_consumed, .chain_broken => break,
-                                    else => continue,
-                                }
-                            }
                             continue;
                         },
+                    }
+                }
+
+                // Try the global lambdas context
+                var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
+                while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
+                    const path_resolution = current_global_lambdas.ctx.iterator(self, path);
+                    switch (path_resolution) {
+                        .field, .lambda => |found| return found,
+                        .iterator_consumed, .chain_broken => break,
+                        else => continue,
                     }
                 }
 
@@ -1269,9 +1270,10 @@ pub fn RenderEngineType(
                 path: Element.Path,
             ) usize {
                 var level: ?*const ContextStack = self.stack;
+                var path_resolution: context.PathResolutionType(usize) = undefined;
 
                 while (level) |current| : (level = current.parent) {
-                    var path_resolution = current.ctx.capacityHint(self, path);
+                    path_resolution = current.ctx.capacityHint(self, path);
 
                     switch (path_resolution) {
                         .field => |size| return size,
@@ -1283,17 +1285,19 @@ pub fn RenderEngineType(
 
                         .not_found_in_context => {
                             // Not rendered, should try against the parent context
-                            var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
-                            while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                                path_resolution = current_global_lambdas.ctx.capacityHint(self, path);
-                                switch (path_resolution) {
-                                    .lambda => return 0,
-                                    .iterator_consumed, .chain_broken, .field => break,
-                                    else => continue,
-                                }
-                            }
                             continue;
                         },
+                    }
+                }
+
+                // Try the global lambdas context
+                var level_global_lambdas: ?*const ContextStack = self.stack_global_lambdas;
+                while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
+                    path_resolution = current_global_lambdas.ctx.capacityHint(self, path);
+                    switch (path_resolution) {
+                        .lambda => return 0,
+                        .iterator_consumed, .chain_broken, .field => break,
+                        else => continue,
                     }
                 }
 
