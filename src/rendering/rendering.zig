@@ -1071,9 +1071,9 @@ pub fn RenderEngineType(
                 path: Element.Path,
             ) ?NativeContext.ContextIterator {
                 // Try the global lambdas context
-                var level_global_lambdas = self.stack_global_lambdas;
-                while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                    const path_resolution = current_global_lambdas.ctx.iterator(@ptrCast(self), path);
+                var level = self.stack_global_lambdas;
+                while (level) |current| : (level = current.parent) {
+                    const path_resolution = current.ctx.iterator(@ptrCast(self), path);
                     switch (path_resolution) {
                         .field, .lambda => |found| return found,
                         .iterator_consumed, .chain_broken => break,
@@ -1340,8 +1340,8 @@ pub fn RenderEngineType(
 
                 // Try the global lambdas context
                 var level_global_lambdas = self.stack_global_lambdas;
-                while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                    path_resolution = current_global_lambdas.ctx.capacityHint(@ptrCast(self), path);
+                while (level_global_lambdas) |current| : (level_global_lambdas = current.parent) {
+                    path_resolution = current.ctx.capacityHint(@ptrCast(self), path);
                     switch (path_resolution) {
                         .lambda => return 0,
                         .iterator_consumed, .chain_broken, .field => break,
