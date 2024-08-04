@@ -399,7 +399,7 @@ pub fn InvokerType(
                 interpolateAction,
             );
             return InterpolatePathInvoker.call(
-                .{ escape },
+                .{escape},
                 data_render,
                 data,
                 path,

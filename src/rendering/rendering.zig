@@ -934,9 +934,7 @@ pub fn RenderEngineType(
                             // Lambdas aways evaluate as "true" for inverted section
                             // Broken paths, empty lists, null and false evaluates as "false"
 
-                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy()
-                                      else if (self.getGlobalLambdasIterator(section.path)) |iterator| iterator.truthy()
-                                      else false;
+                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else if (self.getGlobalLambdasIterator(section.path)) |iterator| iterator.truthy() else false;
 
                             if (!truthy) {
                                 try self.renderLevel(section_children);
@@ -1067,7 +1065,6 @@ pub fn RenderEngineType(
                 }
                 return null;
             }
-
 
             fn getGlobalLambdasIterator(
                 self: *DataRender,
@@ -1303,9 +1300,7 @@ pub fn RenderEngineType(
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
-                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy()
-                                      else if (self.getGlobalLambdasIterator(section.path)) |iterator| iterator.truthy()
-                                      else false;
+                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else if (self.getGlobalLambdasIterator(section.path)) |iterator| iterator.truthy() else false;
                             if (!truthy) {
                                 size += self.levelCapacityHint(section_children);
                             }
