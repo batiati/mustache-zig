@@ -748,6 +748,7 @@ pub fn RenderEngineType(
 ) type {
     return struct {
         pub const PartialsMap = TPartialsMap;
+        const NativeContext = context.ContextType(.native, Writer, PartialsMap, UserData, options);
         pub const Context = context.ContextType(context_source, Writer, PartialsMap, UserData, options);
         pub const ContextStack = Context.ContextStack;
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
@@ -771,7 +772,7 @@ pub fn RenderEngineType(
 
             out_writer: OutWriter,
             stack: *const ContextStack,
-            stack_global_lambdas: ?*const ContextStack = null,
+            stack_global_lambdas: ?*const NativeContext.ContextStack = null,
             partials_map: PartialsMap,
             indentation_queue: *IndentationQueue,
             template_options: if (options == .template) *const TemplateOptions else void,
@@ -865,6 +866,7 @@ pub fn RenderEngineType(
                             index += section.children_count;
 
                             var resolve_path = self.getIterator(section.path);
+                            var resolve_path_global = self.getGlobalLambdasIterator(section.path);
                             if (resolve_path) |*iterator| {
                                 if (self.lambdasSupported()) {
                                     if (iterator.lambda()) |lambda_ctx| {
@@ -894,6 +896,35 @@ pub fn RenderEngineType(
 
                                     try self.renderLevel(section_children);
                                 }
+                            } else if (resolve_path_global) |*iterator| {
+                                if (self.lambdasSupported()) {
+                                    if (iterator.lambda()) |lambda_ctx| {
+                                        assert(section.inner_text != null);
+                                        assert(section.delimiters != null);
+
+                                        const expand_result = try lambda_ctx.expandLambda(
+                                            @ptrCast(self),
+                                            &.{},
+                                            section.inner_text.?,
+                                            .Unescaped,
+                                            section.delimiters.?,
+                                        );
+                                        assert(expand_result == .lambda);
+                                        continue;
+                                    }
+                                }
+                                while (iterator.next()) |item_ctx| {
+                                    const current_level = self.stack_global_lambdas;
+                                    const next_level = NativeContext.ContextStack{
+                                        .parent = current_level,
+                                        .ctx = item_ctx,
+                                    };
+
+                                    self.stack_global_lambdas = &next_level;
+                                    defer self.stack_global_lambdas = current_level;
+
+                                    try self.renderLevel(section_children);
+                                }
                             }
                         },
                         .inverted_section => |section| {
@@ -903,10 +934,9 @@ pub fn RenderEngineType(
                             // Lambdas aways evaluate as "true" for inverted section
                             // Broken paths, empty lists, null and false evaluates as "false"
 
-                            const truthy = if (self.getIterator(section.path)) |iterator|
-                                iterator.truthy()
-                            else
-                                false;
+                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy()
+                                      else if (self.getGlobalLambdasIterator(section.path)) |iterator| iterator.truthy()
+                                      else false;
 
                             if (!truthy) {
                                 try self.renderLevel(section_children);
@@ -999,10 +1029,10 @@ pub fn RenderEngineType(
                 // Try the global lambdas context
                 var level_global_lambdas = self.stack_global_lambdas;
                 while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                    path_resolution = try current_global_lambdas.ctx.interpolate(self, path, escape);
+                    path_resolution = try current_global_lambdas.ctx.interpolate(@ptrCast(self), path, escape);
                     switch (path_resolution) {
                         .lambda => {
-                            const expand_result = try current_global_lambdas.ctx.expandLambda(self, path, "", escape, .{});
+                            const expand_result = try current_global_lambdas.ctx.expandLambda(@ptrCast(self), path, "", escape, .{});
                             assert(expand_result == .lambda);
                             break;
                         },
@@ -1035,11 +1065,18 @@ pub fn RenderEngineType(
                         },
                     }
                 }
+                return null;
+            }
 
+
+            fn getGlobalLambdasIterator(
+                self: *DataRender,
+                path: Element.Path,
+            ) ?NativeContext.ContextIterator {
                 // Try the global lambdas context
                 var level_global_lambdas = self.stack_global_lambdas;
                 while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                    const path_resolution = current_global_lambdas.ctx.iterator(self, path);
+                    const path_resolution = current_global_lambdas.ctx.iterator(@ptrCast(self), path);
                     switch (path_resolution) {
                         .field, .lambda => |found| return found,
                         .iterator_consumed, .chain_broken => break,
@@ -1233,6 +1270,7 @@ pub fn RenderEngineType(
                             index += section.children_count;
 
                             var resolve_path = self.getIterator(section.path);
+                            var resolve_path_global = self.getGlobalLambdasIterator(section.path);
                             if (resolve_path) |*iterator| {
                                 while (iterator.next()) |item_ctx| {
                                     const current_level = self.stack;
@@ -1246,13 +1284,28 @@ pub fn RenderEngineType(
 
                                     size += self.levelCapacityHint(section_children);
                                 }
+                            } else if (resolve_path_global) |*iterator| {
+                                while (iterator.next()) |item_ctx| {
+                                    const current_level = self.stack_global_lambdas;
+                                    const next_level = NativeContext.ContextStack{
+                                        .parent = current_level,
+                                        .ctx = item_ctx,
+                                    };
+
+                                    self.stack_global_lambdas = &next_level;
+                                    defer self.stack_global_lambdas = current_level;
+
+                                    size += self.levelCapacityHint(section_children);
+                                }
                             }
                         },
                         .inverted_section => |section| {
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
-                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else false;
+                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy()
+                                      else if (self.getGlobalLambdasIterator(section.path)) |iterator| iterator.truthy()
+                                      else false;
                             if (!truthy) {
                                 size += self.levelCapacityHint(section_children);
                             }
@@ -1293,7 +1346,7 @@ pub fn RenderEngineType(
                 // Try the global lambdas context
                 var level_global_lambdas = self.stack_global_lambdas;
                 while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                    path_resolution = current_global_lambdas.ctx.capacityHint(self, path);
+                    path_resolution = current_global_lambdas.ctx.capacityHint(@ptrCast(self), path);
                     switch (path_resolution) {
                         .lambda => return 0,
                         .iterator_consumed, .chain_broken, .field => break,
@@ -1397,7 +1450,7 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
-            var context_stack_global_lambdas: ?ContextStack = null;
+            var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
             switch (options) {
                 inline else => |value| {
                     if (value.global_lambdas) |global_lambdas| {
@@ -1438,7 +1491,7 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
-            var context_stack_global_lambdas: ?ContextStack = null;
+            var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
             switch (options) {
                 inline else => |value| {
                     if (value.global_lambdas) |global_lambdas| {
@@ -1480,7 +1533,7 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
-            var context_stack_global_lambdas: ?ContextStack = null;
+            var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
             switch (options) {
                 inline else => |value| {
                     if (value.global_lambdas) |global_lambdas| {
@@ -1522,7 +1575,7 @@ pub fn RenderEngineType(
                 .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
             };
 
-            var context_stack_global_lambdas: ?ContextStack = null;
+            var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
             switch (options) {
                 inline else => |value| {
                     if (value.global_lambdas) |global_lambdas| {
