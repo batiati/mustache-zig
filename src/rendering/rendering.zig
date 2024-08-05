@@ -866,7 +866,6 @@ pub fn RenderEngineType(
                             index += section.children_count;
 
                             var resolve_path = self.getIterator(section.path);
-                            var resolve_path_global = self.getGlobalLambdasIterator(section.path);
                             if (resolve_path) |*iterator| {
                                 if (self.lambdasSupported()) {
                                     if (iterator.lambda()) |lambda_ctx| {
@@ -896,34 +895,37 @@ pub fn RenderEngineType(
 
                                     try self.renderLevel(section_children);
                                 }
-                            } else if (resolve_path_global) |*iterator| {
-                                if (self.lambdasSupported()) {
-                                    if (iterator.lambda()) |lambda_ctx| {
-                                        assert(section.inner_text != null);
-                                        assert(section.delimiters != null);
+                            } else {
+                                var resolve_path_global = self.getGlobalLambdasIterator(section.path);
+                                if (resolve_path_global) |*iterator| {
+                                    if (self.lambdasSupported()) {
+                                        if (iterator.lambda()) |lambda_ctx| {
+                                            assert(section.inner_text != null);
+                                            assert(section.delimiters != null);
 
-                                        const expand_result = try lambda_ctx.expandLambda(
-                                            @ptrCast(self),
-                                            &.{},
-                                            section.inner_text.?,
-                                            .Unescaped,
-                                            section.delimiters.?,
-                                        );
-                                        assert(expand_result == .lambda);
-                                        continue;
+                                            const expand_result = try lambda_ctx.expandLambda(
+                                                @ptrCast(self),
+                                                &.{},
+                                                section.inner_text.?,
+                                                .Unescaped,
+                                                section.delimiters.?,
+                                            );
+                                            assert(expand_result == .lambda);
+                                            continue;
+                                        }
                                     }
-                                }
-                                while (iterator.next()) |item_ctx| {
-                                    const current_level = self.stack_global_lambdas;
-                                    const next_level = NativeContext.ContextStack{
-                                        .parent = current_level,
-                                        .ctx = item_ctx,
-                                    };
+                                    while (iterator.next()) |item_ctx| {
+                                        const current_level = self.stack_global_lambdas;
+                                        const next_level = NativeContext.ContextStack{
+                                            .parent = current_level,
+                                            .ctx = item_ctx,
+                                        };
 
-                                    self.stack_global_lambdas = &next_level;
-                                    defer self.stack_global_lambdas = current_level;
+                                        self.stack_global_lambdas = &next_level;
+                                        defer self.stack_global_lambdas = current_level;
 
-                                    try self.renderLevel(section_children);
+                                        try self.renderLevel(section_children);
+                                    }
                                 }
                             }
                         },
@@ -1267,7 +1269,6 @@ pub fn RenderEngineType(
                             index += section.children_count;
 
                             var resolve_path = self.getIterator(section.path);
-                            var resolve_path_global = self.getGlobalLambdasIterator(section.path);
                             if (resolve_path) |*iterator| {
                                 while (iterator.next()) |item_ctx| {
                                     const current_level = self.stack;
@@ -1281,18 +1282,21 @@ pub fn RenderEngineType(
 
                                     size += self.levelCapacityHint(section_children);
                                 }
-                            } else if (resolve_path_global) |*iterator| {
-                                while (iterator.next()) |item_ctx| {
-                                    const current_level = self.stack_global_lambdas;
-                                    const next_level = NativeContext.ContextStack{
-                                        .parent = current_level,
-                                        .ctx = item_ctx,
-                                    };
+                            } else {
+                                var resolve_path_global = self.getGlobalLambdasIterator(section.path);
+                                if (resolve_path_global) |*iterator| {
+                                    while (iterator.next()) |item_ctx| {
+                                        const current_level = self.stack_global_lambdas;
+                                        const next_level = NativeContext.ContextStack{
+                                            .parent = current_level,
+                                            .ctx = item_ctx,
+                                        };
 
-                                    self.stack_global_lambdas = &next_level;
-                                    defer self.stack_global_lambdas = current_level;
+                                        self.stack_global_lambdas = &next_level;
+                                        defer self.stack_global_lambdas = current_level;
 
-                                    size += self.levelCapacityHint(section_children);
+                                        size += self.levelCapacityHint(section_children);
+                                    }
                                 }
                             }
                         },
