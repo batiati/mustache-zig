@@ -58,7 +58,7 @@ pub fn ContextType(
             self: Context,
             data_render: *DataRender,
             path: Element.Path,
-            index: ?usize
+            index: ?usize,
         ) PathResolutionType(Context) {
             _ = data_render;
             const value = getJsonValue(.Root, self.ctx, path, index);

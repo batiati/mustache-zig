@@ -1388,14 +1388,33 @@ pub fn RenderEngineType(
             }
         };
 
-        pub inline fn getContextType(comptime T: type, data: anytype) Context {
+        pub inline fn getNativeContextType(comptime UserData: type, data: anytype) NativeContext {
+            const Data = @TypeOf(data);
+            const ContextImpl = context.ContextImplType(
+                .native,
+                Writer,
+                Data,
+                PartialsMap,
+                UserData,
+                options,
+            );
+
+            const by_value = comptime Fields.byValue(Data);
+            if (comptime !by_value and !stdx.isSingleItemPtr(Data)) {
+                @compileError("Expected a pointer to " ++ @typeName(Data));
+            }
+
+            return ContextImpl.ContextType(data);
+        }
+
+        pub inline fn getContextType(comptime UserData: type, data: anytype) Context {
             const Data = @TypeOf(data);
             const ContextImpl = context.ContextImplType(
                 context_source,
                 Writer,
                 Data,
                 PartialsMap,
-                T,
+                UserData,
                 options,
             );
 
@@ -1446,7 +1465,7 @@ pub fn RenderEngineType(
                     if (value.global_lambdas) |global_lambdas| {
                         context_stack_global_lambdas = .{
                             .parent = null,
-                            .ctx = getContextType(Data, global_lambdas{}),
+                            .ctx = getNativeContextType(Data, global_lambdas{}),
                         };
                     }
                 },
@@ -1487,7 +1506,7 @@ pub fn RenderEngineType(
                     if (value.global_lambdas) |global_lambdas| {
                         context_stack_global_lambdas = .{
                             .parent = null,
-                            .ctx = getContextType(Data, global_lambdas{}),
+                            .ctx = getNativeContextType(Data, global_lambdas{}),
                         };
                     }
                 },
@@ -1529,7 +1548,7 @@ pub fn RenderEngineType(
                     if (value.global_lambdas) |global_lambdas| {
                         context_stack_global_lambdas = .{
                             .parent = null,
-                            .ctx = getContextType(Data, global_lambdas{}),
+                            .ctx = getNativeContextType(Data, global_lambdas{}),
                         };
                     }
                 },
@@ -1571,7 +1590,7 @@ pub fn RenderEngineType(
                     if (value.global_lambdas) |global_lambdas| {
                         context_stack_global_lambdas = .{
                             .parent = null,
-                            .ctx = getContextType(Data, global_lambdas{}),
+                            .ctx = getNativeContextType(Data, global_lambdas{}),
                         };
                     }
                 },

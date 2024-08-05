@@ -75,7 +75,7 @@ pub fn ContextType(
             self: Context,
             data_render: *DataRender,
             path: Element.Path,
-            index: ?usize
+            index: ?usize,
         ) PathResolutionType(Context) {
             _ = data_render;
             if (self.user_data.get != null) {
