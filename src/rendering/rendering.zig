@@ -619,12 +619,10 @@ fn internalRender(
 
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
-    const Data = @TypeOf(data);
     const RenderEngine = RenderEngineType(
         context_source,
         @TypeOf(writer),
         PartialsMap,
-        Data,
         options,
     );
 
@@ -647,12 +645,10 @@ fn internalAllocRender(
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
-    const Data = @TypeOf(data);
     const RenderEngine = RenderEngineType(
         context_source,
         Writer,
         PartialsMap,
-        Data,
         options,
     );
 
@@ -681,12 +677,10 @@ fn internalCollect(
 
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
-    const Data = @TypeOf(data);
     const RenderEngine = RenderEngineType(
         context_source,
         @TypeOf(writer),
         PartialsMap,
-        Data,
         options,
     );
 
@@ -715,12 +709,10 @@ fn internalAllocCollect(
     const context_source = comptime ContextSource.fromData(@TypeOf(data));
     const Writer = @TypeOf(std.io.null_writer);
     const PartialsMap = map.PartialsMapType(@TypeOf(partials), options);
-    const Data = @TypeOf(data);
     const RenderEngine = RenderEngineType(
         context_source,
         Writer,
         PartialsMap,
-        Data,
         options,
     );
 
@@ -743,13 +735,12 @@ pub fn RenderEngineType(
     comptime context_source: ContextSource,
     comptime Writer: type,
     comptime TPartialsMap: type,
-    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
     return struct {
         pub const PartialsMap = TPartialsMap;
-        const NativeContext = context.ContextType(.native, Writer, PartialsMap, UserData, options);
-        pub const Context = context.ContextType(context_source, Writer, PartialsMap, UserData, options);
+        const NativeContext = context.ContextType(.native, Writer, PartialsMap, options);
+        pub const Context = context.ContextType(context_source, Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
 
@@ -766,7 +757,7 @@ pub fn RenderEngineType(
 
         pub const DataRender = struct {
             pub const Error = Allocator.Error || Writer.Error;
-            pub const TGlobalLambdas = switch (options) {
+            pub const GlobalLambdas = switch (options) {
                 inline else => |value| if (value.global_lambdas) |T| T else void,
             };
 
@@ -1397,14 +1388,14 @@ pub fn RenderEngineType(
             }
         };
 
-        pub inline fn getContextType(data: anytype) Context {
+        pub inline fn getContextType(comptime T: type, data: anytype) Context {
             const Data = @TypeOf(data);
             const ContextImpl = context.ContextImplType(
                 context_source,
                 Writer,
                 Data,
                 PartialsMap,
-                UserData,
+                T,
                 options,
             );
 
@@ -1446,7 +1437,7 @@ pub fn RenderEngineType(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(Data, if (by_value) data else @as(*const Data, &data)),
             };
 
             var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
@@ -1455,7 +1446,7 @@ pub fn RenderEngineType(
                     if (value.global_lambdas) |global_lambdas| {
                         context_stack_global_lambdas = .{
                             .parent = null,
-                            .ctx = getContextType(global_lambdas{}),
+                            .ctx = getContextType(Data, global_lambdas{}),
                         };
                     }
                 },
@@ -1487,7 +1478,7 @@ pub fn RenderEngineType(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(Data, if (by_value) data else @as(*const Data, &data)),
             };
 
             var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
@@ -1496,7 +1487,7 @@ pub fn RenderEngineType(
                     if (value.global_lambdas) |global_lambdas| {
                         context_stack_global_lambdas = .{
                             .parent = null,
-                            .ctx = getContextType(global_lambdas{}),
+                            .ctx = getContextType(Data, global_lambdas{}),
                         };
                     }
                 },
@@ -1529,7 +1520,7 @@ pub fn RenderEngineType(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(Data, if (by_value) data else @as(*const Data, &data)),
             };
 
             var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
@@ -1538,7 +1529,7 @@ pub fn RenderEngineType(
                     if (value.global_lambdas) |global_lambdas| {
                         context_stack_global_lambdas = .{
                             .parent = null,
-                            .ctx = getContextType(global_lambdas{}),
+                            .ctx = getContextType(Data, global_lambdas{}),
                         };
                     }
                 },
@@ -1571,7 +1562,7 @@ pub fn RenderEngineType(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(Data, if (by_value) data else @as(*const Data, &data)),
             };
 
             var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
@@ -1580,7 +1571,7 @@ pub fn RenderEngineType(
                     if (value.global_lambdas) |global_lambdas| {
                         context_stack_global_lambdas = .{
                             .parent = null,
-                            .ctx = getContextType(global_lambdas{}),
+                            .ctx = getContextType(Data, global_lambdas{}),
                         };
                     }
                 },
@@ -4533,7 +4524,6 @@ const tests = struct {
             .native,
             std.ArrayList(u8).Writer,
             DummyPartialsMap,
-            void,
             dummy_options,
         );
         const IndentationQueue = RenderEngine.IndentationQueue;

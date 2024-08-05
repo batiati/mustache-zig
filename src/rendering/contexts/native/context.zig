@@ -83,10 +83,9 @@ pub const ErasedType = struct {
 pub fn ContextInterfaceType(
     comptime Writer: type,
     comptime PartialsMap: type,
-    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngineType(.native, Writer, PartialsMap, UserData, options);
+    const RenderEngine = rendering.RenderEngineType(.native, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -210,7 +209,6 @@ pub fn ContextImplType(
         .native,
         Writer,
         PartialsMap,
-        UserData,
         options,
     );
     const Context = RenderEngine.Context;
@@ -430,7 +428,7 @@ const context_tests = struct {
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyPartialsMap = map.PartialsMapType(void, dummy_options);
     const DummyWriter = std.ArrayList(u8).Writer;
-    const DummyRenderEngine = rendering.RenderEngineType(.native, DummyWriter, DummyPartialsMap, void, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngineType(.native, DummyWriter, DummyPartialsMap, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
     const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
@@ -447,7 +445,7 @@ const context_tests = struct {
         const Data = @TypeOf(data);
         const by_value = comptime Fields.byValue(Data);
 
-        const ctx = DummyRenderEngine.getContextType(if (by_value) data else @as(*const Data, &data));
+        const ctx = DummyRenderEngine.getContextType(Data, if (by_value) data else @as(*const Data, &data));
 
         try interpolateCtx(writer, ctx, path, .Unescaped);
     }
@@ -1034,7 +1032,7 @@ const context_tests = struct {
 
         // Person
 
-        var person_ctx = DummyRenderEngine.getContextType(&person);
+        var person_ctx = DummyRenderEngine.getContextType(@TypeOf(person), &person);
 
         {
             list.clearAndFree();
@@ -1109,7 +1107,7 @@ const context_tests = struct {
 
         // Person
 
-        var person_ctx = DummyRenderEngine.getContextType(&person);
+        var person_ctx = DummyRenderEngine.getContextType(@TypeOf(person), &person);
 
         {
             list.clearAndFree();
@@ -1199,7 +1197,7 @@ const context_tests = struct {
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var person_ctx = DummyRenderEngine.getContextType(&person);
+        var person_ctx = DummyRenderEngine.getContextType(@TypeOf(person), &person);
 
         var data_render: DummyRenderEngine.DataRender = undefined;
 
@@ -1281,7 +1279,7 @@ const context_tests = struct {
         const writer = list.writer();
 
         // Person
-        var ctx = DummyRenderEngine.getContextType(&person);
+        var ctx = DummyRenderEngine.getContextType(@TypeOf(person), &person);
 
         var data_render: DummyRenderEngine.DataRender = undefined;
 
@@ -1328,7 +1326,7 @@ const context_tests = struct {
         var data_render: DummyRenderEngine.DataRender = undefined;
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var ctx = DummyRenderEngine.getContextType(&person);
+        var ctx = DummyRenderEngine.getContextType(@TypeOf(person), &person);
 
         {
             // iterator over true
@@ -1376,7 +1374,7 @@ const context_tests = struct {
         var data_render: DummyRenderEngine.DataRender = undefined;
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        var ctx = DummyRenderEngine.getContextType(&person);
+        var ctx = DummyRenderEngine.getContextType(@TypeOf(person), &person);
 
         {
             // iterator over true

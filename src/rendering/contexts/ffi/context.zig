@@ -27,10 +27,9 @@ const extern_types = @import("../../../ffi/extern_types.zig");
 pub fn ContextType(
     comptime Writer: type,
     comptime PartialsMap: type,
-    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngineType(.ffi, Writer, PartialsMap, UserData, options);
+    const RenderEngine = rendering.RenderEngineType(.ffi, Writer, PartialsMap, options);
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -72,7 +71,13 @@ pub fn ContextType(
             };
         }
 
-        pub inline fn get(self: Context, _: *DataRender, path: Element.Path, index: ?usize) PathResolutionType(Context) {
+        pub inline fn get(
+            self: Context,
+            data_render: *DataRender,
+            path: Element.Path,
+            index: ?usize
+        ) PathResolutionType(Context) {
+            _ = data_render;
             if (self.user_data.get != null) {
                 if (path.len > 0) {
                     var root_path = extern_types.PathPart{
@@ -140,8 +145,8 @@ pub fn ContextType(
                 .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
                 .CHAIN_BROKEN => .chain_broken,
                 .ITERATOR_CONSUMED => .iterator_consumed,
-                .FIELD => .{ .field = RenderEngine.getContextType(out_value) },
-                .LAMBDA => .{ .lambda = RenderEngine.getContextType(out_value) },
+                .FIELD => .{ .field = RenderEngine.getContextType(extern_types.UserData, out_value) },
+                .LAMBDA => .{ .lambda = RenderEngine.getContextType(extern_types.UserData, out_value) },
             };
         }
 
@@ -383,7 +388,7 @@ const context_tests = struct {
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyPartialsMap = map.PartialsMapType(void, dummy_options);
     const DummyWriter = std.ArrayList(u8).Writer;
-    const DummyRenderEngine = rendering.RenderEngineType(.ffi, DummyWriter, DummyPartialsMap, void, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngineType(.ffi, DummyWriter, DummyPartialsMap, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
     const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
@@ -586,7 +591,7 @@ const context_tests = struct {
         };
 
         const user_data = Person.getUserData(&person);
-        var person_ctx = DummyRenderEngine.getContextType(user_data);
+        var person_ctx = DummyRenderEngine.getContextType(@TypeOf(user_data), user_data);
         var data_render: DummyRenderEngine.DataRender = undefined;
 
         const id_ctx = id_ctx: {
@@ -640,7 +645,7 @@ const context_tests = struct {
         person.boss = &next_person;
 
         const user_data = Person.getUserData(&person);
-        var person_ctx = DummyRenderEngine.getContextType(user_data);
+        var person_ctx = DummyRenderEngine.getContextType(@TypeOf(user_data), user_data);
         var data_render: DummyRenderEngine.DataRender = undefined;
 
         const id_ctx = id_ctx: {
@@ -689,7 +694,7 @@ const context_tests = struct {
         };
 
         const user_data = Person.getUserData(&person);
-        const person_ctx = DummyRenderEngine.getContextType(user_data);
+        const person_ctx = DummyRenderEngine.getContextType(@TypeOf(user_data), user_data);
 
         const writer = list.writer();
 
@@ -721,7 +726,7 @@ const context_tests = struct {
 
         person.boss = &next_person;
         const user_data = Person.getUserData(&person);
-        const person_ctx = DummyRenderEngine.getContextType(user_data);
+        const person_ctx = DummyRenderEngine.getContextType(@TypeOf(user_data), user_data);
 
         const writer = list.writer();
 

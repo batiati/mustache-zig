@@ -33,7 +33,6 @@ pub fn InvokerType(
         .native,
         Writer,
         PartialsMap,
-        UserData,
         options,
     );
     const Context = RenderEngine.Context;
@@ -76,7 +75,7 @@ pub fn InvokerType(
 
                     const ctx = Fields.getRuntimeValue(data);
 
-                    if (comptime lambda.isLambdaInvoker(if (DataRender.TGlobalLambdas == Data) UserData else Data)) {
+                    if (comptime lambda.isLambdaInvoker(if (DataRender.GlobalLambdas == Data) UserData else Data)) {
                         return PathResolution{ .lambda = try action_fn(action_param, data_render, ctx) };
                     } else {
                         if (path.len > 0) {
@@ -206,7 +205,7 @@ pub fn InvokerType(
                         const has_fn = comptime meta.hasFn(TValue, decl.name);
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
-                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(if (DataRender.TGlobalLambdas == TValue) UserData else TValue, @TypeOf(bound_fn));
+                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(if (DataRender.GlobalLambdas == TValue) UserData else TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
                                     return try getLambda(
@@ -243,13 +242,13 @@ pub fn InvokerType(
                     const LambdaInvoker = if (params_len == 1)
                         LambdaInvokerType(void, TFn)
                     else
-                        LambdaInvokerType(if (DataRender.TGlobalLambdas == TData) UserData else TData, TFn);
+                        LambdaInvokerType(if (DataRender.GlobalLambdas == TData) UserData else TData, TFn);
 
                     // TData is likely a pointer, or a primitive value (See Field.byValue)
                     // This struct will be copied by value to the lambda context
                     const invoker = LambdaInvoker{
                         .bound_fn = bound_fn,
-                        .data = if (params_len == 1) {} else if (DataRender.TGlobalLambdas == TData)
+                        .data = if (params_len == 1) {} else if (DataRender.GlobalLambdas == TData)
                             data_render.stack.ctx.ctx.get(UserData)
                         else
                             data,
@@ -451,7 +450,7 @@ pub fn InvokerType(
         ) error{}!Context {
             _ = params;
             _ = data_render;
-            return RenderEngine.getContextType(value);
+            return RenderEngine.getContextType(UserData, value);
         }
 
         fn interpolateAction(
@@ -493,7 +492,7 @@ pub fn InvokerType(
             const escape: Escape = params.@"1";
             const delimiters: Delimiters = params.@"2";
 
-            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, UserData, options);
+            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, options);
             var impl = Impl{
                 .data_render = data_render,
                 .escape = escape,

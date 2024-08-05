@@ -25,14 +25,12 @@ const ContextIteratorType = context.ContextIteratorType;
 pub fn ContextType(
     comptime Writer: type,
     comptime PartialsMap: type,
-    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
     const RenderEngine = rendering.RenderEngineType(
         .json,
         Writer,
         PartialsMap,
-        UserData,
         options,
     );
     const DataRender = RenderEngine.DataRender;
@@ -56,14 +54,20 @@ pub fn ContextType(
             };
         }
 
-        pub fn get(self: Context, _: *DataRender, path: Element.Path, index: ?usize) PathResolutionType(Context) {
+        pub fn get(
+            self: Context,
+            data_render: *DataRender,
+            path: Element.Path,
+            index: ?usize
+        ) PathResolutionType(Context) {
+            _ = data_render;
             const value = getJsonValue(.Root, self.ctx, path, index);
 
             return switch (value) {
                 .not_found_in_context => .not_found_in_context,
                 .chain_broken => .chain_broken,
                 .iterator_consumed => .iterator_consumed,
-                .field => |content| .{ .field = RenderEngine.getContextType(content) },
+                .field => |content| .{ .field = RenderEngine.getContextType(std.json.Value, content) },
                 .lambda => {
                     assert(false);
                     unreachable;
