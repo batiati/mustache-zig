@@ -26,7 +26,9 @@ const context = @import("context.zig");
 const Escape = context.Escape;
 const Fields = context.Fields;
 
-const ffi_context = @import("/contexts/ffi/context.zig");
+const native_context = @import("contexts/native/context.zig");
+
+const ffi_context = @import("contexts/ffi/context.zig");
 const ffi_extern_types = @import("../ffi/extern_types.zig");
 
 pub const LambdaContext = context.LambdaContext;
@@ -740,6 +742,7 @@ pub fn RenderEngineType(
     return struct {
         pub const PartialsMap = TPartialsMap;
         const NativeContext = context.ContextType(.native, Writer, PartialsMap, options);
+        const NativeDataRender = RenderEngineType(.native, Writer, PartialsMap, options).DataRender;
         pub const Context = context.ContextType(context_source, Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
@@ -887,8 +890,8 @@ pub fn RenderEngineType(
                                     try self.renderLevel(section_children);
                                 }
                             } else {
-                                var resolve_path_global = self.getGlobalLambdasIterator(section.path);
-                                if (resolve_path_global) |*iterator| {
+                                var resolve_path_global_lambdas = self.getGlobalLambdasIterator(section.path);
+                                if (resolve_path_global_lambdas) |*iterator| {
                                     if (self.lambdasSupported()) {
                                         if (iterator.lambda()) |lambda_ctx| {
                                             assert(section.inner_text != null);
@@ -1019,11 +1022,32 @@ pub fn RenderEngineType(
 
                 // Try the global lambdas context
                 var level_global_lambdas = self.stack_global_lambdas;
+                var native_data_render: *NativeDataRender = @ptrCast(self);
+
+                if (self.stack_global_lambdas != null) {
+                    switch (context_source) {
+                        .json => {
+                            const ctx: NativeContext = .{
+                                .vtable = native_data_render.stack.ctx.vtable,
+                                .ctx = native_context.ErasedType.put(self.stack.ctx.ctx),
+                            };
+
+                            const context_stack = NativeContext.ContextStack{
+                                .parent = @ptrCast(@alignCast(self.stack.parent)),
+                                .ctx = ctx,
+                            };
+
+                            native_data_render.stack = &context_stack;
+                        },
+                        else => {},
+                    }
+                }
+
                 while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
-                    path_resolution = try current_global_lambdas.ctx.interpolate(@ptrCast(self), path, escape);
+                    path_resolution = try current_global_lambdas.ctx.interpolate(native_data_render, path, escape);
                     switch (path_resolution) {
                         .lambda => {
-                            const expand_result = try current_global_lambdas.ctx.expandLambda(@ptrCast(self), path, "", escape, .{});
+                            const expand_result = try current_global_lambdas.ctx.expandLambda(native_data_render, path, "", escape, .{});
                             assert(expand_result == .lambda);
                             break;
                         },
@@ -1274,8 +1298,8 @@ pub fn RenderEngineType(
                                     size += self.levelCapacityHint(section_children);
                                 }
                             } else {
-                                var resolve_path_global = self.getGlobalLambdasIterator(section.path);
-                                if (resolve_path_global) |*iterator| {
+                                var resolve_path_global_lambdas = self.getGlobalLambdasIterator(section.path);
+                                if (resolve_path_global_lambdas) |*iterator| {
                                     while (iterator.next()) |item_ctx| {
                                         const current_level = self.stack_global_lambdas;
                                         const next_level = NativeContext.ContextStack{
@@ -1323,7 +1347,7 @@ pub fn RenderEngineType(
 
                         .lambda, .iterator_consumed, .chain_broken => {
                             // No size can be counted
-                            break;
+                            return 0;
                         },
 
                         .not_found_in_context => {
@@ -1335,8 +1359,10 @@ pub fn RenderEngineType(
 
                 // Try the global lambdas context
                 var level_global_lambdas = self.stack_global_lambdas;
+                const native_data_render: *NativeDataRender = @ptrCast(self);
+
                 while (level_global_lambdas) |current| : (level_global_lambdas = current.parent) {
-                    path_resolution = current.ctx.capacityHint(@ptrCast(self), path);
+                    path_resolution = current.ctx.capacityHint(native_data_render, path);
                     switch (path_resolution) {
                         .lambda => return 0,
                         .iterator_consumed, .chain_broken, .field => break,

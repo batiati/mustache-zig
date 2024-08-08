@@ -91,7 +91,12 @@ const Native = struct {
         const text = Text{ .content = lower_text };
         const ptr_text = &text;
 
-        const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{ .global_lambdas = GlobalLambdas });
+        const result = try mustache.allocRenderTextWithOptions(
+            allocator,
+            template,
+            ptr_text,
+            .{ .global_lambdas = GlobalLambdas },
+        );
         defer allocator.free(result);
 
         try std.testing.expectEqualStrings(upper_text, result);
@@ -138,7 +143,12 @@ const Native = struct {
         const text = ConflictingText{ .content = lower_text };
         const ptr_text = &text;
 
-        const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{ .global_lambdas = GlobalLambdas });
+        const result = try mustache.allocRenderTextWithOptions(
+            allocator,
+            template,
+            ptr_text,
+            .{ .global_lambdas = GlobalLambdas },
+        );
         defer allocator.free(result);
 
         try std.testing.expectEqualStrings(upper_text, result);
@@ -151,7 +161,12 @@ const Native = struct {
         const text = ConflictingText{ .content = lower_text };
         const ptr_text = &text;
 
-        const result = try mustache.allocRenderTextWithOptions(allocator, template, ptr_text, .{ .global_lambdas = GlobalLambdas });
+        const result = try mustache.allocRenderTextWithOptions(
+            allocator,
+            template,
+            ptr_text,
+            .{ .global_lambdas = GlobalLambdas },
+        );
         defer allocator.free(result);
 
         try std.testing.expectEqualStrings(lower_text ++ " " ++ upper_text, result);
@@ -160,6 +175,9 @@ const Native = struct {
 };
 
 const Json = struct {
+    const json_text = "A text in a std.json.Value.string";
+    const json_upper_text = "A TEXT IN A STD.JSON.VALUE.STRING";
+
     fn ok(comptime str: []const u8) !void {
         try headerlessOk("JSON", str);
     }
@@ -173,17 +191,44 @@ const Json = struct {
             }
             try ctx.write(content);
         }
+
+        pub fn upper(value: std.json.Value, ctx: mustache.LambdaContext) !void {
+            std.debug.assert(std.meta.activeTag(value) == .string);
+            const content = try std.ascii.allocUpperString(ctx.allocator.?, value.string);
+            defer ctx.allocator.?.free(content);
+            try ctx.write(content);
+        }
     };
 
     test "section: only LambdaContext" {
         const template = "{{#upper1arg}}" ++ lower_text ++ "{{/upper1arg}}";
+        const value = std.json.Value{ .string = json_text };
 
-        const value = std.json.Value{ .string = "A text in a std.json.Value.string" };
-
-        const result = try mustache.allocRenderTextWithOptions(allocator, template, value, .{ .global_lambdas = GlobalLambdas });
+        const result = try mustache.allocRenderTextWithOptions(
+            allocator,
+            template,
+            value,
+            .{ .global_lambdas = GlobalLambdas },
+        );
         defer allocator.free(result);
 
         try std.testing.expectEqualStrings(upper_text, result);
+        try ok(@src().fn_name);
+    }
+
+    test "interpolation: struct + LambdaContext" {
+        const template = "{{upper}}";
+        const value = std.json.Value{ .string = json_text };
+
+        const result = try mustache.allocRenderTextWithOptions(
+            allocator,
+            template,
+            value,
+            .{ .global_lambdas = GlobalLambdas },
+        );
+        defer allocator.free(result);
+
+        try std.testing.expectEqualStrings(json_upper_text, result);
         try ok(@src().fn_name);
     }
 };

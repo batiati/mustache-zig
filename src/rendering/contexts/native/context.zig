@@ -27,7 +27,7 @@ const invoker = @import("invoker.zig");
 /// It is large enough to hold primitives passed by value like pointers,
 /// slices, enums, integers, floats and nullables.
 pub const ErasedType = struct {
-    const Content = u256;
+    const Content = u1024;
 
     content: Content = 0,
 
