@@ -41,7 +41,7 @@ pub const PartType = enum(u8) {
 };
 
 pub fn TrimmingIndexType(comptime options: TemplateOptions) type {
-    return if (options.features.preseve_line_breaks_and_indentation)
+    return if (options.features.preserve_line_breaks_and_indentation)
         union(enum) {
             preserve_whitespaces,
             allow_trimming: struct {

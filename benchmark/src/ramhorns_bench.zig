@@ -12,7 +12,7 @@ const TIMES = if (builtin.mode == .Debug) 10_000 else 1_000_000;
 // Run tests on full featured mustache specs, or minimum settings for the use case
 const full = true;
 const features: mustache.options.Features = if (full) .{} else .{
-    .preseve_line_breaks_and_indentation = false,
+    .preserve_line_breaks_and_indentation = false,
     .lambdas = .disabled,
 };
 

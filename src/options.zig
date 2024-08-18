@@ -97,7 +97,7 @@ pub const Features = struct {
     /// Examples:
     /// [Line breaks](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/comments.yml#L38)
     /// [Indentation](https://github.com/mustache/spec/blob/b2aeb3c283de931a7004b5f7a2cb394b89382369/specs/partials.yml#L82)
-    preseve_line_breaks_and_indentation: bool = true,
+    preserve_line_breaks_and_indentation: bool = true,
 
     /// Lambda expansion support
     lambdas: Lambdas = .{ .enabled = .{} },

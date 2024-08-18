@@ -820,12 +820,12 @@ pub fn RenderEngineType(
                 };
             }
 
-            inline fn preseveLineBreaksAndIndentation(self: DataRender) bool {
+            inline fn preserveLineBreaksAndIndentation(self: DataRender) bool {
                 return !PartialsMap.isEmpty() and
                     switch (options) {
-                    .template => self.template_options.features.preseve_line_breaks_and_indentation,
-                    .string => |string| string.features.preseve_line_breaks_and_indentation,
-                    .file => |file| file.features.preseve_line_breaks_and_indentation,
+                    .template => self.template_options.features.preserve_line_breaks_and_indentation,
+                    .string => |string| string.features.preserve_line_breaks_and_indentation,
+                    .file => |file| file.features.preserve_line_breaks_and_indentation,
                 };
             }
 
@@ -899,7 +899,7 @@ pub fn RenderEngineType(
                             if (comptime PartialsMap.isEmpty()) continue;
 
                             if (self.partials_map.get(partial.key)) |partial_template| {
-                                if (self.preseveLineBreaksAndIndentation()) {
+                                if (self.preserveLineBreaksAndIndentation()) {
                                     if (partial.indentation) |value| {
                                         const prev_has_pending = self.indentation_queue.has_pending;
                                         var node = IndentationQueue.Node{ .indentation = value };
@@ -1113,7 +1113,7 @@ pub fn RenderEngineType(
                 const indentation_supported = comptime !PartialsMap.isEmpty();
 
                 if (escaped or indentation_supported) {
-                    const indentation_empty: if (indentation_supported) bool else void = if (indentation_supported) self.indentation_queue.isEmpty() or !self.preseveLineBreaksAndIndentation() else {};
+                    const indentation_empty: if (indentation_supported) bool else void = if (indentation_supported) self.indentation_queue.isEmpty() or !self.preserveLineBreaksAndIndentation() else {};
 
                     var index: usize = 0;
 
