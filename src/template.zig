@@ -680,7 +680,7 @@ const tests = struct {
             const template_text =
                 \\Begin.
                 \\{{!
-                \\Something's going on here... 
+                \\Something's going on here...
                 \\}}
                 \\End.
             ;
@@ -705,7 +705,7 @@ const tests = struct {
             const template_text =
                 \\Begin.
                 \\  {{!
-                \\    Something's going on here... 
+                \\    Something's going on here...
                 \\  }}
                 \\End.
             ;
@@ -1555,9 +1555,9 @@ const tests = struct {
         test "Standalone Line Endings" {
             const template_text =
                 \\| This Is
-                \\		{{#boolean}}
+                \\    {{#boolean}}
                 \\|
-                \\		{{/boolean}}
+                \\    {{/boolean}}
                 \\| A Line
             ;
 
@@ -1890,9 +1890,9 @@ const tests = struct {
         test "Standalone Indented Lines" {
             const template_text =
                 \\| This Is
-                \\		{{^boolean}}
+                \\    {{^boolean}}
                 \\|
-                \\		{{/boolean}}
+                \\    {{/boolean}}
                 \\| A Line
             ;
 

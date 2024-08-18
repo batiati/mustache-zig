@@ -1,6 +1,6 @@
 {
 	"recommendations": [
-        "augusterame.zls-vscode",
+        "ziglang.vscode-zig",
         "ms-vscode.cpptools"
     ]
 }
