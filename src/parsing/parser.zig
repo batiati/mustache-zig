@@ -40,7 +40,7 @@ pub fn ParserType(comptime options: TemplateOptions) type {
 
         fn RenderError(comptime TRender: type) type {
             switch (@typeInfo(TRender)) {
-                .Pointer => |pointer| {
+                .pointer => |pointer| {
                     if (pointer.size == .One) {
                         const Render = pointer.child;
                         return Render.Error;

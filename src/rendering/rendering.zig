@@ -57,7 +57,7 @@ pub const ContextSource = enum {
             Data == json.Parsed(json.Value)) return true;
 
         const hasChild = switch (@typeInfo(Data)) {
-            .Pointer, .Array, .Vector => true,
+            .pointer, .array, .vector => true,
             else => false,
         };
 
@@ -1061,21 +1061,21 @@ pub fn RenderEngineType(
                 const TValue = @TypeOf(value);
 
                 switch (@typeInfo(TValue)) {
-                    .Bool => try self.flushToWriter(writer, if (value) "true" else "false", escape),
-                    .Int, .ComptimeInt => {
+                    .bool => try self.flushToWriter(writer, if (value) "true" else "false", escape),
+                    .int, .comptime_int => {
                         var buf: [128]u8 = undefined;
                         const size = std.fmt.formatIntBuf(&buf, value, 10, .lower, .{});
                         try self.flushToWriter(writer, buf[0..size], escape);
                     },
-                    .Float, .ComptimeFloat => {
+                    .float, .comptime_float => {
                         var buf: [128]u8 = undefined;
                         var fbs = std.io.fixedBufferStream(&buf);
                         std.fmt.format(fbs.writer(), "{d}", .{value}) catch unreachable;
                         try self.flushToWriter(writer, buf[0..fbs.pos], escape);
                     },
-                    .Enum => try self.flushToWriter(writer, @tagName(value), escape),
+                    .@"enum" => try self.flushToWriter(writer, @tagName(value), escape),
 
-                    .Pointer => |info| switch (info.size) {
+                    .pointer => |info| switch (info.size) {
                         .One => return if (comptime stdx.canDeref(TValue)) try self.recursiveWrite(
                             writer,
                             value.*,
@@ -1089,12 +1089,12 @@ pub fn RenderEngineType(
                         .Many => @compileError("[*] pointers not supported"),
                         .C => @compileError("[*c] pointers not supported"),
                     },
-                    .Array => |info| {
+                    .array => |info| {
                         if (info.child == u8) {
                             try self.flushToWriter(writer, &value, escape);
                         }
                     },
-                    .Optional => {
+                    .optional => {
                         if (value) |not_null| {
                             try self.recursiveWrite(writer, not_null, escape);
                         }
@@ -1255,14 +1255,14 @@ pub fn RenderEngineType(
                 const TValue = @TypeOf(value);
 
                 switch (@typeInfo(TValue)) {
-                    .Bool => return 5,
-                    .Int,
-                    .ComptimeInt,
-                    .Float,
-                    .ComptimeFloat,
+                    .bool => return 5,
+                    .int,
+                    .comptime_int,
+                    .float,
+                    .comptime_float,
                     => return std.fmt.count("{d}", .{value}),
-                    .Enum => return @tagName(value).len,
-                    .Pointer => |info| switch (info.size) {
+                    .@"enum" => return @tagName(value).len,
+                    .pointer => |info| switch (info.size) {
                         .One => return if (comptime stdx.canDeref(TValue)) self.valueCapacityHint(value.*) else 0,
                         .Slice => {
                             if (info.child == u8) {
@@ -1272,12 +1272,12 @@ pub fn RenderEngineType(
                         .Many => @compileError("[*] pointers not supported"),
                         .C => @compileError("[*c] pointers not supported"),
                     },
-                    .Array => |info| {
+                    .array => |info| {
                         if (info.child == u8) {
                             return value.len;
                         }
                     },
-                    .Optional => {
+                    .optional => {
                         if (value) |not_null| {
                             return self.valueCapacityHint(not_null);
                         }
@@ -4515,11 +4515,11 @@ const tests = struct {
             return hasLambda(meta.Child(Data));
         } else {
             const info = @typeInfo(Data);
-            if (info == .Struct) {
-                const decls = info.Struct.decls;
+            if (info == .@"struct") {
+                const decls = info.@"struct".decls;
                 inline for (decls) |decl| {
                     const DeclType = @TypeOf(@field(Data, decl.name));
-                    if (@typeInfo(DeclType) == .Fn) return true;
+                    if (@typeInfo(DeclType) == .@"fn") return true;
                 }
             }
 
@@ -4553,6 +4553,7 @@ const tests = struct {
             // Comptime template render
             const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
 
+            // TODO: Determine why this throws "runtime value contains reference to comptime var"
             const result = try allocRender(allocator, comptime_template, data);
             defer allocator.free(result);
             try testing.expectEqualStrings(expected, result);
@@ -4639,6 +4640,7 @@ const tests = struct {
                 }
             }
 
+            // TODO: Determine why this throws "runtime value contains reference to comptime var"
             const result = try allocRenderPartials(allocator, comptime_template, comptime_partials, data);
             defer allocator.free(result);
 

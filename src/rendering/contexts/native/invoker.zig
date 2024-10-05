@@ -44,7 +44,7 @@ pub fn InvokerType(
             comptime action_fn: anytype,
         ) type {
             const action_type_info = @typeInfo(@TypeOf(action_fn));
-            if (action_type_info != .Fn) @compileError("action_fn must be a function");
+            if (action_type_info != .@"fn") @compileError("action_fn must be a function");
 
             return struct {
                 const PathResolution = PathResolutionType(TReturn);
@@ -96,7 +96,7 @@ pub fn InvokerType(
                 ) TError!PathResolution {
                     const Data = @TypeOf(data);
                     switch (@typeInfo(TValue)) {
-                        .Struct => {
+                        .@"struct" => {
                             return findFieldPath(
                                 depth,
                                 TValue,
@@ -107,7 +107,7 @@ pub fn InvokerType(
                                 index,
                             );
                         },
-                        .Pointer => |info| switch (info.size) {
+                        .pointer => |info| switch (info.size) {
                             .One => return try recursiveFind(
                                 depth,
                                 info.child,
@@ -131,7 +131,7 @@ pub fn InvokerType(
                             .Many => @compileError("[*] pointers not supported"),
                             .C => @compileError("[*c] pointers not supported"),
                         },
-                        .Optional => |info| {
+                        .optional => |info| {
                             if (!Fields.isNull(Data, data)) {
                                 return try recursiveFind(
                                     depth,
@@ -144,7 +144,7 @@ pub fn InvokerType(
                                 );
                             }
                         },
-                        .Array, .Vector => {
+                        .array, .vector => {
                             //Slice supports the "len" field,
                             if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
                                 return if (next_path_parts.len == 0)
@@ -221,7 +221,7 @@ pub fn InvokerType(
                 ) TError!PathResolution {
                     const TData = @TypeOf(data);
                     const TFn = @TypeOf(bound_fn);
-                    const params_len = @typeInfo(TFn).Fn.params.len;
+                    const params_len = @typeInfo(TFn).@"fn".params.len;
 
                     // Lambdas cannot be used for navigation through a path
                     // Examples:
@@ -251,7 +251,7 @@ pub fn InvokerType(
                 ) TError!PathResolution {
                     const Data = @TypeOf(data);
                     switch (@typeInfo(TValue)) {
-                        .Struct => |info| {
+                        .@"struct" => |info| {
                             if (info.is_tuple) {
                                 const derref = comptime stdx.isSingleItemPtr(Data);
                                 inline for (0..info.fields.len) |i| {
@@ -269,13 +269,13 @@ pub fn InvokerType(
                             }
                         },
                         // Booleans are evaluated on the iterator
-                        .Bool => {
+                        .bool => {
                             return if (data == true and index == 0)
                                 PathResolution{ .field = try action_fn(action_param, data) }
                             else
                                 .iterator_consumed;
                         },
-                        .Pointer => |info| switch (info.size) {
+                        .pointer => |info| switch (info.size) {
                             .One => {
                                 return try iterateAt(
                                     info.child,
@@ -300,7 +300,7 @@ pub fn InvokerType(
                             },
                             else => {},
                         },
-                        .Array => |info| {
+                        .array => |info| {
                             //Array of u8 is always string
                             if (info.child != u8) {
                                 return if (index < data.len)
@@ -314,7 +314,7 @@ pub fn InvokerType(
                                     .iterator_consumed;
                             }
                         },
-                        .Vector => {
+                        .vector => {
                             return if (index < data.len)
                                 PathResolution{
                                     .field = try action_fn(
@@ -325,7 +325,7 @@ pub fn InvokerType(
                             else
                                 .iterator_consumed;
                         },
-                        .Optional => |info| {
+                        .optional => |info| {
                             return if (!Fields.isNull(Data, data))
                                 try iterateAt(
                                     info.child,
@@ -483,8 +483,8 @@ pub fn InvokerType(
 // https://github.com/ziglang/zig/issues/2473
 fn isOnErrorSet(comptime Error: type, value: anyerror) bool {
     switch (@typeInfo(Error)) {
-        .ErrorSet => |info| if (info) |errors| {
-            if (@typeInfo(@TypeOf(value)) == .ErrorSet) {
+        .error_set => |info| if (info) |errors| {
+            if (@typeInfo(@TypeOf(value)) == .error_set) {
                 inline for (errors) |item| {
                     const int_value = @intFromError(@field(Error, item.name));
                     if (int_value == @intFromError(value)) return true;

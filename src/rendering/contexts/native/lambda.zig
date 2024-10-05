@@ -97,7 +97,7 @@ pub fn isLambdaInvoker(comptime TValue: type) bool {
     if (comptime stdx.isSingleItemPtr(TValue)) {
         return isLambdaInvoker(meta.Child(TValue));
     } else {
-        return @typeInfo(TValue) == .Struct and
+        return @typeInfo(TValue) == .@"struct" and
             @hasField(TValue, "data") and
             @hasField(TValue, "bound_fn") and
             blk: {
@@ -134,15 +134,16 @@ test "isLambdaInvoker" {
 /// fn (*TData, LambdaContext) anyerror!void
 pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
     const fn_info = switch (@typeInfo(TFn)) {
-        .Fn => |info| info,
+        .@"fn" => |info| info,
         else => return false,
     };
 
-    const Type = std.builtin.Type;
-    const FnParam = Type.Fn.Param;
+    // TODO: Update types to oncemore be strict on the input type
+    //const Type = std.builtin.Type;
+    //const FnParam = Type.@"fn".Param;
 
     const paramIs = struct {
-        fn action(comptime param: FnParam, comptime types: []const type) bool {
+        fn action(comptime param: anytype, comptime types: []const type) bool {
             inline for (types) |compare_to| {
                 if (param.type) |param_type| {
                     if (param_type == compare_to) return true;
@@ -172,8 +173,8 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
     };
 
     const valid_return = comptime if (fn_info.return_type) |return_type| switch (@typeInfo(return_type)) {
-        .ErrorUnion => |err_info| err_info.payload == void,
-        .Void => true,
+        .error_union => |err_info| err_info.payload == void,
+        .void => true,
         else => false,
     } else false;
 
@@ -256,7 +257,7 @@ pub fn LambdaInvokerType(comptime TData: type, comptime TFn: type) type {
 
         pub fn invoke(self: *const Self, lambda_context: LambdaContext) anyerror!void {
             comptime assert(isValidLambdaFunction(TData, TFn));
-            const fn_type = @typeInfo(TFn).Fn;
+            const fn_type = @typeInfo(TFn).@"fn";
 
             if (TData == void) {
                 try self.call(.{lambda_context});
@@ -272,7 +273,7 @@ pub fn LambdaInvokerType(comptime TData: type, comptime TFn: type) type {
                     @compileError("Generic argument could not be evaluated");
 
                 switch (@typeInfo(TData)) {
-                    .Pointer => |info| {
+                    .pointer => |info| {
                         switch (info.size) {
                             .One => {
                                 if (info.child == fnArg) {
@@ -282,7 +283,7 @@ pub fn LambdaInvokerType(comptime TData: type, comptime TFn: type) type {
                                     try self.call(.{ self.data.*, lambda_context });
                                 } else {
                                     switch (@typeInfo(fnArg)) {
-                                        .Pointer => |arg_info| {
+                                        .pointer => |arg_info| {
                                             if (info.child == arg_info.child) {
                                                 if (arg_info.is_const == true or info.is_const == false) {
 
@@ -303,7 +304,7 @@ pub fn LambdaInvokerType(comptime TData: type, comptime TFn: type) type {
                     },
                     else => {
                         switch (@typeInfo(fnArg)) {
-                            .Pointer => |arg_info| {
+                            .pointer => |arg_info| {
                                 if (TData == arg_info.child and arg_info.is_const == true) {
 
                                     // fn (self const* TValue ...)
@@ -334,9 +335,9 @@ pub fn LambdaInvokerType(comptime TData: type, comptime TFn: type) type {
         }
 
         inline fn call(self: Self, args: anytype) anyerror!void {
-            const fn_type = @typeInfo(TFn).Fn;
+            const fn_type = @typeInfo(TFn).@"fn";
             const return_type = fn_type.return_type orelse @compileError("Generic function could not be evaluated");
-            const has_error = @typeInfo(return_type) == .ErrorUnion;
+            const has_error = @typeInfo(return_type) == .error_union;
 
             if (has_error)
                 try @call(.auto, self.bound_fn, args)

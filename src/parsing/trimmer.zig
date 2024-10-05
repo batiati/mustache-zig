@@ -16,7 +16,7 @@ const TemplateOptions = mustache.options.TemplateOptions;
 const parsing = @import("parsing.zig");
 
 pub fn TrimmerType(comptime TextScanner: type, comptime TrimmingIndex: type) type {
-    return if (@typeInfo(TrimmingIndex) == .Union)
+    return if (@typeInfo(TrimmingIndex) == .@"union")
         struct {
             const Trimmer = @This();
 

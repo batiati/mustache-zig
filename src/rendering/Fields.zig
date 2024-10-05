@@ -22,15 +22,15 @@ pub inline fn getField(data: anytype, comptime field_name: []const u8) field_typ
     const TField = FieldType(Data, field_name);
 
     switch (@typeInfo(TField)) {
-        .ComptimeInt => {
+        .comptime_int => {
             const comptime_value = @field(data, field_name);
             break :field_type RuntimeInt(comptime_value);
         },
-        .ComptimeFloat => {
+        .comptime_float => {
             const comptime_value = @field(data, field_name);
             break :field_type RuntimeFloat(comptime_value);
         },
-        .Null => break :field_type ?u0,
+        .null => break :field_type ?u0,
         else => break :field_type FieldRef(Data, field_name),
     }
 } {
@@ -47,7 +47,7 @@ pub inline fn getField(data: anytype, comptime field_name: []const u8) field_typ
         const comptime_value = @field(data, field_name);
         const runtime_value: RuntimeFloat(comptime_value) = comptime_value;
         return runtime_value;
-    } else if (TField == @TypeOf(.Null)) {
+    } else if (TField == @TypeOf(.null)) {
         const runtime_null: ?u0 = null;
         return runtime_null;
     }
@@ -67,7 +67,7 @@ pub inline fn getRuntimeValue(ctx: anytype) type: {
         RuntimeInt(ctx)
     else if (TContext == comptime_float)
         RuntimeFloat(ctx)
-    else if (TContext == @Type(.Null))
+    else if (TContext == @Type(.null))
         ?u0
     else
         TContext;
@@ -82,7 +82,7 @@ pub inline fn getRuntimeValue(ctx: anytype) type: {
         const comptime_value = ctx;
         const runtime_value: RuntimeFloat(comptime_value) = comptime_value;
         return runtime_value;
-    } else if (TContext == @TypeOf(.Null)) {
+    } else if (TContext == @TypeOf(.null)) {
         const runtime_null: ?u0 = null;
         return runtime_null;
     } else {
@@ -101,7 +101,7 @@ pub inline fn getTupleElement(ctx: anytype, comptime index: usize) element_type:
     } else if (ElementType == comptime_float) {
         const comptime_value = ctx[index];
         break :element_type RuntimeFloat(comptime_value);
-    } else if (ElementType == @Type(.Null)) {
+    } else if (ElementType == @Type(.null)) {
         break :element_type ?u0;
     } else if (byValue(ElementType)) {
         break :element_type ElementType;
@@ -118,7 +118,7 @@ pub inline fn getTupleElement(ctx: anytype, comptime index: usize) element_type:
         const comptime_value = ctx[index];
         const runtime_value: RuntimeFloat(comptime_value) = comptime_value;
         return runtime_value;
-    } else if (ElementType == @Type(.Null)) {
+    } else if (ElementType == @Type(.null)) {
         const runtime_null: ?u0 = null;
         return runtime_null;
     } else if (comptime byValue(ElementType)) {
@@ -153,7 +153,7 @@ pub inline fn getElement(ctx: anytype, index: usize) element_type: {
 
 fn Lhs(comptime T: type) type {
     comptime {
-        if (@typeInfo(T) == .Optional) {
+        if (@typeInfo(T) == .optional) {
             return Lhs(meta.Child(T));
         } else if (needsDerref(T)) {
             return Lhs(meta.Child(T));
@@ -164,7 +164,7 @@ fn Lhs(comptime T: type) type {
 }
 
 pub inline fn lhs(comptime T: type, value: T) Lhs(T) {
-    if (@typeInfo(T) == .Optional) {
+    if (@typeInfo(T) == .optional) {
         return lhs(@TypeOf(value.?), value.?);
     } else if (comptime needsDerref(T)) {
         return lhs(@TypeOf(value.*), value.*);
@@ -179,7 +179,7 @@ pub inline fn needsDerref(comptime T: type) bool {
             const Child = meta.Child(T);
             return stdx.isSingleItemPtr(Child) or
                 stdx.isSlice(Child) or
-                @typeInfo(Child) == .Optional;
+                @typeInfo(Child) == .optional;
         } else {
             return false;
         }
@@ -188,7 +188,7 @@ pub inline fn needsDerref(comptime T: type) bool {
 
 pub fn byValue(comptime TField: type) bool {
     comptime {
-        if (@typeInfo(TField) == .EnumLiteral) @compileError(
+        if (@typeInfo(TField) == .enum_literal) @compileError(
             \\Enum literal is not supported for interpolation
             \\Error: ir_resolve_lazy_recurse. This is a bug in the Zig compiler
             \\Type:
@@ -209,8 +209,8 @@ pub fn byValue(comptime TField: type) bool {
 
         const can_embed = size <= max_size and
             switch (@typeInfo(TField)) {
-            .Enum, .EnumLiteral, .Bool, .Int, .Float => true,
-            .Optional => |info| byValue(info.child),
+            .@"enum", .enum_literal, .bool, .int, .float => true,
+            .optional => |info| byValue(info.child),
             else => false,
         };
 
@@ -220,27 +220,27 @@ pub fn byValue(comptime TField: type) bool {
 
 pub inline fn isNull(comptime T: type, data: T) bool {
     return switch (@typeInfo(T)) {
-        .Pointer => |info| switch (info.size) {
+        .pointer => |info| switch (info.size) {
             .One => return isNull(@TypeOf(data.*), data.*),
             .Slice => return false,
             .Many => @compileError("[*] pointers not supported"),
             .C => @compileError("[*c] pointers not supported"),
         },
-        .Optional => return data == null,
+        .optional => return data == null,
         else => return false,
     };
 }
 
 pub inline fn lenOf(comptime T: type, data: T) ?usize {
     return switch (@typeInfo(T)) {
-        .Pointer => |info| switch (info.size) {
+        .pointer => |info| switch (info.size) {
             .One => return null,
             .Slice => return data.len,
             .Many => @compileError("[*] pointers not supported"),
             .C => @compileError("[*c] pointers not supported"),
         },
-        .Array, .Vector => return data.len,
-        .Optional => if (data) |value| return lenOf(@TypeOf(value), value) else null,
+        .array, .vector => return data.len,
+        .optional => if (data) |value| return lenOf(@TypeOf(value), value) else null,
         else => return null,
     };
 }
@@ -250,17 +250,17 @@ fn FieldRef(comptime T: type, comptime field_name: []const u8) type {
 
     assert(TField != comptime_int);
     assert(TField != comptime_float);
-    assert(TField != @TypeOf(.Null));
+    assert(TField != @TypeOf(.null));
 
-    if (@typeInfo(T) == .Optional) {
+    if (@typeInfo(T) == .optional) {
         return FieldRef(meta.Child(T), field_name);
     } else if (needsDerref(T)) {
         return FieldRef(meta.Child(T), field_name);
     } else {
         const instance: T = switch (@typeInfo(T)) {
-            .Struct => std.mem.zeroInit(T, .{}),
-            .Pointer => @ptrFromInt(@alignOf(T)),
-            .Void => {},
+            .@"struct" => std.mem.zeroInit(T, .{}),
+            .pointer => @ptrFromInt(@alignOf(T)),
+            .void => {},
             else => undefined,
         };
 
@@ -269,7 +269,7 @@ fn FieldRef(comptime T: type, comptime field_name: []const u8) type {
 }
 
 fn FieldType(comptime T: type, comptime field_name: []const u8) type {
-    if (@typeInfo(T) == .Optional) {
+    if (@typeInfo(T) == .optional) {
         const Child = meta.Child(T);
         return FieldType(Child, field_name);
     } else if (stdx.isSingleItemPtr(T)) {

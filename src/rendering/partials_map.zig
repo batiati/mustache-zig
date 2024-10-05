@@ -47,9 +47,9 @@ pub fn PartialsMapType(comptime TPartials: type, comptime comptime_options: Rend
 
         pub fn isEmpty() bool {
             return switch (@typeInfo(TPartials)) {
-                .Void => true,
-                .Struct => |info| info.is_tuple and info.fields.len == 0,
-                inline .Array, .Vector => |info| return info.len == 0,
+                .void => true,
+                .@"struct" => |info| info.is_tuple and info.fields.len == 0,
+                inline .array, .vector => |info| return info.len == 0,
                 else => false,
             };
         }
@@ -136,7 +136,7 @@ pub fn PartialsMapType(comptime TPartials: type, comptime comptime_options: Rend
         fn isValidIndexable() bool {
             comptime {
                 if (stdx.isIndexable(TPartials) and !stdx.isTuple(TPartials)) {
-                    if (stdx.isSingleItemPtr(TPartials) and @typeInfo(meta.Child(TPartials)) == .Array) {
+                    if (stdx.isSingleItemPtr(TPartials) and @typeInfo(meta.Child(TPartials)) == .array) {
                         const Array = meta.Child(TPartials);
                         return isPartialsTupleElement(meta.Child(Array));
                     } else {
@@ -166,9 +166,9 @@ pub fn PartialsMapType(comptime TPartials: type, comptime comptime_options: Rend
 
         fn isValidMap() bool {
             comptime {
-                if (@typeInfo(TPartials) == .Struct and stdx.hasDecls(TPartials, .{ "KV", "get" })) {
+                if (@typeInfo(TPartials) == .@"struct" and stdx.hasDecls(TPartials, .{ "KV", "get" })) {
                     const KV = @field(TPartials, "KV");
-                    if (@typeInfo(KV) == .Struct and stdx.hasFields(KV, .{ "key", "value" })) {
+                    if (@typeInfo(KV) == .@"struct" and stdx.hasFields(KV, .{ "key", "value" })) {
                         const kv: KV = undefined;
                         return stdx.isZigString(@TypeOf(kv.key)) and
                             (@TypeOf(kv.value) == PartialsMap.Template or

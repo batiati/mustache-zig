@@ -83,7 +83,7 @@ pub fn ContextType(
                     if (path.len == 1) {
                         return self.callGet(&root_path, index);
                     } else {
-                        @setCold(true);
+                        @branchHint(.cold);
                         return self.getFromPath(&root_path, &root_path, path[1..], index);
                     }
                 } else {
@@ -161,7 +161,7 @@ pub fn ContextType(
                     if (path.len == 1) {
                         return self.callCapacityHint(&root_path);
                     } else {
-                        @setCold(true);
+                        @branchHint(.cold);
                         return self.capacityHintFromPath(&root_path, &root_path, path[1..]);
                     }
                 } else {
@@ -244,7 +244,7 @@ pub fn ContextType(
                             escape,
                         );
                     } else {
-                        @setCold(true);
+                        @branchHint(.cold);
                         return try self.interpolateFromPath(
                             data_render,
                             &root_path,

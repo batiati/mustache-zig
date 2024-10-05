@@ -448,14 +448,14 @@ pub fn TemplateLoaderType(comptime options: TemplateOptions) type {
             const renderInfo = @typeInfo(TRender);
 
             const ParserError = switch (parserInfo) {
-                .Struct => TParser.LoadError,
-                .Pointer => |info| if (info.size == .One) info.child.LoadError else @compileError("expected a reference to a parser, found " ++ @typeName(TParser)),
+                .@"struct" => TParser.LoadError,
+                .pointer => |info| if (info.size == .One) info.child.LoadError else @compileError("expected a reference to a parser, found " ++ @typeName(TParser)),
                 else => @compileError("expected a parser, found " ++ @typeName(TParser)),
             };
 
             const RenderError = switch (renderInfo) {
-                .Struct => TRender.Error,
-                .Pointer => |info| if (info.size == .One) info.child.Error else @compileError("expected a reference to a render, found " ++ @typeName(TParser)),
+                .@"struct" => TRender.Error,
+                .pointer => |info| if (info.size == .One) info.child.Error else @compileError("expected a reference to a render, found " ++ @typeName(TParser)),
                 else => @compileError("expected a render, found " ++ @typeName(TParser)),
             };
 
