@@ -256,12 +256,16 @@ pub fn TextScannerType(comptime Node: type, comptime options: TemplateOptions) t
                         self.moveLineCounter(char);
                     },
                     .matching_close => |*close_state| {
+                        // TODO: Remove this copy
+                        const close_state_copy: @TypeOf(self.state).MatchingCloseState = .{ .delimiter_index = close_state.delimiter_index, .part_type = close_state.part_type };
                         const delimiter_char = self.delimiters.ending_delimiter[close_state.delimiter_index];
                         if (char == delimiter_char) {
                             const next_index = close_state.delimiter_index + 1;
 
                             if (self.delimiters.ending_delimiter.len == next_index) {
-                                self.state = .{ .produce_close = close_state.part_type };
+                                // TODO: Determine why Zig states this line is "access of inactive union field"
+                                //self.state = .{ .produce_close = close_state.part_type };
+                                self.state = .{ .produce_close = close_state_copy.part_type };
                             } else {
                                 close_state.delimiter_index = next_index;
                             }
