@@ -138,12 +138,11 @@ pub fn isValidLambdaFunction(comptime TData: type, comptime TFn: type) bool {
         else => return false,
     };
 
-    // TODO: Update types to oncemore be strict on the input type
-    //const Type = std.builtin.Type;
-    //const FnParam = Type.@"fn".Param;
+    const Type = std.builtin.Type;
+    const FnParam = Type.Fn.Param;
 
     const paramIs = struct {
-        fn action(comptime param: anytype, comptime types: []const type) bool {
+        fn action(comptime param: FnParam, comptime types: []const type) bool {
             inline for (types) |compare_to| {
                 if (param.type) |param_type| {
                     if (param_type == compare_to) return true;
