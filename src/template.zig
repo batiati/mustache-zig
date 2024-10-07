@@ -465,6 +465,7 @@ pub fn TemplateLoaderType(comptime options: TemplateOptions) type {
 }
 
 const comptime_tests_enabled = @import("build_comptime_tests").comptime_tests_enabled;
+
 test {
     _ = tests;
     _ = parsing;
