@@ -80,6 +80,7 @@ pub fn ContextImplType(
     comptime Writer: type,
     comptime Data: type,
     comptime PartialsMap: type,
+    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
     if (comptime context_source != ContextSource.fromData(Data)) {
@@ -91,13 +92,13 @@ pub fn ContextImplType(
     }
 
     return switch (context_source) {
-        .native => native_context.ContextImplType(Writer, Data, PartialsMap, options),
+        .native => native_context.ContextImplType(Writer, Data, PartialsMap, UserData, options),
         .json => json_context.ContextType(Writer, PartialsMap, options),
         .ffi => ffi_context.ContextType(Writer, PartialsMap, options),
     };
 }
 
-pub fn ContextIteratorType(comptime ContextInterface: type) type {
+pub fn ContextIteratorType(comptime ContextInterface: type, comptime DataRender: type) type {
     return struct {
         const Iterator = @This();
 
@@ -107,6 +108,7 @@ pub fn ContextIteratorType(comptime ContextInterface: type) type {
             sequence: struct {
                 context: *const ContextInterface,
                 path: Element.Path,
+                data_render: *DataRender,
                 state: union(enum) {
                     fetching: struct {
                         item: ContextInterface,
@@ -116,7 +118,7 @@ pub fn ContextIteratorType(comptime ContextInterface: type) type {
                 },
 
                 fn fetch(self: @This(), index: usize) ?ContextInterface {
-                    const result = self.context.get(self.path, index);
+                    const result = self.context.get(self.data_render, self.path, index);
 
                     return switch (result) {
                         .field => |item| item,
@@ -144,6 +146,7 @@ pub fn ContextIteratorType(comptime ContextInterface: type) type {
         pub fn initSequence(
             parent_ctx: *const ContextInterface,
             path: Element.Path,
+            data_render: *DataRender,
             item: ContextInterface,
         ) Iterator {
             return .{
@@ -151,6 +154,7 @@ pub fn ContextIteratorType(comptime ContextInterface: type) type {
                     .sequence = .{
                         .context = parent_ctx,
                         .path = path,
+                        .data_render = data_render,
                         .state = .{
                             .fetching = .{
                                 .item = item,
@@ -216,6 +220,7 @@ pub const LambdaContext = struct {
     vtable: *const VTable,
 
     inner_text: []const u8,
+    allocator: ?std.mem.Allocator,
 
     pub const VTable = struct {
         renderAlloc: *const fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,

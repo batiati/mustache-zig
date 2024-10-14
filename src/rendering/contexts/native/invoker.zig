@@ -26,6 +26,7 @@ const LambdaInvokerType = lambda.LambdaInvokerType;
 pub fn InvokerType(
     comptime Writer: type,
     comptime PartialsMap: type,
+    comptime UserData: type,
     comptime options: RenderOptions,
 ) type {
     const RenderEngine = rendering.RenderEngineType(
@@ -53,16 +54,18 @@ pub fn InvokerType(
 
                 pub inline fn call(
                     action_param: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     path: Element.Path,
                     index: ?usize,
                 ) TError!PathResolution {
-                    return find(.Root, action_param, data, path, index);
+                    return find(.Root, action_param, data_render, data, path, index);
                 }
 
                 fn find(
                     depth: Depth,
                     action_param: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     path: Element.Path,
                     index: ?usize,
@@ -72,15 +75,15 @@ pub fn InvokerType(
 
                     const ctx = Fields.getRuntimeValue(data);
 
-                    if (comptime lambda.isLambdaInvoker(Data)) {
-                        return PathResolution{ .lambda = try action_fn(action_param, ctx) };
+                    if (comptime lambda.isLambdaInvoker(if (DataRender.GlobalLambdas == Data) UserData else Data)) {
+                        return PathResolution{ .lambda = try action_fn(action_param, data_render, ctx) };
                     } else {
                         if (path.len > 0) {
-                            return recursiveFind(depth, Data, action_param, ctx, path[0], path[1..], index);
+                            return recursiveFind(depth, Data, action_param, data_render, ctx, path[0], path[1..], index);
                         } else if (index) |current_index| {
-                            return iterateAt(Data, action_param, ctx, current_index);
+                            return iterateAt(Data, action_param, data_render, ctx, current_index);
                         } else {
-                            return PathResolution{ .field = try action_fn(action_param, ctx) };
+                            return PathResolution{ .field = try action_fn(action_param, data_render, ctx) };
                         }
                     }
                 }
@@ -89,6 +92,7 @@ pub fn InvokerType(
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     current_path_part: []const u8,
                     next_path_parts: Element.Path,
@@ -101,6 +105,7 @@ pub fn InvokerType(
                                 depth,
                                 TValue,
                                 action_param,
+                                data_render,
                                 data,
                                 current_path_part,
                                 next_path_parts,
@@ -112,6 +117,7 @@ pub fn InvokerType(
                                 depth,
                                 info.child,
                                 action_param,
+                                data_render,
                                 data,
                                 current_path_part,
                                 next_path_parts,
@@ -122,7 +128,7 @@ pub fn InvokerType(
                                 if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
                                     return if (next_path_parts.len == 0)
                                         PathResolution{
-                                            .field = try action_fn(action_param, Fields.lenOf(Data, data)),
+                                            .field = try action_fn(action_param, data_render, Fields.lenOf(Data, data)),
                                         }
                                     else
                                         .chain_broken;
@@ -137,6 +143,7 @@ pub fn InvokerType(
                                     depth,
                                     info.child,
                                     action_param,
+                                    data_render,
                                     data,
                                     current_path_part,
                                     next_path_parts,
@@ -149,7 +156,7 @@ pub fn InvokerType(
                             if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
                                 return if (next_path_parts.len == 0)
                                     PathResolution{
-                                        .field = try action_fn(action_param, Fields.lenOf(Data, data)),
+                                        .field = try action_fn(action_param, data_render, Fields.lenOf(Data, data)),
                                     }
                                 else
                                     .chain_broken;
@@ -165,6 +172,7 @@ pub fn InvokerType(
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     current_path_part: []const u8,
                     next_path_parts: Element.Path,
@@ -173,11 +181,11 @@ pub fn InvokerType(
                     const fields = std.meta.fields(TValue);
                     inline for (fields) |field| {
                         if (std.mem.eql(u8, field.name, current_path_part)) {
-                            return try find(.Leaf, action_param, Fields.getField(data, field.name), next_path_parts, index);
+                            return try find(.Leaf, action_param, data_render, Fields.getField(data, field.name), next_path_parts, index);
                         }
                     } else {
                         if (next_path_parts.len == 0) {
-                            return try findLambdaPath(depth, TValue, action_param, data, current_path_part);
+                            return try findLambdaPath(depth, TValue, action_param, data_render, data, current_path_part);
                         } else {
                             return if (depth == .Root) .not_found_in_context else .chain_broken;
                         }
@@ -188,6 +196,7 @@ pub fn InvokerType(
                     depth: Depth,
                     comptime TValue: type,
                     action_param: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     current_path_part: []const u8,
                 ) TError!PathResolution {
@@ -196,11 +205,12 @@ pub fn InvokerType(
                         const has_fn = comptime meta.hasFn(TValue, decl.name);
                         if (has_fn) {
                             const bound_fn = @field(TValue, decl.name);
-                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(TValue, @TypeOf(bound_fn));
+                            const is_valid_lambda = comptime lambda.isValidLambdaFunction(if (DataRender.GlobalLambdas == TValue) UserData else TValue, @TypeOf(bound_fn));
                             if (std.mem.eql(u8, current_path_part, decl.name)) {
                                 if (is_valid_lambda) {
                                     return try getLambda(
                                         action_param,
+                                        data_render,
                                         Fields.lhs(@TypeOf(data), data),
                                         bound_fn,
                                     );
@@ -216,6 +226,7 @@ pub fn InvokerType(
 
                 fn getLambda(
                     action_param: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     bound_fn: anytype,
                 ) TError!PathResolution {
@@ -231,21 +242,25 @@ pub fn InvokerType(
                     const LambdaInvoker = if (params_len == 1)
                         LambdaInvokerType(void, TFn)
                     else
-                        LambdaInvokerType(TData, TFn);
+                        LambdaInvokerType(if (DataRender.GlobalLambdas == TData) UserData else TData, TFn);
 
                     // TData is likely a pointer, or a primitive value (See Field.byValue)
                     // This struct will be copied by value to the lambda context
                     const invoker = LambdaInvoker{
                         .bound_fn = bound_fn,
-                        .data = if (params_len == 1) {} else data,
+                        .data = if (params_len == 1) {} else if (DataRender.GlobalLambdas == TData)
+                            data_render.stack.ctx.ctx.get(UserData)
+                        else
+                            data,
                     };
 
-                    return PathResolution{ .lambda = try action_fn(action_param, invoker) };
+                    return PathResolution{ .lambda = try action_fn(action_param, data_render, invoker) };
                 }
 
                 fn iterateAt(
                     comptime TValue: type,
                     action_param: anytype,
+                    data_render: *DataRender,
                     data: anytype,
                     index: usize,
                 ) TError!PathResolution {
@@ -259,6 +274,7 @@ pub fn InvokerType(
                                         return PathResolution{
                                             .field = try action_fn(
                                                 action_param,
+                                                data_render,
                                                 Fields.getTupleElement(if (derref) data.* else data, i),
                                             ),
                                         };
@@ -271,7 +287,7 @@ pub fn InvokerType(
                         // Booleans are evaluated on the iterator
                         .bool => {
                             return if (data == true and index == 0)
-                                PathResolution{ .field = try action_fn(action_param, data) }
+                                PathResolution{ .field = try action_fn(action_param, data_render, data) }
                             else
                                 .iterator_consumed;
                         },
@@ -280,6 +296,7 @@ pub fn InvokerType(
                                 return try iterateAt(
                                     info.child,
                                     action_param,
+                                    data_render,
                                     Fields.lhs(Data, data),
                                     index,
                                 );
@@ -291,6 +308,7 @@ pub fn InvokerType(
                                         PathResolution{
                                             .field = try action_fn(
                                                 action_param,
+                                                data_render,
                                                 Fields.getElement(Fields.lhs(Data, data), index),
                                             ),
                                         }
@@ -307,6 +325,7 @@ pub fn InvokerType(
                                     PathResolution{
                                         .field = try action_fn(
                                             action_param,
+                                            data_render,
                                             Fields.getElement(Fields.lhs(Data, data), index),
                                         ),
                                     }
@@ -319,6 +338,7 @@ pub fn InvokerType(
                                 PathResolution{
                                     .field = try action_fn(
                                         action_param,
+                                        data_render,
                                         Fields.getElement(Fields.lhs(Data, data), index),
                                     ),
                                 }
@@ -330,6 +350,7 @@ pub fn InvokerType(
                                 try iterateAt(
                                     info.child,
                                     action_param,
+                                    data_render,
                                     Fields.lhs(Data, data),
                                     index,
                                 )
@@ -341,7 +362,7 @@ pub fn InvokerType(
 
                     return if (index == 0)
                         PathResolution{
-                            .field = try action_fn(action_param, data),
+                            .field = try action_fn(action_param, data_render, data),
                         }
                     else
                         .iterator_consumed;
@@ -350,6 +371,7 @@ pub fn InvokerType(
         }
 
         pub inline fn get(
+            data_render: *DataRender,
             data: anytype,
             path: Element.Path,
             index: ?usize,
@@ -357,6 +379,7 @@ pub fn InvokerType(
             const GetPathInvoker = PathInvokerType(error{}, Context, getAction);
             return GetPathInvoker.call(
                 {},
+                data_render,
                 data,
                 path,
                 index,
@@ -375,7 +398,8 @@ pub fn InvokerType(
                 interpolateAction,
             );
             return InterpolatePathInvoker.call(
-                .{ data_render, escape },
+                .{escape},
+                data_render,
                 data,
                 path,
                 null,
@@ -389,6 +413,7 @@ pub fn InvokerType(
         ) PathResolutionType(usize) {
             const CapacityHintPathInvoker = PathInvokerType(error{}, usize, capacityHintAction);
             return CapacityHintPathInvoker.call(
+                {},
                 data_render,
                 data,
                 path,
@@ -410,43 +435,52 @@ pub fn InvokerType(
                 expandLambdaAction,
             );
             return ExpandLambdaPathInvoker.call(
-                .{ data_render, inner_text, escape, delimiters },
+                .{ inner_text, escape, delimiters },
+                data_render,
                 data,
                 path,
                 null,
             );
         }
 
-        fn getAction(param: void, value: anytype) error{}!Context {
-            _ = param;
-            return RenderEngine.getContextType(value);
+        fn getAction(
+            params: void,
+            data_render: *DataRender,
+            value: anytype,
+        ) error{}!Context {
+            _ = params;
+            _ = data_render;
+            return RenderEngine.getContextType(UserData, value);
         }
 
         fn interpolateAction(
             params: anytype,
+            data_render: *DataRender,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
-            if (comptime !stdx.isTuple(@TypeOf(params)) and params.len != 2) {
+            if (comptime !stdx.isTuple(@TypeOf(params)) and params.len != 1) {
                 @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
             }
 
-            var data_render: *DataRender = params.@"0";
-            const escape: Escape = params.@"1";
+            const escape: Escape = params.@"0";
             _ = try data_render.write(value, escape);
         }
 
         fn capacityHintAction(
-            params: anytype,
+            params: void,
+            data_render: *DataRender,
             value: anytype,
         ) error{}!usize {
-            return params.valueCapacityHint(value);
+            _ = params;
+            return data_render.valueCapacityHint(value);
         }
 
         fn expandLambdaAction(
             params: anytype,
+            data_render: *DataRender,
             value: anytype,
         ) (Allocator.Error || Writer.Error)!void {
-            if (comptime !stdx.isTuple(@TypeOf(params)) and params.len != 4) {
+            if (comptime !stdx.isTuple(@TypeOf(params)) and params.len != 3) {
                 @compileError("Incorrect params " ++ @typeName(@TypeOf(params)));
             }
 
@@ -454,10 +488,9 @@ pub fn InvokerType(
 
             const Error = Allocator.Error || Writer.Error;
 
-            const data_render: *DataRender = params.@"0";
-            const inner_text: []const u8 = params.@"1";
-            const escape: Escape = params.@"2";
-            const delimiters: Delimiters = params.@"3";
+            const inner_text: []const u8 = params.@"0";
+            const escape: Escape = params.@"1";
+            const delimiters: Delimiters = params.@"2";
 
             const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, options);
             var impl = Impl{

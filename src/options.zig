@@ -112,7 +112,7 @@ pub const Lambdas = union(enum) {
     enabled: struct {
         /// Lambdas can expand to new tags, including another lambda
         /// Defines the max recursion depth to avoid infinite recursion when evaluating lambdas
-        /// A recursive lambda will interpolate as an empty string, without erros
+        /// A recursive lambda will interpolate as an empty string, without errors
         max_recursion: u32 = 100,
     },
 };
@@ -127,6 +127,10 @@ pub const RenderFromTemplateOptions = struct {
     /// Mustache's spec says it must be rendered as an empty string
     /// However, in Debug mode it defaults to `Error` to avoid silently broken contexts.
     context_misses: ContextMisses = if (builtin.mode == .Debug) .fail else .empty,
+
+    /// TODO: doc
+    /// TODO: generalize to other Options types
+    global_lambdas: ?type = null,
 };
 
 pub const RenderFromStringOptions = struct {
@@ -138,6 +142,10 @@ pub const RenderFromStringOptions = struct {
     /// Those options affect both performance and supported Mustache features.
     /// Defaults to full-spec compatible.
     features: Features = .{},
+
+    /// TODO: doc
+    /// TODO: generalize to other Options types
+    global_lambdas: ?type = null,
 };
 
 pub const RenderFromFileOptions = struct {
@@ -152,6 +160,10 @@ pub const RenderFromFileOptions = struct {
     /// Those options affect both performance and supported Mustache features.
     /// Defaults to full-spec compatible.
     features: Features = .{},
+
+    /// TODO: doc
+    /// TODO: generalize to other Options types
+    global_lambdas: ?type = null,
 };
 
 pub const RenderOptions = union(enum) {
