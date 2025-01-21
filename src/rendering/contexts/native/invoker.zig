@@ -108,7 +108,7 @@ pub fn InvokerType(
                             );
                         },
                         .pointer => |info| switch (info.size) {
-                            .One => return try recursiveFind(
+                            .one => return try recursiveFind(
                                 depth,
                                 info.child,
                                 action_param,
@@ -117,7 +117,7 @@ pub fn InvokerType(
                                 next_path_parts,
                                 index,
                             ),
-                            .Slice => {
+                            .slice => {
                                 //Slice supports the "len" field,
                                 if (next_path_parts.len == 0 and std.mem.eql(u8, "len", current_path_part)) {
                                     return if (next_path_parts.len == 0)
@@ -128,8 +128,8 @@ pub fn InvokerType(
                                         .chain_broken;
                                 }
                             },
-                            .Many => @compileError("[*] pointers not supported"),
-                            .C => @compileError("[*c] pointers not supported"),
+                            .many => @compileError("[*] pointers not supported"),
+                            .c => @compileError("[*c] pointers not supported"),
                         },
                         .optional => |info| {
                             if (!Fields.isNull(Data, data)) {
@@ -276,7 +276,7 @@ pub fn InvokerType(
                                 .iterator_consumed;
                         },
                         .pointer => |info| switch (info.size) {
-                            .One => {
+                            .one => {
                                 return try iterateAt(
                                     info.child,
                                     action_param,
@@ -284,7 +284,7 @@ pub fn InvokerType(
                                     index,
                                 );
                             },
-                            .Slice => {
+                            .slice => {
                                 //Slice of u8 is always string
                                 if (info.child != u8) {
                                     return if (index < data.len)

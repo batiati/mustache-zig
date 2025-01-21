@@ -53,8 +53,8 @@ pub fn PathResolutionType(comptime Payload: type) type {
 }
 
 pub const Escape = enum {
-    Escaped,
-    Unescaped,
+    escaped,
+    unescaped,
 };
 
 pub fn ContextType(
