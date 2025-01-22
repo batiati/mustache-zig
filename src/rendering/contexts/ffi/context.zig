@@ -689,12 +689,12 @@ const context_tests = struct {
 
         const writer = list.writer();
 
-        try interpolateCtx(writer, person_ctx, "id", .Unescaped);
+        try interpolateCtx(writer, person_ctx, "id", .unescaped);
         try testing.expectEqualStrings("100", list.items);
 
         list.clearAndFree();
 
-        try interpolateCtx(writer, person_ctx, "name", .Unescaped);
+        try interpolateCtx(writer, person_ctx, "name", .unescaped);
         try testing.expectEqualStrings("Angus McGyver", list.items);
 
         list.clearAndFree();
@@ -721,12 +721,12 @@ const context_tests = struct {
 
         const writer = list.writer();
 
-        try interpolateCtx(writer, person_ctx, "boss.id", .Unescaped);
+        try interpolateCtx(writer, person_ctx, "boss.id", .unescaped);
         try testing.expectEqualStrings("101", list.items);
 
         list.clearAndFree();
 
-        try interpolateCtx(writer, person_ctx, "boss.name", .Unescaped);
+        try interpolateCtx(writer, person_ctx, "boss.name", .unescaped);
         try testing.expectEqualStrings("Peter Thornton", list.items);
 
         list.clearAndFree();

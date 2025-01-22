@@ -221,10 +221,10 @@ pub fn byValue(comptime TField: type) bool {
 pub inline fn isNull(comptime T: type, data: T) bool {
     return switch (@typeInfo(T)) {
         .pointer => |info| switch (info.size) {
-            .One => return isNull(@TypeOf(data.*), data.*),
-            .Slice => return false,
-            .Many => @compileError("[*] pointers not supported"),
-            .C => @compileError("[*c] pointers not supported"),
+            .one => return isNull(@TypeOf(data.*), data.*),
+            .slice => return false,
+            .many => @compileError("[*] pointers not supported"),
+            .c => @compileError("[*c] pointers not supported"),
         },
         .optional => return data == null,
         else => return false,
@@ -234,10 +234,10 @@ pub inline fn isNull(comptime T: type, data: T) bool {
 pub inline fn lenOf(comptime T: type, data: T) ?usize {
     return switch (@typeInfo(T)) {
         .pointer => |info| switch (info.size) {
-            .One => return null,
-            .Slice => return data.len,
-            .Many => @compileError("[*] pointers not supported"),
-            .C => @compileError("[*c] pointers not supported"),
+            .one => return null,
+            .slice => return data.len,
+            .many => @compileError("[*] pointers not supported"),
+            .c => @compileError("[*c] pointers not supported"),
         },
         .array, .vector => return data.len,
         .optional => if (data) |value| return lenOf(@TypeOf(value), value) else null,
@@ -385,7 +385,7 @@ test "enum literal " {
     // TODO: Not sure if it's a supported use case.
     if (true) return error.SkipZigTest;
 
-    const data = .{ .value = .AreYouSure, .level = .{ .value = .Totally } };
+    const data = .{ .value = .are_you_sure, .level = .{ .value = .totally } };
 
     const field = getField(&data, "value");
     try std.testing.expectEqual(field, data.value);
@@ -398,8 +398,8 @@ test "enum literal " {
 }
 
 test "enum" {
-    const Options = enum { AreYouSure, Totally };
-    var data = .{ .value = Options.AreYouSure, .level = .{ .value = Options.Totally } };
+    const Options = enum { are_you_sure, totally };
+    var data = .{ .value = Options.are_you_sure, .level = .{ .value = Options.totally } };
 
     const field = getField(&data, "value");
     try std.testing.expectEqual(field, data.value);

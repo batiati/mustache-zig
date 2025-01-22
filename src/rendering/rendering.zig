@@ -839,9 +839,9 @@ pub fn RenderEngineType(
                     index += 1;
 
                     switch (element) {
-                        .static_text => |content| _ = try self.write(content, .Unescaped),
-                        .interpolation => |path| try self.interpolate(path, .Escaped),
-                        .unescaped_interpolation => |path| try self.interpolate(path, .Unescaped),
+                        .static_text => |content| _ = try self.write(content, .unescaped),
+                        .interpolation => |path| try self.interpolate(path, .escaped),
+                        .unescaped_interpolation => |path| try self.interpolate(path, .unescaped),
                         .section => |section| {
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
@@ -857,7 +857,7 @@ pub fn RenderEngineType(
                                             self,
                                             &.{},
                                             section.inner_text.?,
-                                            .Unescaped,
+                                            .unescaped,
                                             section.delimiters.?,
                                         );
                                         assert(expand_result == .lambda);
@@ -1013,12 +1013,12 @@ pub fn RenderEngineType(
             ) (Allocator.Error || Writer.Error)!void {
                 switch (self.out_writer) {
                     .writer => |writer| switch (escape) {
-                        .Escaped => try self.recursiveWrite(writer, value, .Escaped),
-                        .Unescaped => try self.recursiveWrite(writer, value, .Unescaped),
+                        .escaped => try self.recursiveWrite(writer, value, .escaped),
+                        .unescaped => try self.recursiveWrite(writer, value, .unescaped),
                     },
                     .buffer => |buffer| switch (escape) {
-                        .Escaped => try self.recursiveWrite(buffer, value, .Escaped),
-                        .Unescaped => try self.recursiveWrite(buffer, value, .Unescaped),
+                        .escaped => try self.recursiveWrite(buffer, value, .escaped),
+                        .unescaped => try self.recursiveWrite(buffer, value, .unescaped),
                     },
                 }
             }
@@ -1033,8 +1033,8 @@ pub fn RenderEngineType(
                         var counter = std.io.countingWriter(writer);
 
                         switch (escape) {
-                            .Escaped => try self.recursiveWrite(counter.writer(), value, .Escaped),
-                            .Unescaped => try self.recursiveWrite(counter.writer(), value, .Unescaped),
+                            .escaped => try self.recursiveWrite(counter.writer(), value, .escaped),
+                            .unescaped => try self.recursiveWrite(counter.writer(), value, .unescaped),
                         }
 
                         return counter.bytes_written;
@@ -1043,8 +1043,8 @@ pub fn RenderEngineType(
                         var counter = std.io.countingWriter(buffer);
 
                         switch (escape) {
-                            .Escaped => try self.recursiveWrite(counter.writer(), value, .Escaped),
-                            .Unescaped => try self.recursiveWrite(counter.writer(), value, .Unescaped),
+                            .escaped => try self.recursiveWrite(counter.writer(), value, .escaped),
+                            .unescaped => try self.recursiveWrite(counter.writer(), value, .unescaped),
                         }
 
                         return counter.bytes_written;
@@ -1076,18 +1076,18 @@ pub fn RenderEngineType(
                     .@"enum" => try self.flushToWriter(writer, @tagName(value), escape),
 
                     .pointer => |info| switch (info.size) {
-                        .One => return if (comptime stdx.canDeref(TValue)) try self.recursiveWrite(
+                        .one => return if (comptime stdx.canDeref(TValue)) try self.recursiveWrite(
                             writer,
                             value.*,
                             escape,
                         ) else {},
-                        .Slice => {
+                        .slice => {
                             if (info.child == u8) {
                                 try self.flushToWriter(writer, value, escape);
                             }
                         },
-                        .Many => @compileError("[*] pointers not supported"),
-                        .C => @compileError("[*c] pointers not supported"),
+                        .many => @compileError("[*] pointers not supported"),
+                        .c => @compileError("[*c] pointers not supported"),
                     },
                     .array => |info| {
                         if (info.child == u8) {
@@ -1109,7 +1109,7 @@ pub fn RenderEngineType(
                 value: []const u8,
                 comptime escape: Escape,
             ) @TypeOf(writer).Error!void {
-                const escaped = comptime escape == .Escaped;
+                const escaped = comptime escape == .escaped;
                 const indentation_supported = comptime !PartialsMap.isEmpty();
 
                 if (escaped or indentation_supported) {
@@ -1263,14 +1263,14 @@ pub fn RenderEngineType(
                     => return std.fmt.count("{d}", .{value}),
                     .@"enum" => return @tagName(value).len,
                     .pointer => |info| switch (info.size) {
-                        .One => return if (comptime stdx.canDeref(TValue)) self.valueCapacityHint(value.*) else 0,
-                        .Slice => {
+                        .one => return if (comptime stdx.canDeref(TValue)) self.valueCapacityHint(value.*) else 0,
+                        .slice => {
                             if (info.child == u8) {
                                 return value.len;
                             }
                         },
-                        .Many => @compileError("[*] pointers not supported"),
-                        .C => @compileError("[*c] pointers not supported"),
+                        .many => @compileError("[*] pointers not supported"),
+                        .c => @compileError("[*c] pointers not supported"),
                     },
                     .array => |info| {
                         if (info.child == u8) {
@@ -4372,18 +4372,18 @@ const tests = struct {
         const IndentationQueue = RenderEngine.IndentationQueue;
 
         test "Escape" {
-            try expectEscape("&gt;abc", ">abc", .Escaped);
-            try expectEscape("abc&lt;", "abc<", .Escaped);
-            try expectEscape("&gt;abc&lt;", ">abc<", .Escaped);
-            try expectEscape("ab&amp;cd", "ab&cd", .Escaped);
-            try expectEscape("&gt;ab&amp;cd", ">ab&cd", .Escaped);
-            try expectEscape("ab&amp;cd&lt;", "ab&cd<", .Escaped);
-            try expectEscape("&gt;ab&amp;cd&lt;", ">ab&cd<", .Escaped);
+            try expectEscape("&gt;abc", ">abc", .escaped);
+            try expectEscape("abc&lt;", "abc<", .escaped);
+            try expectEscape("&gt;abc&lt;", ">abc<", .escaped);
+            try expectEscape("ab&amp;cd", "ab&cd", .escaped);
+            try expectEscape("&gt;ab&amp;cd", ">ab&cd", .escaped);
+            try expectEscape("ab&amp;cd&lt;", "ab&cd<", .escaped);
+            try expectEscape("&gt;ab&amp;cd&lt;", ">ab&cd<", .escaped);
             try expectEscape("&quot;ab&amp;cd&quot;",
                 \\"ab&cd"
-            , .Escaped);
+            , .escaped);
 
-            try expectEscape(">ab&cd<", ">ab&cd<", .Unescaped);
+            try expectEscape(">ab&cd<", ">ab&cd<", .unescaped);
         }
 
         test "Escape and Indentation" {
@@ -4394,8 +4394,8 @@ const tests = struct {
             };
             indentation_queue.indent(&node_1);
 
-            try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .Escaped, &indentation_queue);
-            try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, &indentation_queue);
+            try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .escaped, &indentation_queue);
+            try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .escaped, &indentation_queue);
 
             {
                 var node_2 = IndentationQueue.Node{
@@ -4404,12 +4404,12 @@ const tests = struct {
                 indentation_queue.indent(&node_2);
                 defer indentation_queue.unindent();
 
-                try expectEscapeAndIndent("&gt;a\n>>>>&gt;b\n>>>>&gt;c", ">a\n>b\n>c", .Escaped, &indentation_queue);
-                try expectEscapeAndIndent("&gt;a\r\n>>>>&gt;b\r\n>>>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, &indentation_queue);
+                try expectEscapeAndIndent("&gt;a\n>>>>&gt;b\n>>>>&gt;c", ">a\n>b\n>c", .escaped, &indentation_queue);
+                try expectEscapeAndIndent("&gt;a\r\n>>>>&gt;b\r\n>>>>&gt;c", ">a\r\n>b\r\n>c", .escaped, &indentation_queue);
             }
 
-            try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .Escaped, &indentation_queue);
-            try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .Escaped, &indentation_queue);
+            try expectEscapeAndIndent("&gt;a\n>>&gt;b\n>>&gt;c", ">a\n>b\n>c", .escaped, &indentation_queue);
+            try expectEscapeAndIndent("&gt;a\r\n>>&gt;b\r\n>>&gt;c", ">a\r\n>b\r\n>c", .escaped, &indentation_queue);
         }
 
         test "Indentation" {
@@ -4444,7 +4444,7 @@ const tests = struct {
         }
 
         fn expectIndent(expected: []const u8, value: []const u8, indentation_queue: *IndentationQueue) !void {
-            try expectEscapeAndIndent(expected, value, .Unescaped, indentation_queue);
+            try expectEscapeAndIndent(expected, value, .unescaped, indentation_queue);
         }
 
         fn expectEscapeAndIndent(expected: []const u8, value: []const u8, escape: Escape, indentation_queue: *IndentationQueue) !void {

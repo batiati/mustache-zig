@@ -442,7 +442,7 @@ const context_tests = struct {
 
         const ctx = DummyRenderEngine.getContextType(if (by_value) data else @as(*const Data, &data));
 
-        try interpolateCtx(writer, ctx, path, .Unescaped);
+        try interpolateCtx(writer, ctx, path, .unescaped);
     }
 
     fn interpolateCtx(writer: anytype, ctx: DummyRenderEngine.Context, identifier: []const u8, escape: Escape) anyerror!void {
@@ -1030,7 +1030,7 @@ const context_tests = struct {
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, person_ctx, "address.street", .Unescaped);
+            try interpolateCtx(writer, person_ctx, "address.street", .unescaped);
             try testing.expectEqualStrings("nearby", list.items);
         }
 
@@ -1052,7 +1052,7 @@ const context_tests = struct {
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, address_ctx, "street", .Unescaped);
+            try interpolateCtx(writer, address_ctx, "street", .unescaped);
             try testing.expectEqualStrings("nearby", list.items);
         }
 
@@ -1074,14 +1074,14 @@ const context_tests = struct {
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, street_ctx, "", .Unescaped);
+            try interpolateCtx(writer, street_ctx, "", .unescaped);
             try testing.expectEqualStrings("nearby", list.items);
         }
 
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, street_ctx, ".", .Unescaped);
+            try interpolateCtx(writer, street_ctx, ".", .unescaped);
             try testing.expectEqualStrings("nearby", list.items);
         }
     }
@@ -1103,7 +1103,7 @@ const context_tests = struct {
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, person_ctx, "indication.address.street", .Unescaped);
+            try interpolateCtx(writer, person_ctx, "indication.address.street", .unescaped);
             try testing.expectEqualStrings("far away street", list.items);
         }
 
@@ -1125,7 +1125,7 @@ const context_tests = struct {
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, indication_ctx, "address.street", .Unescaped);
+            try interpolateCtx(writer, indication_ctx, "address.street", .unescaped);
             try testing.expectEqualStrings("far away street", list.items);
         }
 
@@ -1147,7 +1147,7 @@ const context_tests = struct {
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, address_ctx, "street", .Unescaped);
+            try interpolateCtx(writer, address_ctx, "street", .unescaped);
             try testing.expectEqualStrings("far away street", list.items);
         }
 
@@ -1169,14 +1169,14 @@ const context_tests = struct {
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, street_ctx, "", .Unescaped);
+            try interpolateCtx(writer, street_ctx, "", .unescaped);
             try testing.expectEqualStrings("far away street", list.items);
         }
 
         {
             list.clearAndFree();
 
-            try interpolateCtx(writer, street_ctx, ".", .Unescaped);
+            try interpolateCtx(writer, street_ctx, ".", .unescaped);
             try testing.expectEqualStrings("far away street", list.items);
         }
     }
@@ -1288,7 +1288,7 @@ const context_tests = struct {
 
         list.clearAndFree();
 
-        try interpolateCtx(writer, item_1, "name", .Unescaped);
+        try interpolateCtx(writer, item_1, "name", .unescaped);
         try testing.expectEqualStrings("item 1", list.items);
 
         const item_2 = iterator.next() orelse {
@@ -1298,7 +1298,7 @@ const context_tests = struct {
 
         list.clearAndFree();
 
-        try interpolateCtx(writer, item_2, "name", .Unescaped);
+        try interpolateCtx(writer, item_2, "name", .unescaped);
         try testing.expectEqualStrings("item 2", list.items);
 
         const no_more = iterator.next();

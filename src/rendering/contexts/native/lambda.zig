@@ -274,7 +274,7 @@ pub fn LambdaInvokerType(comptime TData: type, comptime TFn: type) type {
                 switch (@typeInfo(TData)) {
                     .pointer => |info| {
                         switch (info.size) {
-                            .One => {
+                            .one => {
                                 if (info.child == fnArg) {
 
                                     // Context is a pointer, but the parameter is a value
