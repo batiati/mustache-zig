@@ -26,7 +26,9 @@ const context = @import("context.zig");
 const Escape = context.Escape;
 const Fields = context.Fields;
 
-const ffi_context = @import("/contexts/ffi/context.zig");
+const native_context = @import("contexts/native/context.zig");
+
+const ffi_context = @import("contexts/ffi/context.zig");
 const ffi_extern_types = @import("../ffi/extern_types.zig");
 
 pub const LambdaContext = context.LambdaContext;
@@ -652,7 +654,12 @@ fn internalAllocRender(
         options,
     );
 
-    try RenderEngine.bufRender(list.writer(), template, data, PartialsMap.init(partials));
+    try RenderEngine.bufRender(
+        list.writer(),
+        template,
+        data,
+        PartialsMap.init(partials),
+    );
 
     return if (comptime sentinel) |z|
         list.toOwnedSliceSentinel(z)
@@ -733,9 +740,11 @@ pub fn RenderEngineType(
     comptime options: RenderOptions,
 ) type {
     return struct {
+        pub const PartialsMap = TPartialsMap;
+        const NativeContext = context.ContextType(.native, Writer, PartialsMap, options);
+        const NativeDataRender = RenderEngineType(.native, Writer, PartialsMap, options).DataRender;
         pub const Context = context.ContextType(context_source, Writer, PartialsMap, options);
         pub const ContextStack = Context.ContextStack;
-        pub const PartialsMap = TPartialsMap;
         pub const IndentationQueue = if (!PartialsMap.isEmpty()) indent.IndentationQueue else indent.IndentationQueue.Null;
 
         /// Provides the ability to choose between two writers
@@ -751,9 +760,13 @@ pub fn RenderEngineType(
 
         pub const DataRender = struct {
             pub const Error = Allocator.Error || Writer.Error;
+            pub const GlobalLambdas = switch (options) {
+                inline else => |value| if (value.global_lambdas) |T| T else void,
+            };
 
             out_writer: OutWriter,
             stack: *const ContextStack,
+            stack_global_lambdas: ?*const NativeContext.ContextStack = null,
             partials_map: PartialsMap,
             indentation_queue: *IndentationQueue,
             template_options: if (options == .template) *const TemplateOptions else void,
@@ -876,6 +889,38 @@ pub fn RenderEngineType(
 
                                     try self.renderLevel(section_children);
                                 }
+                            } else {
+                                var resolve_path_global_lambdas = self.getGlobalLambdasIterator(section.path);
+                                if (resolve_path_global_lambdas) |*iterator| {
+                                    if (self.lambdasSupported()) {
+                                        if (iterator.lambda()) |lambda_ctx| {
+                                            assert(section.inner_text != null);
+                                            assert(section.delimiters != null);
+
+                                            const expand_result = try lambda_ctx.expandLambda(
+                                                @ptrCast(self),
+                                                &.{},
+                                                section.inner_text.?,
+                                                .Unescaped,
+                                                section.delimiters.?,
+                                            );
+                                            assert(expand_result == .lambda);
+                                            continue;
+                                        }
+                                    }
+                                    while (iterator.next()) |item_ctx| {
+                                        const current_level = self.stack_global_lambdas;
+                                        const next_level = NativeContext.ContextStack{
+                                            .parent = current_level,
+                                            .ctx = item_ctx,
+                                        };
+
+                                        self.stack_global_lambdas = &next_level;
+                                        defer self.stack_global_lambdas = current_level;
+
+                                        try self.renderLevel(section_children);
+                                    }
+                                }
                             }
                         },
                         .inverted_section => |section| {
@@ -885,10 +930,7 @@ pub fn RenderEngineType(
                             // Lambdas aways evaluate as "true" for inverted section
                             // Broken paths, empty lists, null and false evaluates as "false"
 
-                            const truthy = if (self.getIterator(section.path)) |iterator|
-                                iterator.truthy()
-                            else
-                                false;
+                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else if (self.getGlobalLambdasIterator(section.path)) |iterator| iterator.truthy() else false;
 
                             if (!truthy) {
                                 try self.renderLevel(section_children);
@@ -948,33 +990,69 @@ pub fn RenderEngineType(
                 escape: Escape,
             ) (Allocator.Error || Writer.Error)!void {
                 var level: ?*const ContextStack = self.stack;
+                var path_resolution: context.PathResolutionType(void) = undefined;
 
                 while (level) |current| : (level = current.parent) {
-                    const path_resolution = try current.ctx.interpolate(self, path, escape);
+                    path_resolution = try current.ctx.interpolate(self, path, escape);
 
                     switch (path_resolution) {
                         .field => {
                             // Success, break the loop
-                            break;
+                            return;
                         },
 
                         .lambda => {
-
                             // Expand the lambda against the current context and break the loop
                             const expand_result = try current.ctx.expandLambda(self, path, "", escape, .{});
                             assert(expand_result == .lambda);
-                            break;
+                            return;
                         },
 
                         .iterator_consumed, .chain_broken => {
                             // Not rendered, but should NOT try against the parent context
-                            break;
+                            return;
                         },
 
                         .not_found_in_context => {
                             // Not rendered, should try against the parent context
                             continue;
                         },
+                    }
+                }
+
+                // Try the global lambdas context
+                var level_global_lambdas = self.stack_global_lambdas;
+                var native_data_render: *NativeDataRender = @ptrCast(self);
+
+                if (self.stack_global_lambdas != null) {
+                    switch (context_source) {
+                        .json => {
+                            const ctx: NativeContext = .{
+                                .vtable = native_data_render.stack.ctx.vtable,
+                                .ctx = native_context.ErasedType.put(self.stack.ctx.ctx),
+                            };
+
+                            const context_stack = NativeContext.ContextStack{
+                                .parent = @ptrCast(@alignCast(self.stack.parent)),
+                                .ctx = ctx,
+                            };
+
+                            native_data_render.stack = &context_stack;
+                        },
+                        else => {},
+                    }
+                }
+
+                while (level_global_lambdas) |current_global_lambdas| : (level_global_lambdas = current_global_lambdas.parent) {
+                    path_resolution = try current_global_lambdas.ctx.interpolate(native_data_render, path, escape);
+                    switch (path_resolution) {
+                        .lambda => {
+                            const expand_result = try current_global_lambdas.ctx.expandLambda(native_data_render, path, "", escape, .{});
+                            assert(expand_result == .lambda);
+                            break;
+                        },
+                        .iterator_consumed, .chain_broken, .field => break,
+                        else => continue,
                     }
                 }
             }
@@ -986,20 +1064,37 @@ pub fn RenderEngineType(
                 var level: ?*const ContextStack = self.stack;
 
                 while (level) |current| : (level = current.parent) {
-                    switch (current.ctx.iterator(path)) {
+                    switch (current.ctx.iterator(self, path)) {
                         .field => |found| return found,
 
                         .lambda => |found| return found,
 
                         .iterator_consumed, .chain_broken => {
                             // Not found, but should NOT try against the parent context
-                            break;
+                            return null;
                         },
 
                         .not_found_in_context => {
                             // Should try against the parent context
                             continue;
                         },
+                    }
+                }
+                return null;
+            }
+
+            fn getGlobalLambdasIterator(
+                self: *DataRender,
+                path: Element.Path,
+            ) ?NativeContext.ContextIterator {
+                // Try the global lambdas context
+                var level = self.stack_global_lambdas;
+                while (level) |current| : (level = current.parent) {
+                    const path_resolution = current.ctx.iterator(@ptrCast(self), path);
+                    switch (path_resolution) {
+                        .field, .lambda => |found| return found,
+                        .iterator_consumed, .chain_broken => break,
+                        else => continue,
                     }
                 }
 
@@ -1202,13 +1297,29 @@ pub fn RenderEngineType(
 
                                     size += self.levelCapacityHint(section_children);
                                 }
+                            } else {
+                                var resolve_path_global_lambdas = self.getGlobalLambdasIterator(section.path);
+                                if (resolve_path_global_lambdas) |*iterator| {
+                                    while (iterator.next()) |item_ctx| {
+                                        const current_level = self.stack_global_lambdas;
+                                        const next_level = NativeContext.ContextStack{
+                                            .parent = current_level,
+                                            .ctx = item_ctx,
+                                        };
+
+                                        self.stack_global_lambdas = &next_level;
+                                        defer self.stack_global_lambdas = current_level;
+
+                                        size += self.levelCapacityHint(section_children);
+                                    }
+                                }
                             }
                         },
                         .inverted_section => |section| {
                             const section_children = elements[index .. index + section.children_count];
                             index += section.children_count;
 
-                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else false;
+                            const truthy = if (self.getIterator(section.path)) |iterator| iterator.truthy() else if (self.getGlobalLambdasIterator(section.path)) |iterator| iterator.truthy() else false;
                             if (!truthy) {
                                 size += self.levelCapacityHint(section_children);
                             }
@@ -1226,22 +1337,36 @@ pub fn RenderEngineType(
                 path: Element.Path,
             ) usize {
                 var level: ?*const ContextStack = self.stack;
+                var path_resolution: context.PathResolutionType(usize) = undefined;
 
                 while (level) |current| : (level = current.parent) {
-                    const path_resolution = current.ctx.capacityHint(self, path);
+                    path_resolution = current.ctx.capacityHint(self, path);
 
                     switch (path_resolution) {
                         .field => |size| return size,
 
                         .lambda, .iterator_consumed, .chain_broken => {
                             // No size can be counted
-                            break;
+                            return 0;
                         },
 
                         .not_found_in_context => {
                             // Not rendered, should try against the parent context
                             continue;
                         },
+                    }
+                }
+
+                // Try the global lambdas context
+                var level_global_lambdas = self.stack_global_lambdas;
+                const native_data_render: *NativeDataRender = @ptrCast(self);
+
+                while (level_global_lambdas) |current| : (level_global_lambdas = current.parent) {
+                    path_resolution = current.ctx.capacityHint(native_data_render, path);
+                    switch (path_resolution) {
+                        .lambda => return 0,
+                        .iterator_consumed, .chain_broken, .field => break,
+                        else => continue,
                     }
                 }
 
@@ -1289,13 +1414,33 @@ pub fn RenderEngineType(
             }
         };
 
-        pub inline fn getContextType(data: anytype) Context {
+        pub inline fn getNativeContextType(comptime UserData: type, data: anytype) NativeContext {
+            const Data = @TypeOf(data);
+            const ContextImpl = context.ContextImplType(
+                .native,
+                Writer,
+                Data,
+                PartialsMap,
+                UserData,
+                options,
+            );
+
+            const by_value = comptime Fields.byValue(Data);
+            if (comptime !by_value and !stdx.isSingleItemPtr(Data)) {
+                @compileError("Expected a pointer to " ++ @typeName(Data));
+            }
+
+            return ContextImpl.ContextType(data);
+        }
+
+        pub inline fn getContextType(comptime UserData: type, data: anytype) Context {
             const Data = @TypeOf(data);
             const ContextImpl = context.ContextImplType(
                 context_source,
                 Writer,
                 Data,
                 PartialsMap,
+                UserData,
                 options,
             );
 
@@ -1337,13 +1482,26 @@ pub fn RenderEngineType(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(Data, if (by_value) data else @as(*const Data, &data)),
             };
+
+            var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
+            switch (options) {
+                inline else => |value| {
+                    if (value.global_lambdas) |global_lambdas| {
+                        context_stack_global_lambdas = .{
+                            .parent = null,
+                            .ctx = getNativeContextType(Data, global_lambdas{}),
+                        };
+                    }
+                },
+            }
 
             var data_render = DataRender{
                 .out_writer = .{ .writer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
+                .stack_global_lambdas = if (context_stack_global_lambdas != null) &context_stack_global_lambdas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
             };
@@ -1351,7 +1509,12 @@ pub fn RenderEngineType(
             try data_render.render(template.elements);
         }
 
-        pub fn bufRender(writer: std.ArrayList(u8).Writer, template: Template, data: anytype, partials_map: PartialsMap) !void {
+        pub fn bufRender(
+            writer: std.ArrayList(u8).Writer,
+            template: Template,
+            data: anytype,
+            partials_map: PartialsMap,
+        ) !void {
             comptime assert(options == .template);
 
             const Data = @TypeOf(data);
@@ -1360,13 +1523,26 @@ pub fn RenderEngineType(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(Data, if (by_value) data else @as(*const Data, &data)),
             };
+
+            var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
+            switch (options) {
+                inline else => |value| {
+                    if (value.global_lambdas) |global_lambdas| {
+                        context_stack_global_lambdas = .{
+                            .parent = null,
+                            .ctx = getNativeContextType(Data, global_lambdas{}),
+                        };
+                    }
+                },
+            }
 
             var data_render = DataRender{
                 .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
+                .stack_global_lambdas = if (context_stack_global_lambdas != null) &context_stack_global_lambdas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = template.options,
             };
@@ -1389,13 +1565,26 @@ pub fn RenderEngineType(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(Data, if (by_value) data else @as(*const Data, &data)),
             };
+
+            var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
+            switch (options) {
+                inline else => |value| {
+                    if (value.global_lambdas) |global_lambdas| {
+                        context_stack_global_lambdas = .{
+                            .parent = null,
+                            .ctx = getNativeContextType(Data, global_lambdas{}),
+                        };
+                    }
+                },
+            }
 
             var data_render = DataRender{
                 .out_writer = .{ .writer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
+                .stack_global_lambdas = if (context_stack_global_lambdas != null) &context_stack_global_lambdas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
             };
@@ -1418,13 +1607,26 @@ pub fn RenderEngineType(
             var indentation_queue = IndentationQueue{};
             const context_stack = ContextStack{
                 .parent = null,
-                .ctx = getContextType(if (by_value) data else @as(*const Data, &data)),
+                .ctx = getContextType(Data, if (by_value) data else @as(*const Data, &data)),
             };
+
+            var context_stack_global_lambdas: ?NativeContext.ContextStack = null;
+            switch (options) {
+                inline else => |value| {
+                    if (value.global_lambdas) |global_lambdas| {
+                        context_stack_global_lambdas = .{
+                            .parent = null,
+                            .ctx = getNativeContextType(Data, global_lambdas{}),
+                        };
+                    }
+                },
+            }
 
             var data_render = DataRender{
                 .out_writer = .{ .buffer = writer },
                 .partials_map = partials_map,
                 .stack = &context_stack,
+                .stack_global_lambdas = if (context_stack_global_lambdas != null) &context_stack_global_lambdas.? else null,
                 .indentation_queue = &indentation_queue,
                 .template_options = {},
             };

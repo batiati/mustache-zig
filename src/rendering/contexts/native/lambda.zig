@@ -17,7 +17,11 @@ const LambdaContext = context.LambdaContext;
 
 const rendering = @import("../../rendering.zig");
 
-pub fn LambdaContextImplType(comptime Writer: type, comptime PartialsMap: type, comptime options: RenderOptions) type {
+pub fn LambdaContextImplType(
+    comptime Writer: type,
+    comptime PartialsMap: type,
+    comptime options: RenderOptions,
+) type {
     const RenderEngine = rendering.RenderEngineType(
         .native,
         Writer,
@@ -44,6 +48,7 @@ pub fn LambdaContextImplType(comptime Writer: type, comptime PartialsMap: type, 
                 .ptr = self,
                 .vtable = &vtable,
                 .inner_text = inner_text,
+                .allocator = if (std.meta.activeTag(self.data_render.out_writer) == .buffer) self.data_render.out_writer.buffer.context.allocator else null,
             };
         }
 

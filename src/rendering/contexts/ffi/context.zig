@@ -61,7 +61,7 @@ pub fn ContextType(
             ctx: Context,
         };
 
-        pub const ContextIterator = ContextIteratorType(Context);
+        pub const ContextIterator = ContextIteratorType(Context, DataRender);
 
         user_data: extern_types.UserData = undefined,
 
@@ -71,7 +71,13 @@ pub fn ContextType(
             };
         }
 
-        pub inline fn get(self: Context, path: Element.Path, index: ?usize) PathResolutionType(Context) {
+        pub inline fn get(
+            self: Context,
+            data_render: *DataRender,
+            path: Element.Path,
+            index: ?usize,
+        ) PathResolutionType(Context) {
+            _ = data_render;
             if (self.user_data.get != null) {
                 if (path.len > 0) {
                     var root_path = extern_types.PathPart{
@@ -139,8 +145,8 @@ pub fn ContextType(
                 .NOT_FOUND_IN_CONTEXT => .not_found_in_context,
                 .CHAIN_BROKEN => .chain_broken,
                 .ITERATOR_CONSUMED => .iterator_consumed,
-                .FIELD => .{ .field = RenderEngine.getContextType(out_value) },
-                .LAMBDA => .{ .lambda = RenderEngine.getContextType(out_value) },
+                .FIELD => .{ .field = RenderEngine.getContextType(extern_types.UserData, out_value) },
+                .LAMBDA => .{ .lambda = RenderEngine.getContextType(extern_types.UserData, out_value) },
             };
         }
 
@@ -352,13 +358,14 @@ pub fn ContextType(
 
         pub fn iterator(
             self: *const Context,
+            data_render: *DataRender,
             path: Element.Path,
         ) PathResolutionType(ContextIterator) {
-            const result = self.get(path, 0);
+            const result = self.get(data_render, path, 0);
 
             return switch (result) {
                 .field => |item| .{
-                    .field = ContextIterator.initSequence(self, path, item),
+                    .field = ContextIterator.initSequence(self, path, data_render, item),
                 },
                 .iterator_consumed => .{
                     .field = ContextIterator.initEmpty(),
@@ -584,13 +591,14 @@ const context_tests = struct {
         };
 
         const user_data = Person.getUserData(&person);
-        var person_ctx = DummyRenderEngine.getContextType(user_data);
+        var person_ctx = DummyRenderEngine.getContextType(@TypeOf(user_data), user_data);
+        var data_render: DummyRenderEngine.DataRender = undefined;
 
         const id_ctx = id_ctx: {
             const path = try expectPath(allocator, "id");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (person_ctx.get(path, null)) {
+            switch (person_ctx.get(&data_render, path, null)) {
                 .field => |found| break :id_ctx found,
                 else => {
                     try testing.expect(false);
@@ -607,7 +615,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "name");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (person_ctx.get(path, null)) {
+            switch (person_ctx.get(&data_render, path, null)) {
                 .field => |found| break :name_ctx found,
                 else => {
                     try testing.expect(false);
@@ -637,13 +645,14 @@ const context_tests = struct {
         person.boss = &next_person;
 
         const user_data = Person.getUserData(&person);
-        var person_ctx = DummyRenderEngine.getContextType(user_data);
+        var person_ctx = DummyRenderEngine.getContextType(@TypeOf(user_data), user_data);
+        var data_render: DummyRenderEngine.DataRender = undefined;
 
         const id_ctx = id_ctx: {
             const path = try expectPath(allocator, "boss.id");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (person_ctx.get(path, null)) {
+            switch (person_ctx.get(&data_render, path, null)) {
                 .field => |found| break :id_ctx found,
                 else => {
                     try testing.expect(false);
@@ -660,7 +669,7 @@ const context_tests = struct {
             const path = try expectPath(allocator, "boss.name");
             defer Element.destroyPath(allocator, false, path);
 
-            switch (person_ctx.get(path, null)) {
+            switch (person_ctx.get(&data_render, path, null)) {
                 .field => |found| break :name_ctx found,
                 else => {
                     try testing.expect(false);
@@ -685,7 +694,7 @@ const context_tests = struct {
         };
 
         const user_data = Person.getUserData(&person);
-        const person_ctx = DummyRenderEngine.getContextType(user_data);
+        const person_ctx = DummyRenderEngine.getContextType(@TypeOf(user_data), user_data);
 
         const writer = list.writer();
 
@@ -717,7 +726,7 @@ const context_tests = struct {
 
         person.boss = &next_person;
         const user_data = Person.getUserData(&person);
-        const person_ctx = DummyRenderEngine.getContextType(user_data);
+        const person_ctx = DummyRenderEngine.getContextType(@TypeOf(user_data), user_data);
 
         const writer = list.writer();
 
