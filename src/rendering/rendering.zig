@@ -823,10 +823,10 @@ pub fn RenderEngineType(
             inline fn preserveLineBreaksAndIndentation(self: DataRender) bool {
                 return !PartialsMap.isEmpty() and
                     switch (options) {
-                    .template => self.template_options.features.preserve_line_breaks_and_indentation,
-                    .string => |string| string.features.preserve_line_breaks_and_indentation,
-                    .file => |file| file.features.preserve_line_breaks_and_indentation,
-                };
+                        .template => self.template_options.features.preserve_line_breaks_and_indentation,
+                        .string => |string| string.features.preserve_line_breaks_and_indentation,
+                        .file => |file| file.features.preserve_line_breaks_and_indentation,
+                    };
             }
 
             fn renderLevel(
@@ -843,7 +843,8 @@ pub fn RenderEngineType(
                         .interpolation => |path| try self.interpolate(path, .escaped),
                         .unescaped_interpolation => |path| try self.interpolate(path, .unescaped),
                         .section => |section| {
-                            const section_children = elements[index .. index + section.children_count];
+                            const end = index + section.children_count;
+                            const section_children = elements[index..@min(elements.len, end)];
                             index += section.children_count;
 
                             var resolve_path = self.getIterator(section.path);
@@ -1185,7 +1186,8 @@ pub fn RenderEngineType(
                         .static_text => |content| size += content.len,
                         .interpolation, .unescaped_interpolation => |path| size += self.pathCapacityHint(path),
                         .section => |section| {
-                            const section_children = elements[index .. index + section.children_count];
+                            const end = index + section.children_count;
+                            const section_children = elements[index..@min(elements.len, end)];
                             index += section.children_count;
 
                             var resolve_path = self.getIterator(section.path);
@@ -3060,6 +3062,15 @@ const tests = struct {
 
                 const data = .{ .section = true, .data = "I got interpolated." };
                 try expectRender(template_text, data, expected);
+            }
+
+            test "Empty node in section" {
+                const template_text = "{{#section}} {{node}}{{/section}}";
+                const expected = "false";
+
+                const Data = struct { section: bool, node: bool };
+                const data = Data{ .section = true, .node = false };
+                try expectRender(template_text, &data, expected);
             }
 
             // Delimiters set outside inverted sections should persist.

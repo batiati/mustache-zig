@@ -1,5 +1,6 @@
 .{
-    .name = "mustache",
+    .name = .mustache,
     .version = "0.0.1",
+    .fingerprint = 0x488f3d885fea5a49,
     .paths = .{""},
 }
