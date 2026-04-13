@@ -81,11 +81,11 @@ pub const ErasedType = struct {
 /// This struct implements the expected context interface using dynamic dispatch.
 /// Pub functions must be kept in sync with other contexts implementation
 pub fn ContextInterfaceType(
-    comptime Writer: type,
     comptime PartialsMap: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngineType(.native, Writer, PartialsMap, options);
+    const RenderEngine = rendering.RenderEngineType(.native, PartialsMap, options);
+    const Writer = RenderEngine.Writer;
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -196,20 +196,19 @@ pub fn ContextInterfaceType(
 
 /// Implements the ContextInterface.VTable for the comptime-known data type.
 pub fn ContextImplType(
-    comptime Writer: type,
     comptime Data: type,
     comptime PartialsMap: type,
     comptime options: RenderOptions,
 ) type {
     const RenderEngine = rendering.RenderEngineType(
         .native,
-        Writer,
         PartialsMap,
         options,
     );
+    const Writer = RenderEngine.Writer;
     const Context = RenderEngine.Context;
     const DataRender = RenderEngine.DataRender;
-    const Invoker = invoker.InvokerType(Writer, PartialsMap, options);
+    const Invoker = invoker.InvokerType(PartialsMap, options);
 
     return struct {
         const is_zero_size = @sizeOf(Data) == 0;
@@ -422,12 +421,11 @@ const context_tests = struct {
 
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyPartialsMap = map.PartialsMapType(void, dummy_options);
-    const DummyWriter = std.ArrayList(u8).Writer;
-    const DummyRenderEngine = rendering.RenderEngineType(.native, DummyWriter, DummyPartialsMap, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngineType(.native, DummyPartialsMap, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
     const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
-    const dummy_map = DummyPartialsMap.init({});
+    const dummy_map = DummyPartialsMap.init(undefined, {});
 
     fn expectPath(allocator: Allocator, path: []const u8) !Element.Path {
         var parser = try DummyParser.init(allocator, "", .{});
@@ -436,7 +434,7 @@ const context_tests = struct {
         return try parser.parsePath(path);
     }
 
-    fn interpolate(writer: anytype, data: anytype, path: []const u8) anyerror!void {
+    fn interpolate(writer: *std.Io.Writer, data: anytype, path: []const u8) anyerror!void {
         const Data = @TypeOf(data);
         const by_value = comptime Fields.byValue(Data);
 
@@ -445,7 +443,7 @@ const context_tests = struct {
         try interpolateCtx(writer, ctx, path, .unescaped);
     }
 
-    fn interpolateCtx(writer: anytype, ctx: DummyRenderEngine.Context, identifier: []const u8, escape: Escape) anyerror!void {
+    fn interpolateCtx(writer: *std.Io.Writer, ctx: DummyRenderEngine.Context, identifier: []const u8, escape: Escape) anyerror!void {
         var stack = DummyRenderEngine.ContextStack{
             .parent = null,
             .ctx = ctx,
@@ -472,387 +470,387 @@ const context_tests = struct {
 
     test "Write Int" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "id");
-        try testing.expectEqualStrings("2", list.items);
+        try testing.expectEqualStrings("2", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Ref access
         try interpolate(writer, &person, "id");
-        try testing.expectEqualStrings("2", list.items);
+        try testing.expectEqualStrings("2", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested access
         try interpolate(writer, person, "address.zip");
-        try testing.expectEqualStrings("333900", list.items);
+        try testing.expectEqualStrings("333900", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.address.zip");
-        try testing.expectEqualStrings("99450", list.items);
+        try testing.expectEqualStrings("99450", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref access
         try interpolate(writer, &person, "address.zip");
-        try testing.expectEqualStrings("333900", list.items);
+        try testing.expectEqualStrings("333900", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref pointer access
         try interpolate(writer, &person, "indication.address.zip");
-        try testing.expectEqualStrings("99450", list.items);
+        try testing.expectEqualStrings("99450", aw.written());
     }
 
     test "Write Float" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "salary");
-        try testing.expectEqualStrings("140", list.items);
+        try testing.expectEqualStrings("140", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Ref access
         try interpolate(writer, &person, "salary");
-        try testing.expectEqualStrings("140", list.items);
+        try testing.expectEqualStrings("140", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested access
         try interpolate(writer, person, "address.coordinates.lon");
-        try testing.expectEqualStrings("38.71471", list.items);
+        try testing.expectEqualStrings("38.71471", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Negative values
         try interpolate(writer, person, "address.coordinates.lat");
-        try testing.expectEqualStrings("-9.13872", list.items);
+        try testing.expectEqualStrings("-9.13872", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.address.coordinates.lon");
-        try testing.expectEqualStrings("41.40338", list.items);
+        try testing.expectEqualStrings("41.40338", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref access
         try interpolate(writer, &person, "address.coordinates.lon");
-        try testing.expectEqualStrings("38.71471", list.items);
+        try testing.expectEqualStrings("38.71471", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Negative Ref values
         try interpolate(writer, &person, "address.coordinates.lat");
-        try testing.expectEqualStrings("-9.13872", list.items);
+        try testing.expectEqualStrings("-9.13872", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref pointer access
         try interpolate(writer, &person, "indication.address.coordinates.lon");
-        try testing.expectEqualStrings("41.40338", list.items);
+        try testing.expectEqualStrings("41.40338", aw.written());
     }
 
     test "Write String" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "name");
-        try testing.expectEqualStrings("Someone Jr", list.items);
+        try testing.expectEqualStrings("Someone Jr", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Ref access
         try interpolate(writer, &person, "name");
-        try testing.expectEqualStrings("Someone Jr", list.items);
+        try testing.expectEqualStrings("Someone Jr", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Direct Len access
         try interpolate(writer, person, "name.len");
-        try testing.expectEqualStrings("10", list.items);
+        try testing.expectEqualStrings("10", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Direct Ref Len access
         try interpolate(writer, &person, "name.len");
-        try testing.expectEqualStrings("10", list.items);
+        try testing.expectEqualStrings("10", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested access
         try interpolate(writer, person, "address.street");
-        try testing.expectEqualStrings("nearby", list.items);
+        try testing.expectEqualStrings("nearby", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.address.street");
-        try testing.expectEqualStrings("far away street", list.items);
+        try testing.expectEqualStrings("far away street", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref access
         try interpolate(writer, &person, "address.street");
-        try testing.expectEqualStrings("nearby", list.items);
+        try testing.expectEqualStrings("nearby", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, &person, "indication.address.street");
-        try testing.expectEqualStrings("far away street", list.items);
+        try testing.expectEqualStrings("far away street", aw.written());
     }
 
     test "Write Enum" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "address.region");
-        try testing.expectEqualStrings("RoW", list.items);
+        try testing.expectEqualStrings("RoW", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Ref access
         try interpolate(writer, &person, "address.region");
-        try testing.expectEqualStrings("RoW", list.items);
+        try testing.expectEqualStrings("RoW", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.address.region");
-        try testing.expectEqualStrings("EU", list.items);
+        try testing.expectEqualStrings("EU", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref pointer access
         try interpolate(writer, &person, "indication.address.region");
-        try testing.expectEqualStrings("EU", list.items);
+        try testing.expectEqualStrings("EU", aw.written());
     }
 
     test "Write Bool" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "active");
-        try testing.expectEqualStrings("true", list.items);
+        try testing.expectEqualStrings("true", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Ref access
         try interpolate(writer, &person, "active");
-        try testing.expectEqualStrings("true", list.items);
+        try testing.expectEqualStrings("true", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.active");
-        try testing.expectEqualStrings("false", list.items);
+        try testing.expectEqualStrings("false", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref pointer access
         try interpolate(writer, &person, "indication.active");
-        try testing.expectEqualStrings("false", list.items);
+        try testing.expectEqualStrings("false", aw.written());
     }
 
     test "Write Nullable" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "additional_information");
-        try testing.expectEqualStrings("someone was here", list.items);
+        try testing.expectEqualStrings("someone was here", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Ref access
         try interpolate(writer, &person, "additional_information");
-        try testing.expectEqualStrings("someone was here", list.items);
+        try testing.expectEqualStrings("someone was here", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Null Accress
         try interpolate(writer, person.indication, "additional_information");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Null Ref Accress
         try interpolate(writer, person.indication, "additional_information");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.additional_information");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref pointer access
         try interpolate(writer, &person, "indication.additional_information");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
     }
 
     test "Write Not found" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "wrong_name");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
 
         // Nested access
         try interpolate(writer, person, "name.wrong_name");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
 
         // Direct Ref access
         try interpolate(writer, &person, "wrong_name");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
 
         // Nested Ref access
         try interpolate(writer, &person, "name.wrong_name");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
     }
 
     test "Lambda - staticLambda" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "staticLambda");
-        try testing.expectEqualStrings("1", list.items);
+        try testing.expectEqualStrings("1", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Ref access
         try interpolate(writer, &person, "staticLambda");
-        try testing.expectEqualStrings("1", list.items);
+        try testing.expectEqualStrings("1", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.staticLambda");
-        try testing.expectEqualStrings("1", list.items);
+        try testing.expectEqualStrings("1", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref access
         try interpolate(writer, &person, "staticLambda");
-        try testing.expectEqualStrings("1", list.items);
+        try testing.expectEqualStrings("1", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref pointer access
         try interpolate(writer, &person, "indication.staticLambda");
-        try testing.expectEqualStrings("1", list.items);
+        try testing.expectEqualStrings("1", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
     }
 
     test "Lambda - selfLambda" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "selfLambda");
-        try testing.expectEqualStrings("10", list.items);
+        try testing.expectEqualStrings("10", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Ref access
         try interpolate(writer, &person, "selfLambda");
-        try testing.expectEqualStrings("10", list.items);
+        try testing.expectEqualStrings("10", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.selfLambda");
-        try testing.expectEqualStrings("8", list.items);
+        try testing.expectEqualStrings("8", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref access
         try interpolate(writer, &person, "selfLambda");
-        try testing.expectEqualStrings("10", list.items);
+        try testing.expectEqualStrings("10", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref pointer access
         try interpolate(writer, &person, "indication.selfLambda");
-        try testing.expectEqualStrings("8", list.items);
+        try testing.expectEqualStrings("8", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
     }
 
     test "Lambda - selfConstPtrLambda" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
@@ -860,52 +858,52 @@ const context_tests = struct {
         const person_const_ptr: *const Person = &person;
         const person_ptr: *Person = &person;
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Direct access
         try interpolate(writer, person, "selfConstPtrLambda");
-        try testing.expectEqualStrings("10", list.items);
+        try testing.expectEqualStrings("10", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Const Ref access
 
         try interpolate(writer, person_const_ptr, "selfConstPtrLambda");
-        try testing.expectEqualStrings("10", list.items);
+        try testing.expectEqualStrings("10", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Mut Ref access
         try interpolate(writer, person_ptr, "selfConstPtrLambda");
-        try testing.expectEqualStrings("10", list.items);
+        try testing.expectEqualStrings("10", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested pointer access
         try interpolate(writer, person, "indication.selfConstPtrLambda");
-        try testing.expectEqualStrings("8", list.items);
+        try testing.expectEqualStrings("8", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested const Ref access
         try interpolate(writer, person_const_ptr, "indication.selfConstPtrLambda");
-        try testing.expectEqualStrings("8", list.items);
+        try testing.expectEqualStrings("8", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         // Nested Ref access
         try interpolate(writer, person_ptr, "indication.selfConstPtrLambda");
-        try testing.expectEqualStrings("8", list.items);
+        try testing.expectEqualStrings("8", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
     }
 
     test "Lambda - Write selfMutPtrLambda" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         {
             const person = getPerson();
@@ -913,22 +911,22 @@ const context_tests = struct {
 
             // Cannot be called from a context by value
             try interpolate(writer, person, "selfMutPtrLambda");
-            try testing.expectEqualStrings("", list.items);
+            try testing.expectEqualStrings("", aw.written());
 
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             // Mutable pointer
             try interpolate(writer, person, "indication.selfMutPtrLambda");
-            try testing.expectEqualStrings("1", list.items);
+            try testing.expectEqualStrings("1", aw.written());
             try testing.expect(person.indication.?.counter == 1);
 
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolate(writer, person, "indication.selfMutPtrLambda");
-            try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
+            try testing.expectEqualStrings("2", aw.written()); // Called again, it's mutable
             try testing.expect(person.indication.?.counter == 2);
 
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
         }
 
         {
@@ -938,9 +936,9 @@ const context_tests = struct {
             // Cannot be called from a context const
             const const_person_ptr: *const Person = &person;
             try interpolate(writer, const_person_ptr, "selfMutPtrLambda");
-            try testing.expectEqualStrings("", list.items);
+            try testing.expectEqualStrings("", aw.written());
 
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
         }
 
         {
@@ -949,89 +947,89 @@ const context_tests = struct {
 
             // Ref access
             try interpolate(writer, &person, "selfMutPtrLambda");
-            try testing.expectEqualStrings("1", list.items);
+            try testing.expectEqualStrings("1", aw.written());
             try testing.expect(person.counter == 1);
 
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolate(writer, &person, "selfMutPtrLambda");
-            try testing.expectEqualStrings("2", list.items); //Called again, it's mutable
+            try testing.expectEqualStrings("2", aw.written()); //Called again, it's mutable
             try testing.expect(person.counter == 2);
 
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             // Nested pointer access
             try interpolate(writer, &person, "indication.selfMutPtrLambda");
-            try testing.expectEqualStrings("1", list.items);
+            try testing.expectEqualStrings("1", aw.written());
             try testing.expect(person.indication.?.counter == 1);
 
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolate(writer, &person, "indication.selfMutPtrLambda");
-            try testing.expectEqualStrings("2", list.items); // Called again, it's mutable
+            try testing.expectEqualStrings("2", aw.written()); // Called again, it's mutable
             try testing.expect(person.indication.?.counter == 2);
 
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
         }
     }
 
     test "Lambda - error handling" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         const person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         try interpolate(writer, person, "willFailStaticLambda");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         try interpolate(writer, person, "willFailSelfLambda");
-        try testing.expectEqualStrings("unfinished", list.items);
+        try testing.expectEqualStrings("unfinished", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
     }
 
     test "Lambda - Write invalid functions" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         const person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Unexpected arguments
         try interpolate(writer, person, "anythingElse");
-        try testing.expectEqualStrings("", list.items);
+        try testing.expectEqualStrings("", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
     }
 
     test "Navigation" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Person
 
         var person_ctx = DummyRenderEngine.getContextType(&person);
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, person_ctx, "address.street", .unescaped);
-            try testing.expectEqualStrings("nearby", list.items);
+            try testing.expectEqualStrings("nearby", aw.written());
         }
 
         // Address
@@ -1050,10 +1048,10 @@ const context_tests = struct {
         };
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, address_ctx, "street", .unescaped);
-            try testing.expectEqualStrings("nearby", list.items);
+            try testing.expectEqualStrings("nearby", aw.written());
         }
 
         // Street
@@ -1072,39 +1070,39 @@ const context_tests = struct {
         };
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, street_ctx, "", .unescaped);
-            try testing.expectEqualStrings("nearby", list.items);
+            try testing.expectEqualStrings("nearby", aw.written());
         }
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, street_ctx, ".", .unescaped);
-            try testing.expectEqualStrings("nearby", list.items);
+            try testing.expectEqualStrings("nearby", aw.written());
         }
     }
 
     test "Navigation Pointers" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Person
 
         var person_ctx = DummyRenderEngine.getContextType(&person);
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, person_ctx, "indication.address.street", .unescaped);
-            try testing.expectEqualStrings("far away street", list.items);
+            try testing.expectEqualStrings("far away street", aw.written());
         }
 
         // Indication
@@ -1123,10 +1121,10 @@ const context_tests = struct {
         };
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, indication_ctx, "address.street", .unescaped);
-            try testing.expectEqualStrings("far away street", list.items);
+            try testing.expectEqualStrings("far away street", aw.written());
         }
 
         // Address
@@ -1145,10 +1143,10 @@ const context_tests = struct {
         };
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, address_ctx, "street", .unescaped);
-            try testing.expectEqualStrings("far away street", list.items);
+            try testing.expectEqualStrings("far away street", aw.written());
         }
 
         // Street
@@ -1167,17 +1165,17 @@ const context_tests = struct {
         };
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, street_ctx, "", .unescaped);
-            try testing.expectEqualStrings("far away street", list.items);
+            try testing.expectEqualStrings("far away street", aw.written());
         }
 
         {
-            list.clearAndFree();
+            aw.clearRetainingCapacity();
 
             try interpolateCtx(writer, street_ctx, ".", .unescaped);
-            try testing.expectEqualStrings("far away street", list.items);
+            try testing.expectEqualStrings("far away street", aw.written());
         }
     }
 
@@ -1259,13 +1257,13 @@ const context_tests = struct {
 
     test "Iterator over slice" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = getPerson();
         defer if (person.indication) |indication| allocator.destroy(indication);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         // Person
         var ctx = DummyRenderEngine.getContextType(&person);
@@ -1286,20 +1284,20 @@ const context_tests = struct {
             unreachable;
         };
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         try interpolateCtx(writer, item_1, "name", .unescaped);
-        try testing.expectEqualStrings("item 1", list.items);
+        try testing.expectEqualStrings("item 1", aw.written());
 
         const item_2 = iterator.next() orelse {
             try testing.expect(false);
             unreachable;
         };
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         try interpolateCtx(writer, item_2, "name", .unescaped);
-        try testing.expectEqualStrings("item 2", list.items);
+        try testing.expectEqualStrings("item 2", aw.written());
 
         const no_more = iterator.next();
         try testing.expect(no_more == null);

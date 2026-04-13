@@ -59,7 +59,6 @@ pub const Escape = enum {
 
 pub fn ContextType(
     comptime context_source: ContextSource,
-    comptime Writer: type,
     comptime PartialsMap: type,
     comptime options: RenderOptions,
 ) type {
@@ -69,15 +68,14 @@ pub fn ContextType(
     // The json context uses static dispatch, once the JSON key-value is well known
     // for any possible type.
     return switch (context_source) {
-        .native => native_context.ContextInterfaceType(Writer, PartialsMap, options),
-        .json => json_context.ContextType(Writer, PartialsMap, options),
-        .ffi => ffi_context.ContextType(Writer, PartialsMap, options),
+        .native => native_context.ContextInterfaceType(PartialsMap, options),
+        .json => json_context.ContextType(PartialsMap, options),
+        .ffi => ffi_context.ContextType(PartialsMap, options),
     };
 }
 
 pub fn ContextImplType(
     comptime context_source: ContextSource,
-    comptime Writer: type,
     comptime Data: type,
     comptime PartialsMap: type,
     comptime options: RenderOptions,
@@ -91,9 +89,9 @@ pub fn ContextImplType(
     }
 
     return switch (context_source) {
-        .native => native_context.ContextImplType(Writer, Data, PartialsMap, options),
-        .json => json_context.ContextType(Writer, PartialsMap, options),
-        .ffi => ffi_context.ContextType(Writer, PartialsMap, options),
+        .native => native_context.ContextImplType(Data, PartialsMap, options),
+        .json => json_context.ContextType(PartialsMap, options),
+        .ffi => ffi_context.ContextType(PartialsMap, options),
     };
 }
 
@@ -220,7 +218,7 @@ pub const LambdaContext = struct {
     pub const VTable = struct {
         renderAlloc: *const fn (*const anyopaque, Allocator, []const u8) anyerror![]u8,
         render: *const fn (*const anyopaque, Allocator, []const u8) anyerror!void,
-        write: *const fn (*const anyopaque, []const u8) anyerror!usize,
+        write: *const fn (*const anyopaque, []const u8) anyerror!void,
     };
 
     /// Renders a template against the current context
@@ -278,21 +276,71 @@ pub const LambdaContext = struct {
         comptime fmt: []const u8,
         args: anytype,
     ) anyerror!void {
-        const writer = std.io.Writer(LambdaContext, anyerror, writeFn){
-            .context = self,
+        var buf: [4096]u8 = undefined;
+        var lw: LambdaWriter = .init(self, &buf);
+        lw.writer.print(fmt, args) catch |err| switch (err) {
+            error.WriteFailed => return lw.err.?,
         };
-
-        try std.fmt.format(writer, fmt, args);
+        lw.writer.flush() catch |err| switch (err) {
+            error.WriteFailed => return lw.err.?,
+        };
     }
 
     /// Writes the raw text on the output stream.
     /// Can return anyerror depending on the underlying writer
     pub fn write(self: LambdaContext, raw_text: []const u8) anyerror!void {
-        _ = try self.vtable.write(self.ptr, raw_text);
+        try self.vtable.write(self.ptr, raw_text);
+    }
+};
+
+/// Adapter from LambdaContext's `write` vtable function to `std.Io.Writer`.
+const LambdaWriter = struct {
+    ctx: LambdaContext,
+    writer: std.Io.Writer,
+    err: ?anyerror = null,
+
+    const vtable: std.Io.Writer.VTable = .{ .drain = drain };
+
+    fn init(ctx: LambdaContext, buf: []u8) LambdaWriter {
+        return .{
+            .ctx = ctx,
+            .writer = .{ .vtable = &vtable, .buffer = buf },
+        };
     }
 
-    fn writeFn(self: LambdaContext, bytes: []const u8) anyerror!usize {
-        return try self.vtable.write(self.ptr, bytes);
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *LambdaWriter = @alignCast(@fieldParentPtr("writer", w));
+
+        // Flush buffered bytes first
+        if (w.end > 0) {
+            self.ctx.write(w.buffer[0..w.end]) catch |e| {
+                self.err = e;
+                return error.WriteFailed;
+            };
+            w.end = 0;
+        }
+
+        const slices = data[0 .. data.len - 1];
+        const pattern = data[data.len - 1];
+        var written: usize = 0;
+
+        for (slices) |bytes| {
+            self.ctx.write(bytes) catch |e| {
+                self.err = e;
+                return error.WriteFailed;
+            };
+            written += bytes.len;
+        }
+
+        for (0..splat) |_| {
+            self.ctx.write(pattern) catch |e| {
+                self.err = e;
+                return error.WriteFailed;
+            };
+        }
+        written += pattern.len * splat;
+
+        return written;
     }
 };
 

@@ -8,7 +8,7 @@ const mustache = @import("mustache.zig");
 
 const extern_types = @import("ffi/extern_types.zig");
 
-pub export fn mustache_create_template(template_text: ?[*]const u8, template_len: u32, out_template_handle: *extern_types.TemplateHandle) callconv(.C) extern_types.Status {
+pub export fn mustache_create_template(template_text: ?[*]const u8, template_len: u32, out_template_handle: *extern_types.TemplateHandle) callconv(.c) extern_types.Status {
     if (template_text) |buffer| {
         var allocator = if (comptime builtin.link_libc) std.heap.c_allocator else testing.allocator;
         const result = mustache.parseText(allocator, buffer[0..template_len], .{}, .{ .copy_strings = true }) catch |err| switch (err) {
@@ -29,7 +29,7 @@ pub export fn mustache_create_template(template_text: ?[*]const u8, template_len
     }
 }
 
-pub export fn mustache_free_template(template_handle: ?extern_types.TemplateHandle) callconv(.C) extern_types.Status {
+pub export fn mustache_free_template(template_handle: ?extern_types.TemplateHandle) callconv(.c) extern_types.Status {
     if (template_handle) |handle| {
         var template: *mustache.Template = @ptrCast(@alignCast(handle));
 
@@ -43,7 +43,7 @@ pub export fn mustache_free_template(template_handle: ?extern_types.TemplateHand
     }
 }
 
-pub export fn mustache_render(template_handle: ?extern_types.TemplateHandle, user_data: extern_types.UserData, out_buffer: *[*]const u8, out_buffer_len: *u32) callconv(.C) extern_types.Status {
+pub export fn mustache_render(template_handle: ?extern_types.TemplateHandle, user_data: extern_types.UserData, out_buffer: *[*]const u8, out_buffer_len: *u32) callconv(.c) extern_types.Status {
     if (template_handle) |handle| {
         const template = @as(*mustache.Template, @ptrCast(@alignCast(handle)));
 
@@ -61,7 +61,7 @@ pub export fn mustache_render(template_handle: ?extern_types.TemplateHandle, use
     }
 }
 
-pub export fn mustache_free_buffer(buffer: ?[*]const u8, buffer_len: u32) callconv(.C) extern_types.Status {
+pub export fn mustache_free_buffer(buffer: ?[*]const u8, buffer_len: u32) callconv(.c) extern_types.Status {
     if (buffer) |ptr| {
         var allocator = if (comptime builtin.link_libc) std.heap.c_allocator else testing.allocator;
         allocator.free(ptr[0..buffer_len]);

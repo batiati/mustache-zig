@@ -25,11 +25,11 @@ const extern_types = @import("../../../ffi/extern_types.zig");
 /// This struct implements the expected context interface using static dispatch.
 /// Pub functions must be kept in sync with other contexts implementation
 pub fn ContextType(
-    comptime Writer: type,
     comptime PartialsMap: type,
     comptime options: RenderOptions,
 ) type {
-    const RenderEngine = rendering.RenderEngineType(.ffi, Writer, PartialsMap, options);
+    const RenderEngine = rendering.RenderEngineType(.ffi, PartialsMap, options);
+    const Writer = RenderEngine.Writer;
     const DataRender = RenderEngine.DataRender;
 
     return struct {
@@ -40,7 +40,7 @@ pub fn ContextType(
             data_render: *DataRender,
             escape: Escape,
 
-            fn write(ctx: ?*anyopaque, value: ?[*]const u8, len: u32) callconv(.C) extern_types.Status {
+            fn write(ctx: ?*anyopaque, value: ?[*]const u8, len: u32) callconv(.c) extern_types.Status {
                 if (ctx) |handle| {
                     if (value) |buffer| {
                         var self = @as(*@This(), @ptrCast(@alignCast(handle)));
@@ -380,12 +380,11 @@ test {
 const context_tests = struct {
     const dummy_options = RenderOptions{ .string = .{} };
     const DummyPartialsMap = map.PartialsMapType(void, dummy_options);
-    const DummyWriter = std.ArrayList(u8).Writer;
-    const DummyRenderEngine = rendering.RenderEngineType(.ffi, DummyWriter, DummyPartialsMap, dummy_options);
+    const DummyRenderEngine = rendering.RenderEngineType(.ffi, DummyPartialsMap, dummy_options);
 
     const parsing = @import("../../../parsing/parser.zig");
     const DummyParser = parsing.ParserType(.{ .source = .{ .string = .{ .copy_strings = false } }, .output = .render, .load_mode = .runtime_loaded });
-    const dummy_map = DummyPartialsMap.init({});
+    const dummy_map = DummyPartialsMap.init(undefined, {});
 
     fn expectPath(allocator: Allocator, path: []const u8) !Element.Path {
         var parser = try DummyParser.init(allocator, "", .{});
@@ -394,7 +393,7 @@ const context_tests = struct {
         return try parser.parsePath(path);
     }
 
-    fn interpolateCtx(writer: anytype, ctx: DummyRenderEngine.Context, identifier: []const u8, escape: Escape) anyerror!void {
+    fn interpolateCtx(writer: *std.Io.Writer, ctx: DummyRenderEngine.Context, identifier: []const u8, escape: Escape) anyerror!void {
         var stack = DummyRenderEngine.ContextStack{
             .parent = null,
             .ctx = ctx,
@@ -424,7 +423,7 @@ const context_tests = struct {
         name: []const u8,
         boss: ?*Person = null,
 
-        pub fn get(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *extern_types.UserData) callconv(.C) extern_types.PathResolution {
+        pub fn get(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *extern_types.UserData) callconv(.c) extern_types.PathResolution {
             if (path.root) |root| {
                 var path_part = root;
                 const path_value = path_part.value[0..path_part.size];
@@ -463,7 +462,7 @@ const context_tests = struct {
             return .NOT_FOUND_IN_CONTEXT;
         }
 
-        pub fn capacityHint(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *u32) callconv(.C) extern_types.PathResolution {
+        pub fn capacityHint(user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path, out_value: *u32) callconv(.c) extern_types.PathResolution {
             if (path.root) |root| {
                 var path_part = root;
                 const path_value = path_part.value[0..path_part.size];
@@ -498,7 +497,7 @@ const context_tests = struct {
             return .NOT_FOUND_IN_CONTEXT;
         }
 
-        pub fn interpolate(writer_handle: extern_types.WriterHandle, writer_fn: extern_types.WriteFn, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.C) extern_types.PathResolution {
+        pub fn interpolate(writer_handle: extern_types.WriterHandle, writer_fn: extern_types.WriteFn, user_data_handle: extern_types.UserDataHandle, path: *const extern_types.Path) callconv(.c) extern_types.PathResolution {
             if (path.root) |root| {
                 var path_part = root;
                 const path_value = path_part.value[0..path_part.size];
@@ -511,7 +510,7 @@ const context_tests = struct {
                 if (std.mem.eql(u8, path_value, "id")) {
                     if (root.next != null) return .NOT_FOUND_IN_CONTEXT;
                     var buffer: [64]u8 = undefined;
-                    const len = std.fmt.formatIntBuf(&buffer, person.id, 10, .lower, .{});
+                    const len = std.fmt.printInt(&buffer, person.id, 10, .lower, .{});
 
                     const ret = writer_fn(writer_handle, &buffer, @intCast(len));
                     if (ret != .SUCCESS) return .CHAIN_BROKEN;
@@ -552,7 +551,7 @@ const context_tests = struct {
             lambda_handle: extern_types.LambdaHandle,
             user_data_handle: extern_types.UserDataHandle,
             path: *const extern_types.Path,
-        ) callconv(.C) extern_types.PathResolution {
+        ) callconv(.c) extern_types.PathResolution {
             _ = lambda_handle;
             _ = user_data_handle;
             _ = path;
@@ -676,8 +675,8 @@ const context_tests = struct {
 
     test "FFI Write" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = Person{
             .id = 100,
@@ -687,23 +686,23 @@ const context_tests = struct {
         const user_data = Person.getUserData(&person);
         const person_ctx = DummyRenderEngine.getContextType(user_data);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         try interpolateCtx(writer, person_ctx, "id", .unescaped);
-        try testing.expectEqualStrings("100", list.items);
+        try testing.expectEqualStrings("100", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         try interpolateCtx(writer, person_ctx, "name", .unescaped);
-        try testing.expectEqualStrings("Angus McGyver", list.items);
+        try testing.expectEqualStrings("Angus McGyver", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
     }
 
     test "FFI Write children" {
         const allocator = testing.allocator;
-        var list = std.ArrayList(u8).init(allocator);
-        defer list.deinit();
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
 
         var person = Person{
             .id = 100,
@@ -719,17 +718,17 @@ const context_tests = struct {
         const user_data = Person.getUserData(&person);
         const person_ctx = DummyRenderEngine.getContextType(user_data);
 
-        const writer = list.writer();
+        const writer = &aw.writer;
 
         try interpolateCtx(writer, person_ctx, "boss.id", .unescaped);
-        try testing.expectEqualStrings("101", list.items);
+        try testing.expectEqualStrings("101", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
 
         try interpolateCtx(writer, person_ctx, "boss.name", .unescaped);
-        try testing.expectEqualStrings("Peter Thornton", list.items);
+        try testing.expectEqualStrings("Peter Thornton", aw.written());
 
-        list.clearAndFree();
+        aw.clearRetainingCapacity();
     }
 
     test "FFI Render" {

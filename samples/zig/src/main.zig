@@ -58,10 +58,12 @@ pub fn renderFromString() anyerror!void {
     }
 
     const allocator = gpa.allocator();
-    var out = std.io.getStdOut();
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    defer stdout_writer.interface.flush() catch {};
 
     // Direct render to save memory
-    try mustache.renderText(allocator, template_text, ctx, out.writer());
+    try mustache.renderText(allocator, template_text, ctx, &stdout_writer.interface);
 }
 
 /// Render a template from a Json object
@@ -73,29 +75,33 @@ pub fn renderFromJson() anyerror!void {
     }
 
     const allocator = gpa.allocator();
-    var out = std.io.getStdOut();
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    defer stdout_writer.interface.flush() catch {};
 
     // Serializing the context as a json string
-    const json_text = try std.json.stringifyAlloc(allocator, ctx, .{});
+    const json_text = try std.json.Stringify.valueAlloc(allocator, ctx, .{});
     defer allocator.free(json_text);
 
     var tree = try std.json.parseFromSlice(std.json.Value, allocator, json_text, .{});
     defer tree.deinit();
 
     // Rendering from a Json object
-    try mustache.renderText(allocator, template_text, tree.value, out.writer());
+    try mustache.renderText(allocator, template_text, tree.value, &stdout_writer.interface);
 }
 
 /// Parses a template at comptime to render many times at runtime, no allocations needed
 pub fn renderComptimeTemplate() anyerror!void {
-    var out = std.io.getStdOut();
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    defer stdout_writer.interface.flush() catch {};
 
     // Comptime-parsed template
     const comptime_template = comptime mustache.parseComptime(template_text, .{}, .{});
 
     var repeat: u32 = 0;
     while (repeat < 10) : (repeat += 1) {
-        try mustache.render(comptime_template, ctx, out.writer());
+        try mustache.render(comptime_template, ctx, &stdout_writer.interface);
     }
 }
 
@@ -124,7 +130,7 @@ pub fn renderFromCachedTemplate() anyerror!void {
         const result = try mustache.allocRender(allocator, cached_template, ctx);
         defer allocator.free(result);
 
-        var out = std.io.getStdOut();
+        const out = std.fs.File.stdout();
         try out.writeAll(result);
     }
 }
@@ -159,15 +165,19 @@ pub fn renderFromFile() anyerror!void {
         }
     }
 
-    var out = std.io.getStdOut();
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    defer stdout_writer.interface.flush() catch {};
 
     // Rendering this large template with only 16KB of RAM
-    try mustache.renderFile(allocator, path_to_template, ctx, out.writer());
+    try mustache.renderFile(allocator, path_to_template, ctx, &stdout_writer.interface);
 }
 
 /// Parses a template at comptime to render many times at runtime, no allocations needed
 pub fn renderComptimePartialTemplate() anyerror!void {
-    var out = std.io.getStdOut();
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    defer stdout_writer.interface.flush() catch {};
 
     // Comptime-parsed template
     const comptime_template = comptime mustache.parseComptime(
@@ -192,6 +202,6 @@ pub fn renderComptimePartialTemplate() anyerror!void {
 
     var repeat: u32 = 0;
     while (repeat < 10) : (repeat += 1) {
-        try mustache.renderPartials(comptime_template, comptime_partials, data, out.writer());
+        try mustache.renderPartials(comptime_template, comptime_partials, data, &stdout_writer.interface);
     }
 }
