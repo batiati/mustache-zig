@@ -24,16 +24,15 @@ const lambda = @import("lambda.zig");
 const LambdaInvokerType = lambda.LambdaInvokerType;
 
 pub fn InvokerType(
-    comptime Writer: type,
     comptime PartialsMap: type,
     comptime options: RenderOptions,
 ) type {
     const RenderEngine = rendering.RenderEngineType(
         .native,
-        Writer,
         PartialsMap,
         options,
     );
+    const Writer = RenderEngine.Writer;
     const Context = RenderEngine.Context;
     const DataRender = RenderEngine.DataRender;
 
@@ -459,7 +458,7 @@ pub fn InvokerType(
             const escape: Escape = params.@"2";
             const delimiters: Delimiters = params.@"3";
 
-            const Impl = lambda.LambdaContextImplType(Writer, PartialsMap, options);
+            const Impl = lambda.LambdaContextImplType(PartialsMap, options);
             var impl = Impl{
                 .data_render = data_render,
                 .escape = escape,
@@ -568,19 +567,16 @@ const invoker_tests = struct {
         .output = .render,
         .load_mode = .runtime_loaded,
     });
-    const DummyWriter = @TypeOf(std.io.null_writer);
     const DummyPartialsMap = map.PartialsMapType(
         void,
         dummy_options,
     );
     const DummyRenderEngine = rendering.RenderEngineType(
         .native,
-        DummyWriter,
         DummyPartialsMap,
         dummy_options,
     );
     const DummyInvoker = InvokerType(
-        DummyWriter,
         DummyPartialsMap,
         dummy_options,
     );

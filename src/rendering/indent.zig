@@ -69,7 +69,7 @@ pub const IndentationQueue = struct {
         }
     }
 
-    pub fn write(self: IndentationQueue, writer: anytype) !void {
+    pub fn write(self: IndentationQueue, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         if (self.list) |list| {
             var node: ?*const Node = list.head;
             while (node) |level| : (node = level.next) {

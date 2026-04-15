@@ -1,5 +1,13 @@
 .{
-    .name = "mustache",
+    .name = .mustache,
+    .fingerprint = 0x488f3d88e490f9b1,
     .version = "0.0.1",
-    .paths = .{""},
+    .minimum_zig_version = "0.15.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE.txt",
+        "ReadMe.md",
+    },
 }

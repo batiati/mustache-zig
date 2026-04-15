@@ -26,12 +26,15 @@ pub fn build(b: *std.Build) void {
         const lib_name = comptime (if (std.mem.startsWith(u8, platform[1], "win")) "lib" else "") ++ "mustache";
         const lib_path = "../lib/" ++ platform[1];
 
-        const lib = b.addSharedLibrary(.{
+        const lib = b.addLibrary(.{
             .name = lib_name,
-            .root_source_file = b.path("src/exports.zig"),
-            .target = b.resolveTargetQuery(cross_target),
-            .optimize = mode,
-            .link_libc = true,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/exports.zig"),
+                .target = b.resolveTargetQuery(cross_target),
+                .optimize = mode,
+                .link_libc = true,
+            }),
+            .linkage = .dynamic,
         });
 
         const install_step = b.addInstallArtifact(
@@ -48,19 +51,24 @@ pub fn build(b: *std.Build) void {
 
     // C FFI Sample
     {
-        const static_lib = b.addStaticLibrary(.{
+        const static_lib = b.addLibrary(.{
             .name = "mustache-static",
-            .root_source_file = b.path("src/exports.zig"),
-            .target = target,
-            .optimize = mode,
-            .link_libc = true,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/exports.zig"),
+                .target = target,
+                .optimize = mode,
+                .link_libc = true,
+            }),
+            .linkage = .static,
         });
 
         const c_sample = b.addExecutable(.{
             .name = "sample",
-            .root_source_file = null,
-            .target = target,
-            .optimize = mode,
+            .root_module = b.createModule(.{
+                .root_source_file = null,
+                .target = target,
+                .optimize = mode,
+            }),
         });
         c_sample.root_module.addCSourceFile(.{
             .file = b.path("samples/c/sample.c"),
@@ -95,10 +103,12 @@ pub fn build(b: *std.Build) void {
 
         const main_tests = b.addTest(.{
             .name = "tests",
-            .root_source_file = b.path("src/mustache.zig"),
-            .target = target,
-            .optimize = mode,
-            .filter = filter,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/mustache.zig"),
+                .target = target,
+                .optimize = mode,
+            }),
+            .filters = if (filter) |f| &.{f} else &.{},
         });
 
         main_tests.root_module.addOptions("build_comptime_tests", comptime_tests);
@@ -124,9 +134,11 @@ pub fn build(b: *std.Build) void {
     {
         const test_exe = b.addTest(.{
             .name = "tests",
-            .root_source_file = b.path("src/mustache.zig"),
-            .target = target,
-            .optimize = mode,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/mustache.zig"),
+                .target = target,
+                .optimize = mode,
+            }),
         });
         test_exe.root_module.addOptions("build_comptime_tests", comptime_tests);
 
